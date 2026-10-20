@@ -2,6 +2,15 @@
 
 import type { SpectrumFrame } from "./frame";
 import type { DisplayRange } from "./levels";
+import {
+  CANVAS_AXIS_BG,
+  CANVAS_BG,
+  CANVAS_FONT,
+  CANVAS_GRID,
+  CANVAS_TEXT,
+  TRACE_FILL,
+  TRACE_STROKE,
+} from "./palette";
 
 const AXIS_HEIGHT = 18;
 /** Left margin (CSS px) reserved for the dB labels; the waterfall is offset by the same amount. */
@@ -72,7 +81,7 @@ export class SpectrumPlot {
     const { ctx, canvas, dpr } = this;
     const w = canvas.width;
     const h = canvas.height;
-    ctx.fillStyle = "#0a0a0c";
+    ctx.fillStyle = CANVAS_BG;
     ctx.fillRect(0, 0, w, h);
     const frame = this.frame;
     if (!frame || frame.binCount === 0) return;
@@ -83,7 +92,9 @@ export class SpectrumPlot {
     const plotH = h - axisH;
     if (plotW <= 0 || plotH <= 0) return;
 
-    ctx.font = `${10 * dpr}px ui-monospace, monospace`;
+    ctx.fillStyle = CANVAS_AXIS_BG;
+    ctx.fillRect(0, plotH, w, axisH);
+    ctx.font = `${10 * dpr}px ${CANVAS_FONT}`;
     ctx.lineWidth = Math.max(1, dpr * 0.5);
 
     // dB grid.
@@ -95,12 +106,12 @@ export class SpectrumPlot {
     ctx.textBaseline = "middle";
     for (let db = Math.ceil(lowDb / dbStep) * dbStep; db <= highDb; db += dbStep) {
       const y = plotH - ((db - lowDb) / dbRange) * plotH;
-      ctx.strokeStyle = "#26262c";
+      ctx.strokeStyle = CANVAS_GRID;
       ctx.beginPath();
       ctx.moveTo(left, y);
       ctx.lineTo(w, y);
       ctx.stroke();
-      ctx.fillStyle = "#8a8a94";
+      ctx.fillStyle = CANVAS_TEXT;
       ctx.fillText(String(Math.round(db)), left - 4 * dpr, y);
     }
 
@@ -111,12 +122,12 @@ export class SpectrumPlot {
     ctx.textBaseline = "top";
     for (let f = Math.ceil(startHz / fStep) * fStep; f <= startHz + frame.sampleRate; f += fStep) {
       const x = left + ((f - startHz) / frame.sampleRate) * plotW;
-      ctx.strokeStyle = "#26262c";
+      ctx.strokeStyle = CANVAS_GRID;
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, plotH);
       ctx.stroke();
-      ctx.fillStyle = "#8a8a94";
+      ctx.fillStyle = CANVAS_TEXT;
       ctx.fillText(formatMHz(f, fStep), x, plotH + 3 * dpr);
     }
 
@@ -135,9 +146,9 @@ export class SpectrumPlot {
     fill.lineTo(left + ((n - 0.5) / n) * plotW, plotH);
     fill.lineTo(left + (0.5 / n) * plotW, plotH);
     fill.closePath();
-    ctx.fillStyle = "rgba(56, 189, 248, 0.15)";
+    ctx.fillStyle = TRACE_FILL;
     ctx.fill(fill);
-    ctx.strokeStyle = "#38bdf8";
+    ctx.strokeStyle = TRACE_STROKE;
     ctx.lineWidth = Math.max(1, dpr);
     ctx.stroke(path);
   }

@@ -1,8 +1,27 @@
 import type { AudioController, AudioSnapshot } from "../audio/controller";
-import { FrequencyInput } from "../spectrum/TuningControls";
 import { formatFrequency } from "../spectrum/freq";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  Badge,
+  Button,
+  EmptyState,
+  Field,
+  IconButton,
+  Kbd,
+  PlusIcon,
+  RowButton,
+  SegmentedControl,
+  Select,
+  Slider,
+  SpeakerIcon,
+  SpeakerMutedIcon,
+  TrashIcon,
+  cn,
+} from "../ui";
 import { VFO_MODES, type Vfo, type VfoMode, type VfoPatch } from "./api";
 import type { VfoSnapshot } from "./controller";
+import { LiveMarker } from "./LiveMarker";
 import {
   BANDWIDTH_PRESETS,
   MODE_LABEL,
@@ -21,8 +40,6 @@ import {
 } from "./model";
 import { SMeter } from "./SMeter";
 
-const selectClass = "rounded border border-neutral-600 bg-neutral-900 px-1 py-0.5";
-const btnClass = "rounded border border-neutral-600 px-2 py-0.5 disabled:opacity-40";
 const DEFAULT_BW = "default";
 
 interface Props {
@@ -39,6 +56,7 @@ interface Props {
   onRemove: (id: number) => void;
 }
 
+/** Radio section content: VFO list, tuning step and the controls of the selected VFO. */
 export function VfoPanel({
   vfos,
   audio,
@@ -52,53 +70,78 @@ export function VfoPanel({
   onRemove,
 }: Props) {
   const selected = vfos.vfos.find((v) => v.id === vfos.selectedId) ?? null;
+  const full = vfos.vfos.length >= maxVfos;
   return (
-    <div className="flex flex-col gap-2 text-sm text-neutral-300" role="group" aria-label="VFOs">
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          className={btnClass}
-          disabled={vfos.vfos.length >= maxVfos}
-          title="New VFO at the display centre (Alt/Ctrl-click on the spectrum creates one at the pointer)"
+    <div className="flex flex-col gap-3" role="group" aria-label="VFOs">
+      <div className="flex items-end gap-2">
+        <Select
+          className="flex-1"
+          label="Tuning step"
+          value={String(step)}
+          onChange={(v) => onStep(v === "auto" ? "auto" : Number(v))}
+          options={[
+            { value: "auto", label: "Auto (by mode)" },
+            ...STEPS_HZ.map((s) => ({ value: String(s), label: formatStep(s) })),
+          ]}
+        />
+        <Button
+          variant="primary"
+          icon={<PlusIcon />}
+          disabled={full}
+          title="New VFO at the display centre (Ctrl/Alt-click on the spectrum creates one at the pointer)"
           onClick={onCreate}
         >
-          + VFO
-        </button>
-        {vfos.vfos.map((v) => (
-          <button
-            key={v.id}
-            type="button"
-            aria-pressed={v.id === vfos.selectedId}
-            className={`rounded border px-2 py-0.5 font-mono text-xs tabular-nums ${
-              v.id === vfos.selectedId ? "bg-neutral-800" : ""
-            } ${v.status === "paused" ? "opacity-50" : ""}`}
-            style={{ borderColor: vfoColor(v.id) }}
-            onClick={() => onSelect(v.id === vfos.selectedId ? null : v.id)}
-          >
-            {v.id} {MODE_LABEL[v.mode]} {formatFrequency(v.freqHz).slice(0, -4)}
-          </button>
-        ))}
-        <label className="ml-auto flex items-center gap-1">
-          Step
-          <select
-            className={selectClass}
-            value={String(step)}
-            onChange={(e) => onStep(e.target.value === "auto" ? "auto" : Number(e.target.value))}
-          >
-            <option value="auto">Auto (by mode)</option>
-            {STEPS_HZ.map((s) => (
-              <option key={s} value={s}>
-                {formatStep(s)}
-              </option>
-            ))}
-          </select>
-        </label>
-        {vfos.error && (
-          <span className="text-red-400" role="alert">
-            {vfos.error}
-          </span>
-        )}
+          VFO
+        </Button>
       </div>
+      {vfos.vfos.length === 0 ? (
+        <EmptyState title="No VFOs yet">
+          {vfos.loaded ? (
+            <>
+              <Kbd>Ctrl</Kbd>+click the spectrum or press <Kbd>+ VFO</Kbd>.
+            </>
+          ) : (
+            "Loading…"
+          )}
+        </EmptyState>
+      ) : (
+        <ul className="flex flex-col gap-1" aria-label="VFO list">
+          {vfos.vfos.map((v) => {
+            const isSel = v.id === vfos.selectedId;
+            return (
+              <li key={v.id} className="flex items-center gap-1">
+                <RowButton
+                  selected={isSel}
+                  onClick={() => onSelect(isSel ? null : v.id)}
+                  className={cn("flex-1", v.status === "paused" && "opacity-60")}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="size-2.5 shrink-0 rounded-full"
+                    style={{ background: vfoColor(v.id) }}
+                  />
+                  <span className="w-4 text-xs text-fg-subtle num">{v.id}</span>
+                  <Badge tone={isSel ? "accent" : "neutral"}>{MODE_LABEL[v.mode]}</Badge>
+                  <span className="min-w-0 flex-1 truncate text-right font-mono text-sm text-fg num">
+                    {formatFrequency(v.freqHz).slice(0, -4)}
+                  </span>
+                  {v.status === "paused" && (
+                    <Badge
+                      tone="warn"
+                      title="Outside the device passband: no audio until the device is retuned"
+                    >
+                      paused
+                    </Badge>
+                  )}
+                </RowButton>
+                <IconButton label={`Delete VFO ${v.id}`} size="sm" onClick={() => onRemove(v.id)}>
+                  <TrashIcon size={14} />
+                </IconButton>
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {selected ? (
         <SelectedVfo
           vfo={selected}
@@ -110,11 +153,11 @@ export function VfoPanel({
           onDeselect={() => onSelect(null)}
         />
       ) : (
-        <p className="text-xs text-neutral-500">
-          {vfos.loaded && vfos.vfos.length === 0
-            ? "No VFOs. Alt/Ctrl-click the spectrum or press + VFO to create one."
-            : "No VFO selected: a plain click on the spectrum tunes the device centre."}
-        </p>
+        vfos.vfos.length > 0 && (
+          <p className="text-xs text-fg-subtle">
+            No VFO selected: a plain click on the spectrum tunes the device centre.
+          </p>
+        )
       )}
     </div>
   );
@@ -148,123 +191,85 @@ function SelectedVfo({
 
   return (
     <div
-      className="flex flex-wrap items-center gap-x-3 gap-y-2"
+      className="flex flex-col gap-3 rounded-lg border border-border bg-surface-2/50 p-3"
       role="group"
       aria-label={`VFO ${vfo.id}`}
     >
-      <span className="flex items-center gap-1">
-        <button
-          type="button"
-          className={btnClass}
-          aria-label="Down one step"
-          onClick={() => nudge(-1)}
-        >
-          ◀
-        </button>
-        <FrequencyInput
-          label="VFO frequency"
-          centerHz={vfo.freqHz}
-          onCommit={(hz) => onUpdate(vfo.id, { freqHz: hz })}
-        />
-        <button
-          type="button"
-          className={btnClass}
-          aria-label="Up one step"
-          onClick={() => nudge(1)}
-        >
-          ▶
-        </button>
-      </span>
-      <label className="flex items-center gap-1">
-        Mode
-        <select
-          className={selectClass}
+      <div className="flex items-center justify-between gap-2">
+        <IconButton label="Down one step" variant="secondary" onClick={() => nudge(-1)}>
+          <ArrowLeftIcon />
+        </IconButton>
+        <div className="flex flex-col items-center">
+          <span className="font-mono text-lg text-fg num">{formatFrequency(vfo.freqHz)}</span>
+          <span className="text-[11px] text-fg-subtle">MHz · step {formatStep(stepHz)}</span>
+        </div>
+        <IconButton label="Up one step" variant="secondary" onClick={() => nudge(1)}>
+          <ArrowRightIcon />
+        </IconButton>
+      </div>
+      <Field label="Mode">
+        <SegmentedControl
+          aria-label="Mode"
           value={vfo.mode}
-          onChange={(e) =>
-            // A mode change resets the bandwidth to the new mode's default.
-            onUpdate(vfo.id, { mode: e.target.value as VfoMode, bandwidthHz: null })
-          }
-        >
-          {VFO_MODES.map((m) => (
-            <option key={m} value={m}>
-              {MODE_LABEL[m]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex items-center gap-1">
-        Bandwidth
-        <select
-          className={selectClass}
-          value={String(vfo.bandwidthHz)}
-          onChange={(e) =>
-            onUpdate(vfo.id, {
-              bandwidthHz: e.target.value === DEFAULT_BW ? null : Number(e.target.value),
-            })
-          }
-        >
-          {bandwidths.map((b) => (
-            <option key={b} value={b}>
-              {formatBandwidth(b)}
-            </option>
-          ))}
-          <option value={DEFAULT_BW}>Mode default</option>
-        </select>
-      </label>
-      <label className="flex items-center gap-1">
-        Squelch
-        <input
-          type="range"
-          className="w-28"
-          min={SQUELCH_OFF_POS}
-          max={0}
-          step={1}
-          value={squelchToSlider(vfo.squelchDbfs)}
-          aria-valuetext={formatSquelch(vfo.squelchDbfs)}
-          title={`off, ${SQUELCH_MIN_DBFS}..0 dBFS (channel power)`}
-          onChange={(e) =>
-            onUpdate(vfo.id, { squelchDbfs: sliderToSquelch(Number(e.target.value)) })
-          }
+          options={VFO_MODES.map((m) => ({ value: m, label: MODE_LABEL[m] }))}
+          // A mode change resets the bandwidth to the new mode's default.
+          onChange={(m: VfoMode) => onUpdate(vfo.id, { mode: m, bandwidthHz: null })}
+          className="w-full"
         />
-        <output className="w-16 text-right font-mono text-xs tabular-nums">
-          {formatSquelch(vfo.squelchDbfs)}
-        </output>
-      </label>
-      <label className="flex items-center gap-1">
-        Volume
-        <input
-          type="range"
-          className="w-24"
+      </Field>
+      <Select
+        label="Bandwidth"
+        value={String(vfo.bandwidthHz)}
+        onChange={(v) => onUpdate(vfo.id, { bandwidthHz: v === DEFAULT_BW ? null : Number(v) })}
+        options={[
+          ...bandwidths.map((b) => ({ value: String(b), label: formatBandwidth(b) })),
+          { value: DEFAULT_BW, label: "Mode default" },
+        ]}
+      />
+      <Slider
+        label="Squelch"
+        min={SQUELCH_OFF_POS}
+        max={0}
+        value={squelchToSlider(vfo.squelchDbfs)}
+        valueLabel={formatSquelch(vfo.squelchDbfs)}
+        title={`off, ${SQUELCH_MIN_DBFS}..0 dBFS (channel power); the green tick is the live level`}
+        onChange={(pos) => onUpdate(vfo.id, { squelchDbfs: sliderToSquelch(pos) })}
+        overlay={<LiveMarker audio={audio} vfoId={vfo.id} />}
+      />
+      <div className="flex items-end gap-2">
+        <Slider
+          className="flex-1"
+          label="Volume"
           min={0}
           max={100}
-          step={1}
           value={Math.round(level.volume * 100)}
-          onChange={(e) => audio.setVolume(vfo.id, Number(e.target.value) / 100)}
+          valueLabel={level.muted ? "muted" : `${Math.round(level.volume * 100)} %`}
+          onChange={(v) => audio.setVolume(vfo.id, v / 100)}
         />
-      </label>
-      <label className="flex items-center gap-1">
-        <input
-          type="checkbox"
-          checked={level.muted}
-          onChange={(e) => audio.setMuted(vfo.id, e.target.checked)}
-        />
-        Mute
-      </label>
-      <SMeter audio={audio} vfoId={vfo.id} />
-      {vfo.status === "paused" && (
-        <span
-          className="rounded bg-amber-900/60 px-1.5 py-0.5 text-xs text-amber-300"
-          title="Outside the device passband: no audio until the device is retuned"
+        <IconButton
+          label={level.muted ? "Unmute" : "Mute"}
+          variant="secondary"
+          pressed={level.muted}
+          onClick={() => audio.setMuted(vfo.id, !level.muted)}
         >
-          paused
-        </span>
-      )}
-      <button type="button" className={btnClass} onClick={onDeselect} title="Esc">
-        Deselect
-      </button>
-      <button type="button" className={`${btnClass} text-red-300`} onClick={() => onRemove(vfo.id)}>
-        Delete
-      </button>
+          {level.muted ? <SpeakerMutedIcon /> : <SpeakerIcon />}
+        </IconButton>
+      </div>
+      <SMeter audio={audio} vfoId={vfo.id} />
+      <div className="flex gap-2">
+        <Button variant="secondary" size="sm" className="flex-1" onClick={onDeselect} title="Esc">
+          Deselect
+        </Button>
+        <Button
+          variant="danger"
+          size="sm"
+          className="flex-1"
+          icon={<TrashIcon size={14} />}
+          onClick={() => onRemove(vfo.id)}
+        >
+          Delete
+        </Button>
+      </div>
     </div>
   );
 }
