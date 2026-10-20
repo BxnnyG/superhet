@@ -1,0 +1,105 @@
+name: Release
+
+# main  -> ghcr.io/bxnnyg/superhet:edge and :sha-<short>
+# vX.Y.Z[-pre] tag -> :X.Y.Z, :X.Y, :latest (stable only) plus a GitHub Release.
+# Not gated on CI by design: tag only commits that are green on main (see docs/releasing.md).
+
+on:
+  push:
+    branches: [main]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/bxnnyg/superhet
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag matches crate and web versions
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          core="${tag%%-*}"
+          cargo_v="$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\(.*\)"/\1/p}' Cargo.toml)"
+          web_v="$(sed -n 's/^  "version": "\(.*\)",/\1/p' web/package.json)"
+          echo "tag=$core cargo=$cargo_v web=$web_v"
+          if [ "$core" != "$cargo_v" ] || [ "$core" != "$web_v" ]; then
+            echo "::error::Tag version must equal Cargo.toml workspace version and web/package.json version"
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: |
+            latest=auto
+          tags: |
+            type=edge,branch=main
+            type=sha,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}
+          labels: |
+            org.opencontainers.image.title=Superhet
+            org.opencontainers.image.description=Self-hosted web SDR with a process-based plugin system
+            org.opencontainers.image.licenses=AGPL-3.0-only
+            org.opencontainers.image.source=https://github.com/BxnnyG/superhet
+
+      # linux/amd64 only: the Rust stage would have to run under QEMU for arm64 (hours, not minutes).
+      # Add arm64 later via a native arm runner (ubuntu-24.04-arm) and a merged manifest.
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  github-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, skipping"
+            exit 0
+          fi
+          flags=(--generate-notes --verify-tag)
+          case "$TAG" in *-*) flags+=(--prerelease) ;; esac
+          notes="Container image: \`${IMAGE}:${TAG#v}\` (digest \`${DIGEST}\`)"
+          gh release create "$TAG" --title "$TAG" --notes "$notes" "${flags[@]}"

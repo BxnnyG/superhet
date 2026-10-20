@@ -34,6 +34,16 @@ Services: `superhet-api` (web UI, port 8073), `superhet-sdrd` (device + DSP), `s
 
 Host preparation for the RTL-SDR (kernel module blacklist, udev rules) is described in `deploy/` and will be documented in `docs/setup-host.md` in phase 1.
 
+## Install from GHCR
+
+Prebuilt images are published to GitHub Packages (see [docs/releasing.md](docs/releasing.md)):
+
+```bash
+scripts/gen-secrets.sh
+echo 'SUPERHET_IMAGE=ghcr.io/bxnnyg/superhet:edge' >> .env   # or a release tag, e.g. 0.1.0
+docker compose pull && docker compose up -d --no-build
+```
+
 ## Legal notice
 
 Superhet is intended for **amateur radio** and **public services meant for general reception** (e.g. broadcast, ADS-B, AIS, APRS, ISM sensors, weather satellites).

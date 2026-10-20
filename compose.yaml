@@ -5,7 +5,8 @@ x-superhet: &superhet
   build:
     context: .
     dockerfile: deploy/docker/Dockerfile
-  image: superhet:dev
+  # SUPERHET_IMAGE overrides the tag, e.g. ghcr.io/bxnnyg/superhet:0.1.0 (then use `docker compose pull`).
+  image: ${SUPERHET_IMAGE:-superhet:dev}
   restart: unless-stopped
   networks: [backend]
 
