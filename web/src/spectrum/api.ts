@@ -1,5 +1,7 @@
 // Typed wrappers for the device REST API (docs/api-devices.md) with runtime validation.
 
+import { apiFetch } from "../auth/session";
+
 export interface GainState {
   mode: "auto" | "manual";
   db: number | null;
@@ -136,7 +138,7 @@ export function httpError(res: Response, body: unknown): ApiError {
 
 export const deviceUrl = (device: string) => `/api/v1/devices/${encodeURIComponent(device)}`;
 
-export function createApiClient(fetchImpl: typeof fetch = (...a) => fetch(...a)): ApiClient {
+export function createApiClient(fetchImpl: typeof fetch = apiFetch): ApiClient {
   return {
     async getState(device, signal) {
       let res: Response;

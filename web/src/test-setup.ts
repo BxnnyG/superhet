@@ -1,8 +1,12 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
+import { resetSession } from "./auth/session";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  resetSession();
+});
 
 // jsdom lacks these browser APIs; the spectrum view degrades gracefully without WebGL.
 class ResizeObserverStub {

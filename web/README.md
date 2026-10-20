@@ -3,6 +3,14 @@
 React + Vite + TypeScript (strict) + Tailwind, pnpm. `pnpm -C web dev` proxies `/api` (including
 WebSockets) to `superhet-api` on port 8073.
 
+## Authentication
+
+`AuthGate` (`src/auth/`) asks `GET /api/v1/auth/status` on load and renders first-run setup (username,
+password, setup token from `docker compose logs superhet-api`), login, or the app. The settings menu
+shows the signed-in user with "Change password" and "Sign out". Any 401 from the data API, or a
+WebSocket that closes without ever opening while the server reports a signed-out session, sends the
+user back to login; the spectrum and audio sockets stop reconnecting until the next login.
+
 ## Spectrum gestures
 
 | Gesture                                          | Action                                             |

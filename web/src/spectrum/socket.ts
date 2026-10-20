@@ -1,6 +1,7 @@
 // WebSocket client for /api/v1/ws/spectrum with automatic reconnect.
 // Frames are delivered through a callback; no per-frame state is kept here.
 
+import { isSessionLost, verifySession } from "../auth/session";
 import { decodeFrame, type SpectrumFrame } from "./frame";
 
 export type SocketStatus = "connecting" | "connected" | "reconnecting";
@@ -92,7 +93,7 @@ export class SpectrumSocket {
   }
 
   private connect(): void {
-    if (this.closed) return;
+    if (this.closed || isSessionLost()) return;
     this.setStatus(this.attempt === 0 ? "connecting" : "reconnecting");
     const url = this.opts.url ?? spectrumUrl(this.opts.device);
     let ws: WebSocket;
@@ -104,7 +105,9 @@ export class SpectrumSocket {
     }
     ws.binaryType = "arraybuffer";
     this.ws = ws;
+    let opened = false;
     ws.onopen = () => {
+      opened = true;
       this.attempt = 0;
       this.setStatus("connected");
       this.sendView();
@@ -124,6 +127,9 @@ export class SpectrumSocket {
     ws.onclose = () => {
       if (this.ws !== ws) return;
       this.ws = null;
+      // A rejected upgrade (401) looks like any failed connection: ask the server whether the
+      // session is still valid; if not, the session is marked lost and reconnecting stops.
+      if (!opened) void verifySession();
       this.scheduleReconnect();
     };
     // `close` always follows `error`; nothing to do here.
@@ -148,7 +154,7 @@ export class SpectrumSocket {
   }
 
   private scheduleReconnect(): void {
-    if (this.closed) return;
+    if (this.closed || isSessionLost()) return;
     this.setStatus("reconnecting");
     const delay = backoffDelay(this.attempt);
     this.attempt += 1;

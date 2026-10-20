@@ -1,6 +1,7 @@
 // WebSocket client for /api/v1/ws/audio (docs/protocol-audio.md) with automatic reconnect.
 // The subscription (set of VFO ids) is re-sent after every reconnect.
 
+import { isSessionLost, verifySession } from "../auth/session";
 import { decodeAudioFrame, type AudioFrame } from "./frame";
 import { backoffDelay, type SocketStatus } from "../spectrum/socket";
 
@@ -75,7 +76,7 @@ export class AudioSocket {
   }
 
   private connect(): void {
-    if (this.closed) return;
+    if (this.closed || isSessionLost()) return;
     this.setStatus(this.attempt === 0 ? "connecting" : "reconnecting");
     const url = this.opts.url ?? audioUrl(this.opts.device);
     let ws: WebSocket;
@@ -87,7 +88,9 @@ export class AudioSocket {
     }
     ws.binaryType = "arraybuffer";
     this.ws = ws;
+    let opened = false;
     ws.onopen = () => {
+      opened = true;
       this.attempt = 0;
       this.sentKey = null;
       this.setStatus("connected");
@@ -108,6 +111,9 @@ export class AudioSocket {
     ws.onclose = () => {
       if (this.ws !== ws) return;
       this.ws = null;
+      // A rejected upgrade (401) looks like any failed connection: ask the server whether the
+      // session is still valid; if not, the session is marked lost and reconnecting stops.
+      if (!opened) void verifySession();
       this.scheduleReconnect();
     };
     // `close` always follows `error`; nothing to do here.
@@ -132,7 +138,7 @@ export class AudioSocket {
   }
 
   private scheduleReconnect(): void {
-    if (this.closed) return;
+    if (this.closed || isSessionLost()) return;
     this.setStatus("reconnecting");
     const delay = backoffDelay(this.attempt);
     this.attempt += 1;

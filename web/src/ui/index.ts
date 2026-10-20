@@ -1,11 +1,14 @@
 // Shared UI kit. Raw <button>/<select> elements are only allowed inside this directory.
+export { Alert, type AlertTone } from "./Alert";
 export { Badge, type BadgeTone } from "./Badge";
 export { Button, type ButtonSize, type ButtonVariant } from "./Button";
 export { cn } from "./cn";
+export { Dialog } from "./Dialog";
 export { EmptyState, Field, Kbd } from "./Field";
 export { FrequencyReadout } from "./FrequencyReadout";
 export { IconButton } from "./IconButton";
 export * from "./icons";
+export { Logo } from "./Logo";
 export { Meter, type MeterTick } from "./Meter";
 export { NumberField } from "./NumberField";
 export { Panel, Section } from "./Section";
@@ -13,6 +16,7 @@ export { RowButton } from "./RowButton";
 export { SegmentedControl, type SegmentOption } from "./SegmentedControl";
 export { Select, type SelectOption } from "./Select";
 export { Slider, markerLeft } from "./Slider";
+export { PasswordField, TextField } from "./TextField";
 export { Toggle } from "./Toggle";
 export { Tooltip } from "./Tooltip";
 export { useTheme, type ThemePreference } from "./theme";
