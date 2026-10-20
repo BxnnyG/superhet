@@ -1,8 +1,8 @@
 # WebSocket protocol: spectrum gateway (v1)
 
 Endpoint: `GET /api/v1/ws/spectrum?dev=<device-id>` on **superhet-api** (port 8073). Part of the
-browser-facing edge described in `docs/ARCHITECTURE.md` (section 2, step 3a). The audio and event
-sockets will follow the same conventions.
+browser-facing edge described in `docs/ARCHITECTURE.md` (section 2, step 3a). The audio socket
+(`docs/protocol-audio.md`) follows the same conventions; the event socket will too.
 
 ## Connection
 

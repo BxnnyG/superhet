@@ -4,7 +4,7 @@ Demodulated VFO audio is published by **superhet-sdrd** on core NATS, subject
 `sh.v1.dev.<dev>.audio.<vfo_id>` (one subject per VFO, `<vfo_id>` is the decimal VFO id, see
 `docs/api-devices.md`). Core NATS means lossy live data: nothing is buffered, frames are dropped
 when the bus or a consumer lags. Consumers detect loss through `seq` / `sample_pos`. The browser
-facing audio socket of **superhet-api** will follow the conventions of `docs/protocol-ws.md`.
+facing audio socket of **superhet-api** (below) follows the conventions of `docs/protocol-ws.md`.
 
 ## Frame
 
@@ -46,3 +46,32 @@ or an unknown codec must be discarded.
 - Opus settings: 48 kHz mono, VBR, application `audio`, 20 ms frames, 64 kbit/s for WFM and
   24 kbit/s for NFM/AM. Decoders need no out-of-band configuration (no in-band FEC, no DTX).
 - Bandwidth: about 50 packets/s per VFO; a packet is 20-160 bytes at 24 kbit/s.
+
+## WebSocket (superhet-api)
+
+Endpoint: `GET /api/v1/ws/audio?dev=<device-id>` on **superhet-api** (port 8073). Connection rules
+are those of the spectrum socket (`docs/protocol-ws.md`): upgrade refused with `400` (invalid or
+missing `dev`), `403` (`Origin` not allowed, same `SUPERHET_ALLOWED_ORIGINS` policy), `503` (no
+bus, more than 32 audio clients, too many streams, subscription failed); the route sits behind
+`auth::require_session` (currently a pass-through).
+
+**Client to server** (text, at most 1024 bytes): `{"type":"subscribe","v":1,"vfos":[1,2]}`. The list
+replaces the previous set; an empty list means none (a new socket starts with none). `v` is
+optional. Duplicates collapse; at most 8 distinct VFO ids, ids are >= 1. Unknown fields are
+rejected. VFOs need not exist yet: frames flow once the daemon publishes them.
+
+**Server to client**
+- Text, always with `"v":1`: `{"v":1,"type":"ack","vfos":[...]}` (the applied set) after a valid
+  `subscribe`; `{"v":1,"type":"error","error":"<reason>"}` for an invalid message or a failed
+  subscription (connection stays open, the previous set stays active). An oversized message closes
+  the connection.
+- Binary: one `AudioFrame` v1 (above) per message, **byte for byte as published**; the frame
+  carries its `vfo_id`. Only subscribed VFOs are forwarded, and no frame of a VFO that was
+  dropped from the set follows its acknowledgement. Frames that fail validation (length, magic,
+  version, codec, `vfo_id` differing from the subject) are discarded by the API.
+
+**Flow control**: the API keeps one bus subscription per (device, VFO), shared by all clients and
+dropped with the last one. Each client has a queue of 32 frames (shared by its VFOs); when it is
+full the oldest frame is dropped and counted (logged when the client leaves). A slow client never
+delays the bus subscription or other clients; it sees the loss as a gap in `seq` / `sample_pos`.
+A client that cannot accept a message for 5 s is disconnected.

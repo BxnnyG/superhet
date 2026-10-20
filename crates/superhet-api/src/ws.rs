@@ -102,7 +102,7 @@ async fn spectrum_ws(
 }
 
 /// Send with a deadline; `false` means the client is gone or too slow.
-async fn send(socket: &mut WebSocket, message: Message) -> bool {
+pub(crate) async fn send(socket: &mut WebSocket, message: Message) -> bool {
     matches!(
         tokio::time::timeout(SEND_TIMEOUT, socket.send(message)).await,
         Ok(Ok(()))

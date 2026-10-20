@@ -1,9 +1,11 @@
-//! Device state and tuning over REST: `GET /api/v1/devices/{dev}/state` and
-//! `POST /api/v1/devices/{dev}/tune`. Protocol: `docs/api-devices.md`.
+//! Device state, tuning and VFOs over REST: `GET /api/v1/devices/{dev}/state`,
+//! `POST /api/v1/devices/{dev}/tune` and `/api/v1/devices/{dev}/vfos[/{id}]`. Protocol:
+//! `docs/api-devices.md`.
 //!
-//! The API is a thin edge here: tune bodies are forwarded as `ctl.tune` requests to the daemon
-//! owning the device (which validates authoritatively) and its reply is passed through; state is
-//! read from the JetStream KV bucket `STATE`, falling back to a `ctl.state` request.
+//! The API is a thin edge here: tune and VFO bodies are forwarded as `ctl.*` requests to the
+//! daemon owning the device (which validates authoritatively) and its reply is passed through;
+//! state (and with it the VFO list) is read from the JetStream KV bucket `STATE`, falling back to
+//! a `ctl.state` request.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -53,6 +55,18 @@ pub fn router(state: DevicesState) -> Router {
         .route(
             "/api/v1/devices/{dev}/tune",
             post(post_tune).layer(DefaultBodyLimit::max(MAX_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/devices/{dev}/vfos",
+            get(list_vfos)
+                .post(post_vfo)
+                .layer(DefaultBodyLimit::max(MAX_BODY_BYTES)),
+        )
+        .route(
+            "/api/v1/devices/{dev}/vfos/{id}",
+            axum::routing::patch(patch_vfo)
+                .delete(delete_vfo)
+                .layer(DefaultBodyLimit::max(MAX_BODY_BYTES)),
         )
         .route_layer(middleware::from_fn(auth::require_session))
         .with_state(state)
@@ -140,8 +154,8 @@ fn is_json_content_type(headers: &HeaderMap) -> bool {
         .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("application/json"))
 }
 
-/// Parse a tune body into the bus request: a JSON object, `"v"` defaulting to 1.
-fn prepare_tune(body: &[u8]) -> Result<Vec<u8>, &'static str> {
+/// Parse a request body into a JSON object, `"v"` defaulting to 1.
+fn prepare_object(body: &[u8]) -> Result<serde_json::Map<String, serde_json::Value>, &'static str> {
     let serde_json::Value::Object(mut object) =
         serde_json::from_slice(body).map_err(|_| "body is not valid JSON")?
     else {
@@ -154,7 +168,86 @@ fn prepare_tune(body: &[u8]) -> Result<Vec<u8>, &'static str> {
         Some(v) if v.as_u64() == Some(1) => {}
         Some(_) => return Err("unsupported protocol version"),
     }
+    Ok(object)
+}
+
+/// Parse a tune body into the bus request: a JSON object, `"v"` defaulting to 1.
+fn prepare_tune(body: &[u8]) -> Result<Vec<u8>, &'static str> {
+    Ok(serde_json::Value::Object(prepare_object(body)?)
+        .to_string()
+        .into_bytes())
+}
+
+/// Parse a VFO update body and bind it to the id of the URL (a differing `"id"` is an error).
+fn prepare_vfo_update(body: &[u8], id: u32) -> Result<Vec<u8>, &'static str> {
+    let mut object = prepare_object(body)?;
+    match object.get("id") {
+        None => {}
+        Some(v) if v.as_u64() == Some(u64::from(id)) => {}
+        Some(_) => return Err("body id does not match the URL"),
+    }
+    object.insert("id".into(), id.into());
     Ok(serde_json::Value::Object(object).to_string().into_bytes())
+}
+
+/// The VFO id of a URL segment.
+fn parse_vfo_id(raw: &str) -> Result<u32, &'static str> {
+    raw.parse().map_err(|_| "invalid VFO id")
+}
+
+/// CSRF and content-type checks shared by all mutating routes. Cookies are sent along with
+/// cross-site requests, so the Origin check is what keeps a foreign page from controlling the
+/// receiver.
+fn guard_mutation(
+    state: &DevicesState,
+    headers: &HeaderMap,
+    has_body: bool,
+) -> Result<(), Box<Response>> {
+    if !state.origins.allows(headers) {
+        tracing::warn!("device control: origin rejected");
+        return Err(Box::new(failure(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "origin not allowed",
+        )));
+    }
+    if has_body && !is_json_content_type(headers) {
+        return Err(Box::new(failure(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "invalid",
+            "content type must be application/json",
+        )));
+    }
+    Ok(())
+}
+
+/// Send a control request to the daemon and return its reply if it reports success; a failure
+/// reply or a bus problem becomes the response for the client (`invalid`/`unsupported` are 400, `not_found` 404).
+async fn call_daemon(
+    state: &DevicesState,
+    subject: String,
+    payload: Vec<u8>,
+) -> Result<Bytes, Box<Response>> {
+    let client = connected(state.nats.as_ref()).map_err(|e| Box::new(e.into_response()))?;
+    let reply = ctl_request(client, subject, payload)
+        .await
+        .map_err(|e| Box::new(e.into_response()))?;
+    match serde_json::from_slice::<serde_json::Value>(&reply) {
+        Ok(value) if value["ok"] == true => Ok(reply),
+        Ok(value) => Err(Box::new(json(
+            match value["code"].as_str() {
+                Some("invalid" | "unsupported") => StatusCode::BAD_REQUEST,
+                Some("not_found") => StatusCode::NOT_FOUND,
+                _ => StatusCode::BAD_GATEWAY,
+            },
+            reply,
+        ))),
+        Err(_) => Err(Box::new(failure(
+            StatusCode::BAD_GATEWAY,
+            "bus",
+            "malformed daemon reply",
+        ))),
+    }
 }
 
 async fn post_tune(
@@ -163,18 +256,8 @@ async fn post_tune(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    // Cookies are sent along with cross-site requests, so the Origin check is what keeps a
-    // foreign page from retuning the receiver.
-    if !state.origins.allows(&headers) {
-        tracing::warn!("tune: origin rejected");
-        return failure(StatusCode::FORBIDDEN, "forbidden", "origin not allowed");
-    }
-    if !is_json_content_type(&headers) {
-        return failure(
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "invalid",
-            "content type must be application/json",
-        );
+    if let Err(response) = guard_mutation(&state, &headers, true) {
+        return *response;
     }
     let Ok(subject) = subjects::ctl(&device, "tune") else {
         return failure(StatusCode::BAD_REQUEST, "invalid", "invalid device id");
@@ -183,23 +266,92 @@ async fn post_tune(
         Ok(payload) => payload,
         Err(message) => return failure(StatusCode::BAD_REQUEST, "invalid", message),
     };
-    let client = match connected(state.nats.as_ref()) {
-        Ok(client) => client,
-        Err(e) => return e.into_response(),
+    match call_daemon(&state, subject, payload).await {
+        Ok(reply) => json(StatusCode::OK, reply),
+        Err(response) => *response,
+    }
+}
+
+async fn post_vfo(
+    State(state): State<DevicesState>,
+    Path(device): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(response) = guard_mutation(&state, &headers, true) {
+        return *response;
+    }
+    let Ok(subject) = subjects::ctl_vfo(&device, "create") else {
+        return failure(StatusCode::BAD_REQUEST, "invalid", "invalid device id");
     };
-    let reply = match ctl_request(client, subject, payload).await {
+    let payload = match prepare_tune(&body) {
+        Ok(payload) => payload,
+        Err(message) => return failure(StatusCode::BAD_REQUEST, "invalid", message),
+    };
+    let reply = match call_daemon(&state, subject, payload).await {
         Ok(reply) => reply,
-        Err(e) => return e.into_response(),
+        Err(response) => return *response,
     };
-    let status = match serde_json::from_slice::<serde_json::Value>(&reply) {
-        Ok(value) if value["ok"] == true => StatusCode::OK,
-        Ok(value) => match value["code"].as_str() {
-            Some("invalid" | "unsupported") => StatusCode::BAD_REQUEST,
-            _ => StatusCode::BAD_GATEWAY,
-        },
-        Err(_) => return failure(StatusCode::BAD_GATEWAY, "bus", "malformed daemon reply"),
+    let mut response = json(StatusCode::CREATED, reply.clone());
+    if let Some(id) = serde_json::from_slice::<serde_json::Value>(&reply)
+        .ok()
+        .and_then(|v| v["vfo"]["id"].as_u64())
+        && let Ok(location) =
+            header::HeaderValue::from_str(&format!("/api/v1/devices/{device}/vfos/{id}"))
+    {
+        response.headers_mut().insert(header::LOCATION, location);
+    }
+    response
+}
+
+async fn patch_vfo(
+    State(state): State<DevicesState>,
+    Path((device, id)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(response) = guard_mutation(&state, &headers, true) {
+        return *response;
+    }
+    let Ok(subject) = subjects::ctl_vfo(&device, "update") else {
+        return failure(StatusCode::BAD_REQUEST, "invalid", "invalid device id");
     };
-    json(status, reply)
+    let payload = match parse_vfo_id(&id).and_then(|id| prepare_vfo_update(&body, id)) {
+        Ok(payload) => payload,
+        Err(message) => return failure(StatusCode::BAD_REQUEST, "invalid", message),
+    };
+    match call_daemon(&state, subject, payload).await {
+        Ok(reply) => json(StatusCode::OK, reply),
+        Err(response) => *response,
+    }
+}
+
+async fn delete_vfo(
+    State(state): State<DevicesState>,
+    Path((device, id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(response) = guard_mutation(&state, &headers, false) {
+        return *response;
+    }
+    let Ok(subject) = subjects::ctl_vfo(&device, "delete") else {
+        return failure(StatusCode::BAD_REQUEST, "invalid", "invalid device id");
+    };
+    let id = match parse_vfo_id(&id) {
+        Ok(id) => id,
+        Err(message) => return failure(StatusCode::BAD_REQUEST, "invalid", message),
+    };
+    let payload = serde_json::json!({"v": 1, "id": id})
+        .to_string()
+        .into_bytes();
+    match call_daemon(&state, subject, payload).await {
+        Ok(_) => {
+            let mut response = Response::new(Body::empty());
+            *response.status_mut() = StatusCode::NO_CONTENT;
+            response
+        }
+        Err(response) => *response,
+    }
 }
 
 /// The state object from a stored KV value or a `ctl.state` reply.
@@ -217,29 +369,59 @@ async fn read_kv(client: &Client, key: &str) -> Option<Bytes> {
         .flatten()
 }
 
-async fn get_state(State(state): State<DevicesState>, Path(device): Path<String>) -> Response {
-    let (Ok(key), Ok(subject)) = (
-        subjects::state_key(&device),
-        subjects::ctl(&device, "state"),
-    ) else {
-        return failure(StatusCode::BAD_REQUEST, "invalid", "invalid device id");
+/// The state object of a device as JSON bytes: KV first, then a `ctl.state` request.
+async fn load_state(state: &DevicesState, device: &str) -> Result<Bytes, Box<Response>> {
+    let (Ok(key), Ok(subject)) = (subjects::state_key(device), subjects::ctl(device, "state"))
+    else {
+        return Err(Box::new(failure(
+            StatusCode::BAD_REQUEST,
+            "invalid",
+            "invalid device id",
+        )));
     };
-    let client = match connected(state.nats.as_ref()) {
-        Ok(client) => client,
-        Err(e) => return e.into_response(),
-    };
+    let client = connected(state.nats.as_ref()).map_err(|e| Box::new(e.into_response()))?;
     if let Some(stored) = read_kv(client, &key).await {
-        return json(StatusCode::OK, stored);
+        return Ok(stored);
     }
-    let reply = match ctl_request(client, subject, Vec::new()).await {
-        Ok(reply) => reply,
-        Err(e) => return e.into_response(),
-    };
+    let reply = ctl_request(client, subject, Vec::new())
+        .await
+        .map_err(|e| Box::new(e.into_response()))?;
     match serde_json::from_slice::<serde_json::Value>(&reply) {
         Ok(value) if value["ok"] == true && value["state"].is_object() => {
-            json(StatusCode::OK, value["state"].to_string())
+            Ok(value["state"].to_string().into())
         }
-        _ => failure(StatusCode::BAD_GATEWAY, "bus", "malformed daemon reply"),
+        _ => Err(Box::new(failure(
+            StatusCode::BAD_GATEWAY,
+            "bus",
+            "malformed daemon reply",
+        ))),
+    }
+}
+
+async fn get_state(State(state): State<DevicesState>, Path(device): Path<String>) -> Response {
+    match load_state(&state, &device).await {
+        Ok(stored) => json(StatusCode::OK, stored),
+        Err(response) => *response,
+    }
+}
+
+async fn list_vfos(State(state): State<DevicesState>, Path(device): Path<String>) -> Response {
+    let stored = match load_state(&state, &device).await {
+        Ok(stored) => stored,
+        Err(response) => return *response,
+    };
+    match serde_json::from_slice::<serde_json::Value>(&stored) {
+        Ok(value) if value.is_object() => {
+            let vfos = value
+                .get("vfos")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([]));
+            json(
+                StatusCode::OK,
+                serde_json::json!({"v": 1, "vfos": vfos}).to_string(),
+            )
+        }
+        _ => failure(StatusCode::BAD_GATEWAY, "bus", "malformed device state"),
     }
 }
 
@@ -361,6 +543,123 @@ mod tests {
             .expect("request");
         let (status, _) = call(bad).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    const VFOS: &str = "/api/v1/devices/rtl0/vfos";
+
+    fn req(method: &str, path: &str, origin: Option<&str>, body: &str) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::HOST, "sdr.local:8073");
+        if !body.is_empty() {
+            builder = builder.header(header::CONTENT_TYPE, "application/json");
+        }
+        if let Some(origin) = origin {
+            builder = builder.header(header::ORIGIN, origin);
+        }
+        builder.body(Body::from(body.to_owned())).expect("request")
+    }
+
+    #[tokio::test]
+    async fn vfo_mutations_reject_foreign_origin() {
+        let evil = Some("https://evil.example");
+        for (method, path, body) in [
+            ("POST", VFOS.to_owned(), r#"{"freq_hz":1,"mode":"nfm"}"#),
+            ("PATCH", format!("{VFOS}/1"), r#"{"freq_hz":2}"#),
+            ("DELETE", format!("{VFOS}/1"), ""),
+        ] {
+            let (status, resp) = call(req(method, &path, evil, body)).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{method}");
+            assert_eq!(resp["code"], "forbidden");
+        }
+    }
+
+    #[tokio::test]
+    async fn vfo_bodies_need_json_and_stay_small() {
+        for method in ["POST", "PATCH"] {
+            let path = if method == "POST" {
+                VFOS.to_owned()
+            } else {
+                format!("{VFOS}/1")
+            };
+            let (status, _) = call(post_req_method(method, &path, Some("text/plain"), "{}")).await;
+            assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE, "{method}");
+            let big = format!(r#"{{"x":"{}"}}"#, "a".repeat(MAX_BODY_BYTES));
+            let (status, _) = call(post_req_method(
+                method,
+                &path,
+                Some("application/json"),
+                &big,
+            ))
+            .await;
+            assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{method}");
+        }
+    }
+
+    fn post_req_method(
+        method: &str,
+        path: &str,
+        content_type: Option<&str>,
+        body: &str,
+    ) -> Request<Body> {
+        let mut request = post_req(path, content_type, None, body);
+        *request.method_mut() = method.parse().expect("method");
+        request
+    }
+
+    #[tokio::test]
+    async fn vfo_routes_validate_input_before_the_bus() {
+        let json_ct = Some("application/json");
+        // Bad device id, bad VFO id and bad bodies are 400; a valid request fails on the bus.
+        let (status, _) = call(post_req_method(
+            "POST",
+            "/api/v1/devices/a*b/vfos",
+            json_ct,
+            "{}",
+        ))
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        for id in ["x", "-1", "99999999999"] {
+            let (status, _) = call(req("DELETE", &format!("{VFOS}/{id}"), None, "")).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{id}");
+        }
+        for body in ["nope", "[]", r#"{"v":2}"#, r#"{"id":2}"#] {
+            let (status, _) = call(post_req_method(
+                "PATCH",
+                &format!("{VFOS}/1"),
+                json_ct,
+                body,
+            ))
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        }
+        let (status, _) = call(post_req_method(
+            "PATCH",
+            &format!("{VFOS}/1"),
+            json_ct,
+            r#"{"id":1,"freq_hz":5}"#,
+        ))
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        let (status, _) = call(req("DELETE", &format!("{VFOS}/1"), None, "")).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        let (status, _) = call(req("GET", VFOS, None, "")).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        let (status, _) = call(req("GET", "/api/v1/devices/a.b/vfos", None, "")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn prepare_vfo_update_binds_the_url_id() {
+        let out = prepare_vfo_update(br#"{"freq_hz":5}"#, 3).expect("valid");
+        let value: serde_json::Value = serde_json::from_slice(&out).expect("json");
+        assert_eq!(value, serde_json::json!({"v":1,"id":3,"freq_hz":5}));
+        assert!(prepare_vfo_update(br#"{"id":3}"#, 3).is_ok());
+        assert!(prepare_vfo_update(br#"{"id":4}"#, 3).is_err());
+        assert!(prepare_vfo_update(br#"{"id":"3"}"#, 3).is_err());
+        assert_eq!(parse_vfo_id("12"), Ok(12));
+        assert!(parse_vfo_id("1a").is_err());
     }
 
     #[test]

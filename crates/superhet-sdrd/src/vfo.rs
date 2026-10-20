@@ -398,7 +398,10 @@ fn check_realisable(vfo: &Vfo, sample_rate: u32) -> Result<(), CtlError> {
 }
 
 fn not_found(id: u32) -> CtlError {
-    CtlError::invalid(format!("no VFO with id {id}"))
+    CtlError {
+        code: ErrorCode::NotFound,
+        message: format!("no VFO with id {id}"),
+    }
 }
 
 impl VfoRegistry {
@@ -444,8 +447,8 @@ impl VfoRegistry {
     /// Apply a partial update.
     ///
     /// # Errors
-    /// [`ErrorCode::Invalid`] for an unknown id, an inconsistent result (de-emphasis on AM) or
-    /// a VFO the channelizer cannot realise.
+    /// [`ErrorCode::NotFound`] for an unknown id, [`ErrorCode::Invalid`] for an inconsistent
+    /// result (de-emphasis on AM) or a VFO the channelizer cannot realise.
     pub fn update(&mut self, patch: &VfoPatch, sample_rate: u32) -> Result<Vfo, CtlError> {
         let index = self
             .vfos
@@ -481,7 +484,7 @@ impl VfoRegistry {
     /// Remove a VFO.
     ///
     /// # Errors
-    /// [`ErrorCode::Invalid`] for an unknown id.
+    /// [`ErrorCode::NotFound`] for an unknown id.
     pub fn delete(&mut self, id: u32) -> Result<(), CtlError> {
         let index = self
             .vfos
@@ -645,7 +648,7 @@ mod tests {
         assert_eq!(err.code, ErrorCode::Unsupported);
         assert_eq!(
             reg.delete(99).expect_err("unknown").code,
-            ErrorCode::Invalid
+            ErrorCode::NotFound
         );
     }
 
@@ -724,9 +727,11 @@ mod tests {
         assert_eq!(err.code, ErrorCode::Invalid);
         assert_eq!(reg.list(), before);
         assert_eq!(reg.revision(), revision);
-        assert!(
+        assert_eq!(
             reg.update(&patch(r#"{"v":1,"id":42,"freq_hz":5}"#), RATE)
-                .is_err()
+                .expect_err("unknown")
+                .code,
+            ErrorCode::NotFound
         );
     }
 
