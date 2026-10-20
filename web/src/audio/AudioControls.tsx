@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { Button, Select, SpeakerIcon, SpeakerMutedIcon } from "../ui";
 import type { AudioController, AudioSnapshot } from "./controller";
 import { formatDebug } from "./format";
 
@@ -10,7 +11,28 @@ interface Props {
   snapshot: AudioSnapshot;
 }
 
-/** "Audio on" button (user gesture for the autoplay policy), jitter target and debug readout. */
+/** Audio on/off (a user gesture is required by the autoplay policy). */
+export function AudioButton({ audio, snapshot }: Props) {
+  const { enabled, starting, unsupported } = snapshot;
+  return (
+    <Button
+      variant={enabled ? "secondary" : "primary"}
+      size="md"
+      aria-pressed={enabled}
+      aria-label={enabled ? "Audio on" : "Audio off"}
+      disabled={starting || unsupported !== null}
+      title={unsupported ?? "Switch audio output on or off"}
+      icon={enabled ? <SpeakerIcon /> : <SpeakerMutedIcon />}
+      onClick={() => void (enabled ? audio.disable() : audio.enable())}
+    >
+      <span className="max-sm:hidden">
+        {enabled ? "Audio on" : starting ? "Starting…" : "Audio off"}
+      </span>
+    </Button>
+  );
+}
+
+/** Audio section content: on/off, jitter buffer target and the technical readout. */
 export function AudioControls({ audio, snapshot }: Props) {
   const debugRef = useRef<HTMLPreElement>(null);
 
@@ -22,49 +44,25 @@ export function AudioControls({ audio, snapshot }: Props) {
     return () => window.clearInterval(timer);
   }, [audio]);
 
-  const { enabled, starting, unsupported, error } = snapshot;
+  const { unsupported } = snapshot;
   return (
-    <div className="flex flex-wrap items-start gap-3 text-sm text-neutral-300" aria-label="Audio">
-      <button
-        type="button"
-        className={`rounded border px-2 py-0.5 disabled:opacity-40 ${
-          enabled ? "border-emerald-500 text-emerald-300" : "border-neutral-600"
-        }`}
-        disabled={starting || unsupported !== null}
-        aria-pressed={enabled}
-        onClick={() => void (enabled ? audio.disable() : audio.enable())}
-      >
-        {enabled ? "Audio off" : starting ? "Starting…" : "Audio on"}
-      </button>
-      {unsupported && (
-        <span className="max-w-xl text-amber-400" role="alert">
+    <div className="flex flex-col gap-3" role="group" aria-label="Audio">
+      <AudioButton audio={audio} snapshot={snapshot} />
+      {unsupported ? (
+        <p className="rounded-md bg-warn-soft px-2.5 py-2 text-xs text-warn" role="alert">
           {unsupported}
-        </span>
-      )}
-      {error && (
-        <span className="text-red-400" role="alert">
-          {error}
-        </span>
-      )}
-      {!unsupported && (
-        <label className="flex items-center gap-1">
-          Buffer
-          <select
-            className="rounded border border-neutral-600 bg-neutral-900 px-1 py-0.5"
-            value={snapshot.targetMs}
-            onChange={(e) => audio.setTargetMs(Number(e.target.value))}
-          >
-            {TARGET_CHOICES_MS.map((ms) => (
-              <option key={ms} value={ms}>
-                {ms} ms
-              </option>
-            ))}
-          </select>
-        </label>
+        </p>
+      ) : (
+        <Select
+          label="Jitter buffer"
+          value={String(snapshot.targetMs)}
+          onChange={(v) => audio.setTargetMs(Number(v))}
+          options={TARGET_CHOICES_MS.map((ms) => ({ value: String(ms), label: `${ms} ms` }))}
+        />
       )}
       <pre
         ref={debugRef}
-        className="min-w-0 flex-1 font-mono text-xs leading-snug text-neutral-500"
+        className="min-w-0 overflow-x-auto font-mono text-[11px] leading-snug whitespace-pre-wrap text-fg-subtle"
         title="Latency = capture to browser (includes server/browser clock skew) + jitter buffer + output device"
       />
     </div>

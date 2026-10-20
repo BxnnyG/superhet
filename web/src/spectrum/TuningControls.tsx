@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { NumberField, Select, Slider, Toggle } from "../ui";
+import type { TunePatch } from "./api";
 import { formatFrequency, parseFrequency } from "./freq";
 import type { TuningSnapshot } from "./tuning";
-import type { TunePatch } from "./api";
 
 /** Sample rates offered for RTL-SDR dongles (S/s). */
 export const SAMPLE_RATES = [
@@ -12,138 +12,91 @@ export function formatRate(rate: number): string {
   return `${parseFloat((rate / 1e6).toFixed(3))} MS/s`;
 }
 
+/** Index of the entry in `gains` closest to `db` (0 for an empty list). */
+export function nearestGainIndex(gains: readonly number[], db: number | null): number {
+  if (db === null || gains.length === 0) return 0;
+  let best = 0;
+  for (let i = 1; i < gains.length; i++) {
+    if (Math.abs((gains[i] ?? 0) - db) < Math.abs((gains[best] ?? 0) - db)) best = i;
+  }
+  return best;
+}
+
 interface Props {
   tuning: TuningSnapshot;
   onTune: (patch: TunePatch) => void;
 }
 
-const selectClass =
-  "rounded border border-neutral-600 bg-neutral-900 px-1 py-0.5 disabled:opacity-40";
-
-export function FrequencyInput({
-  centerHz,
-  onCommit,
-  label = "Centre frequency",
-}: {
-  centerHz: number | null;
-  onCommit: (hz: number) => void;
-  label?: string;
-}) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const [invalid, setInvalid] = useState(false);
-  const shown = draft ?? (centerHz === null ? "" : formatFrequency(centerHz));
-
-  const cancel = () => {
-    setDraft(null);
-    setInvalid(false);
-  };
-
-  return (
-    <label className="flex items-center gap-1">
-      <span className="sr-only">{label}</span>
-      <input
-        type="text"
-        inputMode="decimal"
-        aria-label={label}
-        aria-invalid={invalid}
-        spellCheck={false}
-        placeholder="MHz"
-        className={`w-36 rounded border bg-neutral-900 px-2 py-0.5 text-right font-mono text-base tabular-nums ${
-          invalid ? "border-red-500" : "border-neutral-600"
-        }`}
-        value={shown}
-        onFocus={(e) => e.currentTarget.select()}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          setInvalid(false);
-        }}
-        onBlur={cancel}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            cancel();
-            e.currentTarget.blur();
-          } else if (e.key === "Enter") {
-            const hz = parseFrequency(draft ?? shown);
-            if (hz === null) {
-              setInvalid(true);
-              return;
-            }
-            onCommit(hz);
-            cancel();
-            e.currentTarget.blur();
-          }
-        }}
-      />
-      <span className="text-neutral-500">MHz</span>
-    </label>
-  );
-}
-
+/** Source section content: centre frequency, sample rate, gain, PPM. */
 export function TuningControls({ tuning, onTune }: Props) {
-  const { display, busy, error } = tuning;
+  const { display, busy } = tuning;
   const rates =
     display && !SAMPLE_RATES.includes(display.sampleRate)
       ? [...SAMPLE_RATES, display.sampleRate].sort((a, b) => a - b)
       : SAMPLE_RATES;
   const gain = display?.gain ?? null;
-  const gainValue = gain === null ? "" : gain.mode === "auto" ? "auto" : String(gain.db);
   const gains = display?.gainsDb ?? [];
-  const gainOptions =
-    gain?.mode === "manual" && gain.db !== null && !gains.includes(gain.db)
-      ? [...gains, gain.db].sort((a, b) => a - b)
-      : gains;
+  const gainIdx = nearestGainIndex(gains, gain?.db ?? null);
+  const gainDb = gains[gainIdx];
 
   return (
-    <div
-      className="flex flex-wrap items-center gap-3 text-sm text-neutral-300"
-      role="group"
-      aria-label="Tuning"
-    >
-      <FrequencyInput
-        centerHz={display?.centerHz ?? null}
+    <div className="flex flex-col gap-3" role="group" aria-label="Source">
+      <NumberField
+        label="Centre frequency"
+        unit="MHz"
+        min={1}
+        step={1000}
+        value={display?.centerHz ?? 0}
+        format={formatFrequency}
+        parse={parseFrequency}
+        disabled={!display}
         onCommit={(hz) => onTune({ centerHz: hz })}
       />
-      <label className="flex items-center gap-1">
-        Rate
-        <select
-          className={selectClass}
-          disabled={!display || busy}
-          value={display ? String(display.sampleRate) : ""}
-          onChange={(e) => onTune({ sampleRate: Number(e.target.value) })}
-        >
-          {!display && <option value="">–</option>}
-          {rates.map((r) => (
-            <option key={r} value={r}>
-              {formatRate(r)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex items-center gap-1">
-        Gain
-        <select
-          className={selectClass}
-          disabled={!display || gain === null || busy}
-          value={gainValue}
-          onChange={(e) =>
-            onTune({ gain: e.target.value === "auto" ? "auto" : Number(e.target.value) })
-          }
-        >
-          {gain === null && <option value="">n/a</option>}
-          {gain !== null && <option value="auto">Auto</option>}
-          {gain !== null &&
-            gainOptions.map((g) => (
-              <option key={g} value={String(g)}>
-                {g.toFixed(1)} dB
-              </option>
-            ))}
-        </select>
-      </label>
-      {error && (
-        <span className="text-red-400" role="alert">
-          {error}
-        </span>
+      <Select
+        label="Sample rate"
+        disabled={!display || busy}
+        value={display ? String(display.sampleRate) : ""}
+        onChange={(v) => onTune({ sampleRate: Number(v) })}
+        options={[
+          ...(display ? [] : [{ value: "", label: "–" }]),
+          ...rates.map((r) => ({ value: String(r), label: formatRate(r) })),
+        ]}
+      />
+      {gain === null ? (
+        display ? (
+          <p className="text-xs text-fg-subtle">This device has no gain control.</p>
+        ) : null
+      ) : (
+        <div className="flex flex-col gap-2">
+          <Toggle
+            label="Automatic gain"
+            checked={gain.mode === "auto"}
+            disabled={busy}
+            onChange={(auto) => onTune({ gain: auto ? "auto" : (gainDb ?? 0) })}
+          />
+          <Slider
+            label="Gain"
+            min={0}
+            max={Math.max(0, gains.length - 1)}
+            value={gainIdx}
+            disabled={gain.mode === "auto" || gains.length < 2}
+            valueLabel={gain.mode === "auto" ? "auto" : `${(gainDb ?? 0).toFixed(1)} dB`}
+            onChange={(i) => {
+              const db = gains[i];
+              if (db !== undefined) onTune({ gain: db });
+            }}
+          />
+        </div>
       )}
+      <NumberField
+        label="Frequency correction"
+        unit="ppm"
+        min={-1000}
+        max={1000}
+        value={display?.ppm ?? 0}
+        disabled={!display}
+        onCommit={(ppm) => onTune({ ppm })}
+      />
     </div>
   );
 }

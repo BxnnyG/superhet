@@ -6,6 +6,7 @@
 // Everything here is imperative; no React state changes per pointer event.
 
 import { formatFrequency } from "./freq";
+import { CANVAS_FONT, CHIP_BG, CHIP_BORDER, CURSOR_COLOR, CANVAS_TEXT_STRONG } from "./palette";
 import { MODE_LABEL, hitTestVfo, vfoColor, type Marker } from "../vfo/model";
 import { fracToHz, spanWidth, type Span, type ViewController } from "./view";
 
@@ -259,7 +260,7 @@ export class SpectrumInteraction {
     if (frac < 0 || frac > 1) return;
 
     const px = x * dpr;
-    ctx.strokeStyle = "rgba(250, 204, 21, 0.7)";
+    ctx.strokeStyle = CURSOR_COLOR;
     ctx.lineWidth = Math.max(1, dpr);
     ctx.beginPath();
     ctx.moveTo(px, 0);
@@ -267,14 +268,13 @@ export class SpectrumInteraction {
     ctx.stroke();
 
     const label = `${formatFrequency(fracToHz(span, frac))} MHz`;
-    ctx.font = `${11 * dpr}px ui-monospace, monospace`;
+    ctx.font = `${11 * dpr}px ${CANVAS_FONT}`;
     const padX = 4 * dpr;
     const w = ctx.measureText(label).width + padX * 2;
     const h = 16 * dpr;
     const boxX = Math.min(Math.max(left * dpr, px + 6 * dpr), canvas.width - w);
-    ctx.fillStyle = "rgba(10, 10, 12, 0.85)";
-    ctx.fillRect(boxX, 2 * dpr, w, h);
-    ctx.fillStyle = "#facc15";
+    this.chip(ctx, boxX, 2 * dpr, w, h, CHIP_BG);
+    ctx.fillStyle = CANVAS_TEXT_STRONG;
     ctx.textBaseline = "middle";
     ctx.textAlign = "left";
     ctx.fillText(label, boxX + padX, 2 * dpr + h / 2);
@@ -293,7 +293,7 @@ export class SpectrumInteraction {
     ctx.beginPath();
     ctx.rect(left, 0, plotW, canvas.height);
     ctx.clip();
-    ctx.font = `${11 * dpr}px ui-monospace, monospace`;
+    ctx.font = `${11 * dpr}px ${CANVAS_FONT}`;
     ctx.textBaseline = "middle";
     ctx.textAlign = "left";
     for (const m of this.markers) {
@@ -324,11 +324,31 @@ export class SpectrumInteraction {
       const h = 16 * dpr;
       const bx = Math.min(Math.max(left, xc + 3 * dpr), canvas.width - w);
       ctx.globalAlpha = 0.9;
-      ctx.fillStyle = "rgba(10, 10, 12, 0.85)";
-      ctx.fillRect(bx, 22 * dpr, w, h);
+      this.chip(ctx, bx, 22 * dpr, w, h, CHIP_BG, color);
       ctx.fillStyle = color;
       ctx.fillText(label, bx + padX, 22 * dpr + h / 2);
     }
     ctx.restore();
+  }
+
+  /** Rounded label chip with a subtle border (outlined in `edge` when given). */
+  private chip(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    fill: string,
+    edge?: string,
+  ): void {
+    const r = 4 * this.dpr;
+    ctx.beginPath();
+    if (typeof ctx.roundRect === "function") ctx.roundRect(x, y, w, h, r);
+    else ctx.rect(x, y, w, h);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.lineWidth = Math.max(1, this.dpr);
+    ctx.strokeStyle = edge ?? CHIP_BORDER;
+    ctx.stroke();
   }
 }

@@ -22,6 +22,7 @@ Acceptance criteria:
 7. CPU: core + waterfall + 4 NFM VFOs ≤ 25 % of one core on the dev PC (documented measurement in `docs/perf.md`).
 8. CI green (fmt, clippy -D warnings, tests incl. PostgreSQL/NATS integration, cargo-deny, gitleaks, web lint/typecheck/build), Docker image builds in CI.
 9. Restarting `superhet-api` or `superhet-worker` does not interrupt reception or audio recording in sdrd (dropped blocks stay 0, test with compose stack).
+10. UI: consistent design system (tokens + shared components), SDR-style layout (top bar with digit-tunable frequency readout, collapsible sidebar, full-height spectrum/waterfall, status bar), responsive down to 375 px, keyboard-accessible controls.
 
 ## P2 – Plugin system and first plugins
 
