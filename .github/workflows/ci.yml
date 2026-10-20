@@ -31,6 +31,8 @@ jobs:
     env:
       DATABASE_URL: postgres://superhet:ci-only-password@localhost:5432/superhet
       SUPERHET_NATS_URL: nats://localhost:4222
+      # The *_live tests are gated on this variable and skip silently without it.
+      SUPERHET_TEST_NATS_URL: nats://localhost:4222
     steps:
       - uses: actions/checkout@v4
       # Service containers cannot take command arguments, so start NATS with JetStream by hand.
@@ -52,6 +54,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # The API live tests spawn target/debug/superhet-sdrd; build it explicitly rather than
+      # relying on the workspace test build to leave it there.
+      - run: cargo build -p superhet-sdrd
       - run: cargo test --workspace
 
   deny:
