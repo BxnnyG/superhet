@@ -12,3 +12,10 @@ export function useCooldown(): { remaining: number; start: (seconds: number) => 
   const start = useCallback((seconds: number) => setRemaining(Math.max(0, Math.ceil(seconds))), []);
   return { remaining, start };
 }
+
+/** Formats a countdown: `m:ss` from one minute up, plain seconds below. */
+export function formatCountdown(seconds: number): string {
+  const s = Math.max(0, Math.ceil(seconds));
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}

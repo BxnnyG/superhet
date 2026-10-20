@@ -2,7 +2,7 @@ import { useRef, useState, type SyntheticEvent } from "react";
 import { Alert, Button, PasswordField, TextField } from "../ui";
 import { AuthError, type AuthClient } from "./api";
 import { AuthLayout } from "./AuthLayout";
-import { useCooldown } from "./useCooldown";
+import { formatCountdown, useCooldown } from "./useCooldown";
 
 interface Props {
   client: AuthClient;
@@ -72,7 +72,11 @@ export function LoginPage({ client, onSuccess, notice }: Props) {
           onChange={(e) => setPassword(e.target.value)}
         />
         <Button type="submit" variant="primary" size="lg" disabled={busy || limited}>
-          {busy ? "Signing in…" : limited ? `Try again in ${remaining}s` : "Sign in"}
+          {busy
+            ? "Signing in…"
+            : limited
+              ? `Try again in ${formatCountdown(remaining)}`
+              : "Sign in"}
         </Button>
       </form>
     </AuthLayout>
