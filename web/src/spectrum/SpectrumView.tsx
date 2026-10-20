@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import type { SpectrumFrame } from "./frame";
+import { LevelController, MIN_SPAN_DB, loadLevelSettings, saveLevelSettings } from "./levels";
 import { SpectrumPlot } from "./plot";
 import { SpectrumSocket, clampBins, type SocketStatus } from "./socket";
 import { Waterfall } from "./waterfall";
@@ -11,7 +12,18 @@ interface Props {
 interface Info {
   centerHz: number;
   sampleRate: number;
+  minDb: number;
+  maxDb: number;
 }
+
+interface LevelsUi {
+  auto: boolean;
+  lowDb: number;
+  highDb: number;
+}
+
+/** Auto-level readout/slider refresh period; keeps React out of the per-frame path. */
+const AUTO_UI_REFRESH_MS = 500;
 
 const STATUS_LABEL: Record<SocketStatus, string> = {
   connecting: "Connecting…",
@@ -36,6 +48,12 @@ export function SpectrumView({ device = "dev0" }: Props) {
   const [status, setStatus] = useState<SocketStatus>("connecting");
   const [info, setInfo] = useState<Info | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [controller] = useState(() => new LevelController(loadLevelSettings()));
+  const [levels, setLevels] = useState<LevelsUi>(() => ({
+    auto: controller.auto,
+    lowDb: Math.round(controller.range.lowDb),
+    highDb: Math.round(controller.range.highDb),
+  }));
 
   useEffect(() => {
     const container = containerRef.current;
@@ -46,8 +64,8 @@ export function SpectrumView({ device = "dev0" }: Props) {
     let plot: SpectrumPlot;
     let waterfall: Waterfall;
     try {
-      plot = new SpectrumPlot(plotCanvas);
-      waterfall = new Waterfall(wfCanvas);
+      plot = new SpectrumPlot(plotCanvas, controller.range);
+      waterfall = new Waterfall(wfCanvas, controller.range);
     } catch (e) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- one-off setup failure
       setError(e instanceof Error ? e.message : String(e));
@@ -59,10 +77,22 @@ export function SpectrumView({ device = "dev0" }: Props) {
       device,
       getBins: () => clampBins(container.clientWidth * window.devicePixelRatio),
       onFrame: (frame: SpectrumFrame) => {
+        controller.onFrame(frame, performance.now());
         plot.push(frame);
         waterfall.push(frame);
-        if (!last || last.centerHz !== frame.centerHz || last.sampleRate !== frame.sampleRate) {
-          last = { centerHz: frame.centerHz, sampleRate: frame.sampleRate };
+        if (
+          !last ||
+          last.centerHz !== frame.centerHz ||
+          last.sampleRate !== frame.sampleRate ||
+          last.minDb !== frame.minDb ||
+          last.maxDb !== frame.maxDb
+        ) {
+          last = {
+            centerHz: frame.centerHz,
+            sampleRate: frame.sampleRate,
+            minDb: frame.minDb,
+            maxDb: frame.maxDb,
+          };
           setInfo(last);
         }
       },
@@ -82,13 +112,48 @@ export function SpectrumView({ device = "dev0" }: Props) {
     observer.observe(container);
     socket.start();
 
+    // Manual changes redraw immediately; auto mode redraws with the next frame anyway.
+    const offChange = controller.onChange(() => {
+      plot.redraw();
+      waterfall.redraw();
+    });
+    // Mirror the auto-estimated range into the controls at a low rate.
+    const timer = window.setInterval(() => {
+      if (!controller.auto) return;
+      const lowDb = Math.round(controller.range.lowDb);
+      const highDb = Math.round(controller.range.highDb);
+      setLevels((prev) =>
+        prev.auto && prev.lowDb === lowDb && prev.highDb === highDb
+          ? prev
+          : { auto: true, lowDb, highDb },
+      );
+    }, AUTO_UI_REFRESH_MS);
+
     return () => {
+      window.clearInterval(timer);
+      offChange();
       observer.disconnect();
       socket.stop();
       plot.destroy();
       waterfall.destroy();
     };
-  }, [device]);
+  }, [device, controller]);
+
+  const applyManual = (lowDb: number, highDb: number) => {
+    controller.setManual(lowDb, highDb);
+    const next = { auto: false, lowDb: controller.range.lowDb, highDb: controller.range.highDb };
+    setLevels(next);
+    saveLevelSettings(controller.settings());
+  };
+
+  const applyAuto = () => {
+    controller.setAuto();
+    setLevels((prev) => ({ ...prev, auto: true }));
+    saveLevelSettings(controller.settings());
+  };
+
+  const dbMin = info?.minDb ?? -120;
+  const dbMax = info?.maxDb ?? 0;
 
   return (
     <section className="flex h-full min-h-0 flex-col gap-2">
@@ -103,6 +168,59 @@ export function SpectrumView({ device = "dev0" }: Props) {
             {(info.centerHz / 1e6).toFixed(3)} MHz · span {(info.sampleRate / 1e6).toFixed(3)} MHz
           </span>
         )}
+        <div className="ml-auto flex items-center gap-3" role="group" aria-label="Display levels">
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={levels.auto}
+              onChange={(e) => {
+                if (e.target.checked) applyAuto();
+                else applyManual(controller.range.lowDb, controller.range.highDb);
+              }}
+            />
+            Auto
+          </label>
+          <label className="flex items-center gap-1">
+            Floor
+            <input
+              type="range"
+              className="w-24"
+              min={dbMin}
+              max={dbMax - MIN_SPAN_DB}
+              step={1}
+              value={levels.lowDb}
+              onChange={(e) => {
+                const low = Number(e.target.value);
+                applyManual(low, Math.max(levels.highDb, low + MIN_SPAN_DB));
+              }}
+            />
+            <output className="w-14 text-right font-mono tabular-nums">{levels.lowDb} dB</output>
+          </label>
+          <label className="flex items-center gap-1">
+            Ceiling
+            <input
+              type="range"
+              className="w-24"
+              min={dbMin + MIN_SPAN_DB}
+              max={dbMax}
+              step={1}
+              value={levels.highDb}
+              onChange={(e) => {
+                const high = Number(e.target.value);
+                applyManual(Math.min(levels.lowDb, high - MIN_SPAN_DB), high);
+              }}
+            />
+            <output className="w-14 text-right font-mono tabular-nums">{levels.highDb} dB</output>
+          </label>
+          <button
+            type="button"
+            className="rounded border border-neutral-600 px-2 py-0.5 disabled:opacity-40"
+            disabled={levels.auto}
+            onClick={applyAuto}
+          >
+            Reset to auto
+          </button>
+        </div>
         {error && (
           <span className="text-red-400" role="alert">
             {error}

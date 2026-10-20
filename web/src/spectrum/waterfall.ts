@@ -2,6 +2,7 @@
 // unrolls the ring (newest row on top) and applies a turbo-like colormap.
 
 import type { SpectrumFrame } from "./frame";
+import type { DisplayRange } from "./levels";
 
 export const HISTORY_ROWS = 512;
 
@@ -20,6 +21,8 @@ uniform sampler2D u_tex;
 uniform float u_head;   // index of the newest row
 uniform float u_rows;
 uniform float u_valid;  // rows written so far (<= u_rows)
+uniform vec2 u_src;     // dB mapped to texel values 0 and 1 (frame min_db, max_db)
+uniform vec2 u_view;    // displayed dB window (low, high)
 in vec2 v_uv;
 out vec4 outColor;
 
@@ -48,7 +51,8 @@ void main() {
   float row = u_head - age;
   row += u_rows * step(row, -0.5);
   float v = texture(u_tex, vec2(v_uv.x, (row + 0.5) / u_rows)).r;
-  outColor = vec4(turbo(v), 1.0);
+  float db = u_src.x + v * (u_src.y - u_src.x);
+  outColor = vec4(turbo((db - u_view.x) / (u_view.y - u_view.x)), 1.0);
 }`;
 
 interface GlState {
@@ -58,6 +62,8 @@ interface GlState {
   uHead: WebGLUniformLocation | null;
   uRows: WebGLUniformLocation | null;
   uValid: WebGLUniformLocation | null;
+  uSrc: WebGLUniformLocation | null;
+  uView: WebGLUniformLocation | null;
   uTex: WebGLUniformLocation | null;
 }
 
@@ -82,16 +88,27 @@ export class Waterfall {
   private valid = 0;
   private center = 0;
   private span = 0;
+  private srcMinDb = -120;
+  private srcMaxDb = 0;
   private raf = 0;
   private destroyed = false;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  /** `range` is read on every draw; mutate it and call `redraw()` to change the contrast. */
+  constructor(
+    private readonly canvas: HTMLCanvasElement,
+    private readonly range: DisplayRange,
+  ) {
     const gl = canvas.getContext("webgl2", { antialias: false, alpha: false });
     if (!gl) throw new Error("WebGL2 is not available");
     this.gl = gl;
     canvas.addEventListener("webglcontextlost", this.onLost);
     canvas.addEventListener("webglcontextrestored", this.onRestored);
     this.state = this.init();
+  }
+
+  /** Redraw with the current display range (the texture keeps the raw values). */
+  redraw(): void {
+    this.schedule();
   }
 
   /** Set the backing store size in device pixels. */
@@ -109,15 +126,19 @@ export class Waterfall {
     const st = this.state;
     if (!st || frame.binCount === 0) return;
     const gl = this.gl;
-    // A different span or bin count makes old rows meaningless: start over.
+    // A different span, bin count or dB mapping makes old rows meaningless: start over.
     if (
       frame.binCount !== this.texWidth ||
+      frame.minDb !== this.srcMinDb ||
+      frame.maxDb !== this.srcMaxDb ||
       frame.centerHz !== this.center ||
       frame.sampleRate !== this.span
     ) {
       this.allocate(st, frame.binCount);
       this.center = frame.centerHz;
       this.span = frame.sampleRate;
+      this.srcMinDb = frame.minDb;
+      this.srcMaxDb = frame.maxDb;
     }
     this.head = (this.head + 1) % HISTORY_ROWS;
     this.valid = Math.min(this.valid + 1, HISTORY_ROWS);
@@ -185,6 +206,8 @@ export class Waterfall {
       uHead: gl.getUniformLocation(program, "u_head"),
       uRows: gl.getUniformLocation(program, "u_rows"),
       uValid: gl.getUniformLocation(program, "u_valid"),
+      uSrc: gl.getUniformLocation(program, "u_src"),
+      uView: gl.getUniformLocation(program, "u_view"),
       uTex: gl.getUniformLocation(program, "u_tex"),
     };
     // Context state was reset (or is fresh): rows must be re-uploaded.
@@ -232,6 +255,8 @@ export class Waterfall {
     gl.uniform1f(st.uHead, this.head);
     gl.uniform1f(st.uRows, HISTORY_ROWS);
     gl.uniform1f(st.uValid, this.valid);
+    gl.uniform2f(st.uSrc, this.srcMinDb, this.srcMaxDb);
+    gl.uniform2f(st.uView, this.range.lowDb, this.range.highDb);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 }
