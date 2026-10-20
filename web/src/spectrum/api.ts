@@ -42,9 +42,9 @@ export interface ApiClient {
   tune(device: string, patch: TunePatch, signal?: AbortSignal): Promise<DeviceState>;
 }
 
-type Rec = Record<string, unknown>;
+export type Rec = Record<string, unknown>;
 
-function isRec(v: unknown): v is Rec {
+export function isRec(v: unknown): v is Rec {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
@@ -115,7 +115,7 @@ export function tuneBody(patch: TunePatch): Rec {
   return body;
 }
 
-async function readJson(res: Response): Promise<unknown> {
+export async function readJson(res: Response): Promise<unknown> {
   try {
     return await res.json();
   } catch {
@@ -123,7 +123,7 @@ async function readJson(res: Response): Promise<unknown> {
   }
 }
 
-function httpError(res: Response, body: unknown): ApiError {
+export function httpError(res: Response, body: unknown): ApiError {
   if (isRec(body) && typeof body.error === "string") {
     return new ApiError(
       body.error,
@@ -134,7 +134,7 @@ function httpError(res: Response, body: unknown): ApiError {
   return new ApiError(`HTTP ${res.status}`, res.status);
 }
 
-const deviceUrl = (device: string) => `/api/v1/devices/${encodeURIComponent(device)}`;
+export const deviceUrl = (device: string) => `/api/v1/devices/${encodeURIComponent(device)}`;
 
 export function createApiClient(fetchImpl: typeof fetch = (...a) => fetch(...a)): ApiClient {
   return {

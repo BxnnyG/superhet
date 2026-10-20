@@ -23,9 +23,11 @@ const selectClass =
 export function FrequencyInput({
   centerHz,
   onCommit,
+  label = "Centre frequency",
 }: {
   centerHz: number | null;
   onCommit: (hz: number) => void;
+  label?: string;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const [invalid, setInvalid] = useState(false);
@@ -38,11 +40,11 @@ export function FrequencyInput({
 
   return (
     <label className="flex items-center gap-1">
-      <span className="sr-only">Centre frequency</span>
+      <span className="sr-only">{label}</span>
       <input
         type="text"
         inputMode="decimal"
-        aria-label="Centre frequency"
+        aria-label={label}
         aria-invalid={invalid}
         spellCheck={false}
         placeholder="MHz"
