@@ -17,7 +17,7 @@ unwrap_used = "warn"
 
 [workspace.dependencies]
 axum = "0.8"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tower = { version = "0.5", features = ["util"] }
@@ -25,8 +25,13 @@ http-body-util = "0.1"
 async-nats = { version = "0.50", default-features = false, features = ["ring", "jetstream", "nkeys"] }
 sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls", "migrate", "macros", "uuid", "time"] }
 thiserror = "2"
+futures-util = { version = "0.3", default-features = false }
 uuid = { version = "1", features = ["v4"] }
 time = "0.3"
+rustfft = "6"
+num-complex = "0.4"
 
 superhet-bus = { path = "crates/superhet-bus" }
+superhet-device = { path = "crates/superhet-device" }
+superhet-dsp = { path = "crates/superhet-dsp" }
 superhet-db = { path = "crates/superhet-db" }

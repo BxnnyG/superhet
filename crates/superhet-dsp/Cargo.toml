@@ -7,5 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[dependencies]
+num-complex.workspace = true
+thiserror.workspace = true
+rustfft.workspace = true
 [lints]
 workspace = true

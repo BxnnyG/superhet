@@ -12,12 +12,19 @@ name = "superhet-sdrd"
 path = "src/main.rs"
 
 [dependencies]
+async-nats.workspace = true
+superhet-bus.workspace = true
+superhet-device.workspace = true
+superhet-dsp.workspace = true
+thiserror.workspace = true
 axum.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+futures-util.workspace = true
+tokio = { workspace = true, features = ["time"] }
 tower.workspace = true
 http-body-util.workspace = true
 
