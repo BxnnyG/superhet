@@ -35,3 +35,10 @@ superhet-bus = { path = "crates/superhet-bus" }
 superhet-device = { path = "crates/superhet-device" }
 superhet-dsp = { path = "crates/superhet-dsp" }
 superhet-db = { path = "crates/superhet-db" }
+
+# DSP code is unusably slow unoptimised; keep debug builds and tests responsive.
+[profile.dev.package.superhet-dsp]
+opt-level = 2
+
+[profile.dev.package.rustfft]
+opt-level = 2
