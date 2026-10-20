@@ -3,9 +3,12 @@
 //! A [`Device`] owns one SDR. Streaming is pull-free: [`Device::start`] returns an
 //! [`IqStream`] whose bounded channel is fed from a dedicated OS thread. The producer
 //! never blocks on a slow consumer; blocks that do not fit are dropped and counted.
-//! A future librtlsdr backend implements the same trait.
+//! Backends: [`FileDevice`] (replay) and, with the `rtlsdr` feature, `RtlSdrDevice`.
 
 mod file;
+#[cfg(feature = "rtlsdr")]
+mod rtlsdr;
+mod rtlsdr_config;
 mod spec;
 
 use std::sync::Arc;
@@ -14,6 +17,9 @@ use std::sync::mpsc::Receiver;
 
 pub use file::{FileConfig, FileDevice, SampleFormat};
 pub use num_complex::Complex32;
+#[cfg(feature = "rtlsdr")]
+pub use rtlsdr::RtlSdrDevice;
+pub use rtlsdr_config::{DeviceSelector, Gain, RtlSdrConfig};
 pub use spec::open_from_spec;
 
 /// Errors raised by device backends.

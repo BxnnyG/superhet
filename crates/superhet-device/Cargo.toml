@@ -11,5 +11,9 @@ publish.workspace = true
 num-complex.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+[features]
+# RTL-SDR backend via the system librtlsdr (needs librtlsdr-dev at build time).
+rtlsdr = []
+
 [lints]
 workspace = true

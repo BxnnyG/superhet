@@ -6,7 +6,7 @@ External components run as **separate processes** (plugins) or are **dynamically
 
 | Component | Use | License | Distribution by Superhet | Notes |
 |---|---|---|---|---|
-| librtlsdr (osmocom/rtl-sdr) | device backend (dynamic lib) | GPL-2.0-or-later | system package in image | – |
+| librtlsdr (osmocom/rtl-sdr) | device backend (dynamic lib, hand-written FFI, cargo feature `rtlsdr`) | GPL-2.0-or-later | system package in image (`librtlsdr0`; `librtlsdr-dev` only in the build stage) | no source vendored; AGPL-3.0 core links it dynamically, see ADR-0001 |
 | SoapySDR | device backend (later) | BSL-1.0 | system package | – |
 | PostgreSQL | database (separate container) | PostgreSQL License | official image | – |
 | NATS server | message bus (separate container) | Apache-2.0 | official image | – |
