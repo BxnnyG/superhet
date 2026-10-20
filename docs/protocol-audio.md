@@ -53,7 +53,7 @@ Endpoint: `GET /api/v1/ws/audio?dev=<device-id>` on **superhet-api** (port 8073)
 are those of the spectrum socket (`docs/protocol-ws.md`): upgrade refused with `400` (invalid or
 missing `dev`), `403` (`Origin` not allowed, same `SUPERHET_ALLOWED_ORIGINS` policy), `503` (no
 bus, more than 32 audio clients, too many streams, subscription failed); the route sits behind
-`auth::require_session` (currently a pass-through).
+session check (`401` without a valid cookie, `docs/api-auth.md`).
 
 **Client to server** (text, at most 1024 bytes): `{"type":"subscribe","v":1,"vfos":[1,2]}`. The list
 replaces the previous set; an empty list means none (a new socket starts with none). `v` is

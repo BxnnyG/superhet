@@ -18,7 +18,7 @@ Self-hosted, single-user web SDR (modern alternative to OpenWebRX, SDR#-like fre
 - `crates/superhet-pluginhost` – binary `superhet-pluginhost` (supervises out-of-process plugins; port 8075)
 - `crates/superhet-worker` – binary `superhet-worker` (background jobs, event consumers; port 8076)
 - `crates/superhet-bus` – NATS subjects (`sh.v1.*`, versioned) + connect helper · `crates/superhet-db` – PostgreSQL pool + migrations (`migrations/`)
-- Config via env: `SUPERHET_DATABASE_URL`, `SUPERHET_NATS_URL`, `SUPERHET_NATS_USER`/`SUPERHET_NATS_PASSWORD`, `SUPERHET_LISTEN`, `SUPERHET_ALLOWED_ORIGINS` (api WebSocket origin allowlist; default same-origin)
+- Config via env: `SUPERHET_DATABASE_URL`, `SUPERHET_NATS_URL`, `SUPERHET_NATS_USER`/`SUPERHET_NATS_PASSWORD`, `SUPERHET_LISTEN`, `SUPERHET_ALLOWED_ORIGINS` (api WebSocket origin allowlist; default same-origin), `SUPERHET_SETUP_TOKEN` (optional fixed first-run token), `SUPERHET_COOKIE_SECURE` (`auto|true|false`), `SUPERHET_TRUST_PROXY` (honour `X-Forwarded-*`)
 - `crates/superhet-device` – device abstraction (RTL-SDR first; Soapy/rtl_tcp later)
 - `crates/superhet-dsp` – FFT, DDC, demodulators, resampling
 - `crates/superhet-plugin-protocol` – versioned plugin contract (manifest + wire types)
