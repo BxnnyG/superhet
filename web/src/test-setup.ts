@@ -1,5 +1,8 @@
 import "@testing-library/jest-dom/vitest";
-import { vi } from "vitest";
+import { cleanup } from "@testing-library/react";
+import { afterEach, vi } from "vitest";
+
+afterEach(cleanup);
 
 // jsdom lacks these browser APIs; the spectrum view degrades gracefully without WebGL.
 class ResizeObserverStub {
