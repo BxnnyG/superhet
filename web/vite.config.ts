@@ -6,7 +6,8 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     proxy: {
-      "/healthz": "http://localhost:8073",
+      "/healthz": "http://127.0.0.1:8073",
+      "/api": { target: "http://127.0.0.1:8073", ws: true },
     },
   },
   test: {
