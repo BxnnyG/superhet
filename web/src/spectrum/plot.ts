@@ -1,6 +1,7 @@
 // 2D canvas spectrum line plot with dB grid and a frequency axis in MHz.
 
 import type { SpectrumFrame } from "./frame";
+import type { DisplayRange } from "./levels";
 
 const AXIS_HEIGHT = 18;
 const LEFT_PAD = 34;
@@ -25,7 +26,11 @@ export class SpectrumPlot {
   private dpr = 1;
   private destroyed = false;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  /** `range` is read on every draw; mutate it and call `redraw()` to change the y-axis. */
+  constructor(
+    private readonly canvas: HTMLCanvasElement,
+    private readonly range: DisplayRange,
+  ) {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("2D canvas is not available");
     this.ctx = ctx;
@@ -36,6 +41,11 @@ export class SpectrumPlot {
     this.dpr = dpr;
     this.canvas.width = Math.max(1, Math.floor(width));
     this.canvas.height = Math.max(1, Math.floor(height));
+    this.schedule();
+  }
+
+  /** Redraw the last frame with the current display range. */
+  redraw(): void {
     this.schedule();
   }
 
@@ -76,12 +86,14 @@ export class SpectrumPlot {
     ctx.lineWidth = Math.max(1, dpr * 0.5);
 
     // dB grid.
-    const dbRange = frame.maxDb - frame.minDb;
+    const { lowDb, highDb } = this.range;
+    const dbRange = highDb - lowDb;
+    if (!(dbRange > 0)) return;
     const dbStep = niceStep(dbRange, Math.max(2, plotH / (40 * dpr)));
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
-    for (let db = Math.ceil(frame.minDb / dbStep) * dbStep; db <= frame.maxDb; db += dbStep) {
-      const y = plotH - ((db - frame.minDb) / dbRange) * plotH;
+    for (let db = Math.ceil(lowDb / dbStep) * dbStep; db <= highDb; db += dbStep) {
+      const y = plotH - ((db - lowDb) / dbRange) * plotH;
       ctx.strokeStyle = "#26262c";
       ctx.beginPath();
       ctx.moveTo(left, y);
@@ -109,10 +121,12 @@ export class SpectrumPlot {
 
     // Trace.
     const n = frame.binCount;
+    const binDb = (frame.maxDb - frame.minDb) / 255;
     const path = new Path2D();
     for (let i = 0; i < n; i++) {
       const x = left + ((i + 0.5) / n) * plotW;
-      const y = plotH - ((frame.bins[i] ?? 0) / 255) * plotH;
+      const db = frame.minDb + (frame.bins[i] ?? 0) * binDb;
+      const y = plotH - Math.min(1, Math.max(0, (db - lowDb) / dbRange)) * plotH;
       if (i === 0) path.moveTo(x, y);
       else path.lineTo(x, y);
     }
