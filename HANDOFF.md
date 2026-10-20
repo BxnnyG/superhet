@@ -11,6 +11,8 @@ Phase 0 (foundation) done and pushed → next: P1 core receiver (docs/ROADMAP.md
 - Skeleton: crates superhet-{api,sdrd,pluginhost,worker} (bins, /healthz), superhet-{bus,db,device,dsp,plugin-protocol} (libs); web (React 19, Vite 8, Tailwind 4); compose with postgres:18.6-alpine + nats:2.15.1-alpine (JetStream, per-service users); gen-secrets.sh; CI (rust w/ Postgres+NATS, web, deny, gitleaks, docker); git hooks; check.sh green.
 
 ## Offen / Nächster Schritt
+- Branch feat/p1-spectrum committed: FileDevice (cu8/cf32) → SpectrumProcessor (rustfft) → SpectrumFrame v1 (32B LE header + u8 bins) on core NATS `sh.v1.dev.<dev>.spectrum`; sdrd background NATS connect (backoff 250ms..10s), drop-on-lag, /readyz (device + NATS). Live-tested vs real NATS: 25 fps, peaks in correct bins. Integration test gated on SUPERHET_TEST_NATS_URL.
+- Next: api WS gateway (per-client crop/decimate, ARCHITECTURE §3a) → WebGL waterfall. Later: sdrd ctl handlers (tune/rate), /metrics, api/worker/pluginhost onto connect_background.
 - P1 start order: file device backend + IQ bus + FFT in sdrd → spectrum via NATS → api WS gateway → WebGL waterfall; then librtlsdr backend, tuning model, demods, Opus audio, local auth.
 - Spike before P3: confirm no usable open-source TETRA DMO decoder; collect own TMO/DMO reference recordings (review for private data before committing, SECURITY.md).
 - Tooling: TypeScript pinned 6.0.3 (typescript-eslint), gitleaks installed locally, cargo-nextest not; gitleaks-action needs license if repo moves to an org.
