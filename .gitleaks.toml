@@ -1,0 +1,9 @@
+# gitleaks configuration: default rules plus a narrow allowlist.
+title = "Superhet gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholders only; real secrets live in the gitignored .env"
+paths = ['''^\.env\.example$''']

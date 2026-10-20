@@ -1,0 +1,11 @@
+.git
+.github
+.githooks
+.claude
+target
+**/node_modules
+web/dist
+data
+.env
+docs
+*.sigmf-data

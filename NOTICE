@@ -1,0 +1,28 @@
+Superhet – self-hosted web SDR
+Copyright (C) 2026 Benjamin Niklas Singh (BxnnyG)
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License version 3 as
+published by the Free Software Foundation (AGPL-3.0-only). See LICENSE.
+
+Additional terms pursuant to section 7(b) of the AGPL-3.0:
+
+  Any conveyed copy or modified version of this program, and any user
+  interface presented to users interacting with it remotely over a network,
+  must preserve the following author attribution in a reasonable and
+  visible place (e.g. an "About" dialog, footer or documentation):
+
+      "Based on Superhet by Benjamin Niklas Singh (BxnnyG)"
+
+  This NOTICE file must be retained in all source distributions.
+
+Third-party components:
+
+  Decoders, codecs and other external tools used by Superhet plugins run as
+  separate processes and keep their own licenses. They are not part of this
+  program. See docs/licenses.md for the license matrix.
+
+  Superhet does NOT ship the ETSI TETRA speech codec, mbelib or any
+  AMBE/IMBE implementation. Codec plugins fetch such code from its original
+  source and build it locally on the user's machine, after the user has
+  acknowledged the applicable license and patent terms.

@@ -1,0 +1,134 @@
+# Superhet stack. Only superhet-api publishes a port; everything else stays on the
+# internal "backend" network. Create .env first: scripts/gen-secrets.sh
+
+x-superhet: &superhet
+  build:
+    context: .
+    dockerfile: deploy/docker/Dockerfile
+  image: superhet:dev
+  restart: unless-stopped
+  networks: [backend]
+
+# Plain HTTP GET /healthz via bash (the runtime image has no curl).
+x-healthcheck: &healthcheck-defaults
+  interval: 30s
+  timeout: 5s
+  retries: 3
+  start_period: 10s
+
+services:
+  postgres:
+    image: postgres:18.6-alpine
+    restart: unless-stopped
+    networks: [backend]
+    environment:
+      POSTGRES_USER: superhet
+      POSTGRES_DB: superhet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run scripts/gen-secrets.sh}
+    volumes:
+      # PostgreSQL 18+ keeps the versioned data dir below /var/lib/postgresql.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superhet -d superhet"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  nats:
+    image: nats:2.15.1-alpine
+    restart: unless-stopped
+    networks: [backend]
+    command: ["-js", "-c", "/etc/nats/nats.conf"]
+    environment:
+      NATS_API_PASSWORD: ${NATS_API_PASSWORD:?run scripts/gen-secrets.sh}
+      NATS_SDRD_PASSWORD: ${NATS_SDRD_PASSWORD:?run scripts/gen-secrets.sh}
+      NATS_PLUGINHOST_PASSWORD: ${NATS_PLUGINHOST_PASSWORD:?run scripts/gen-secrets.sh}
+      NATS_WORKER_PASSWORD: ${NATS_WORKER_PASSWORD:?run scripts/gen-secrets.sh}
+    volumes:
+      - ./deploy/nats/nats.conf:/etc/nats/nats.conf:ro
+      - nats-data:/data
+    # The monitoring port (8222) is only reachable inside the backend network.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8222/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  superhet-api:
+    <<: *superhet
+    command: ["superhet-api"]
+    networks: [backend, edge]
+    ports:
+      - "8073:8073"
+    environment:
+      SUPERHET_DATABASE_URL: postgres://superhet:${POSTGRES_PASSWORD}@postgres:5432/superhet
+      SUPERHET_NATS_URL: nats://nats:4222
+      SUPERHET_NATS_USER: api
+      SUPERHET_NATS_PASSWORD: ${NATS_API_PASSWORD}
+    depends_on:
+      postgres: { condition: service_healthy }
+      nats: { condition: service_healthy }
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8073 && printf 'GET /readyz HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
+
+  superhet-sdrd:
+    <<: *superhet
+    command: ["superhet-sdrd"]
+    # No published port. One sdrd instance per SDR; add more services for more devices.
+    environment:
+      SUPERHET_NATS_URL: nats://nats:4222
+      SUPERHET_NATS_USER: sdrd
+      SUPERHET_NATS_PASSWORD: ${NATS_SDRD_PASSWORD}
+    depends_on:
+      nats: { condition: service_healthy }
+    # RTL-SDR access: pass the USB bus through to the container. Requires the host
+    # setup from deploy/udev/ (device permissions) and deploy/modprobe/ (kernel DVB
+    # driver blacklist), otherwise the container cannot claim the dongle.
+    # Not needed yet; uncomment once device support lands.
+    # devices:
+    #   - /dev/bus/usb:/dev/bus/usb
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8074 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
+
+  superhet-pluginhost:
+    <<: *superhet
+    command: ["superhet-pluginhost"]
+    environment:
+      SUPERHET_NATS_URL: nats://nats:4222
+      SUPERHET_NATS_USER: pluginhost
+      SUPERHET_NATS_PASSWORD: ${NATS_PLUGINHOST_PASSWORD}
+    depends_on:
+      nats: { condition: service_healthy }
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8075 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
+
+  superhet-worker:
+    <<: *superhet
+    command: ["superhet-worker"]
+    environment:
+      SUPERHET_DATABASE_URL: postgres://superhet:${POSTGRES_PASSWORD}@postgres:5432/superhet
+      SUPERHET_NATS_URL: nats://nats:4222
+      SUPERHET_NATS_USER: worker
+      SUPERHET_NATS_PASSWORD: ${NATS_WORKER_PASSWORD}
+    depends_on:
+      postgres: { condition: service_healthy }
+      nats: { condition: service_healthy }
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8076 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
+
+networks:
+  # No external connectivity: databases and the bus are unreachable from outside.
+  backend:
+    internal: true
+  # Only used by superhet-api so its published port works.
+  edge: {}
+
+volumes:
+  postgres-data:
+  nats-data:
