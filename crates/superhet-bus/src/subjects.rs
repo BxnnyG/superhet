@@ -14,7 +14,7 @@ pub const ALL_STATE: &str = "sh.v1.dev.*.state";
 /// Wildcard matching the spectrum subject of every device.
 pub const ALL_SPECTRUM: &str = "sh.v1.dev.*.spectrum";
 /// Wildcard matching every audio stream of every device.
-pub const ALL_AUDIO: &str = "sh.v1.dev.*.audio.*";
+pub const ALL_AUDIO: &str = "sh.v1.dev.*.audio.>";
 /// Wildcard matching every plugin event.
 pub const ALL_EVENTS: &str = "sh.v1.events.>";
 /// Wildcard matching every lookup request.
@@ -60,6 +60,17 @@ pub fn ctl(device: &str, cmd: &str) -> Result<String, InvalidToken> {
 pub fn ctl_all(device: &str) -> Result<String, InvalidToken> {
     check(device)?;
     Ok(format!("{PREFIX}.dev.{device}.ctl.>"))
+}
+
+/// Device VFO control subject: `sh.v1.dev.<dev>.ctl.vfo.<action>` with `action` one of
+/// `create`, `update`, `delete`.
+///
+/// # Errors
+/// Fails if a token is invalid.
+pub fn ctl_vfo(device: &str, action: &str) -> Result<String, InvalidToken> {
+    check(device)?;
+    check(action)?;
+    Ok(format!("{PREFIX}.dev.{device}.ctl.vfo.{action}"))
 }
 
 /// Name of the JetStream KV bucket holding the latest state of every device.
@@ -157,6 +168,11 @@ mod tests {
             audio("rtl0", "main").as_deref(),
             Ok("sh.v1.dev.rtl0.audio.main")
         );
+        assert_eq!(
+            ctl_vfo("rtl0", "create").as_deref(),
+            Ok("sh.v1.dev.rtl0.ctl.vfo.create")
+        );
+        assert!(ctl_vfo("rtl0", "a.b").is_err());
         assert_eq!(
             event("adsb", "position").as_deref(),
             Ok("sh.v1.events.adsb.position")

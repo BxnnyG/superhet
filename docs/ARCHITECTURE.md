@@ -81,10 +81,10 @@ Concurrency inside sdrd: tokio for I/O; DSP runs on dedicated OS threads (device
 
 | Subject | Kind | Producer → consumer |
 |---|---|---|
-| `sh.v1.dev.<dev>.ctl.<cmd>` | request/reply | api/pluginhost → sdrd (tune, state implemented; vfo.*, profile.load, claim, lock planned; see `docs/api-devices.md`) |
-| `sh.v1.dev.<dev>.state` | pub/sub + KV bucket `STATE` (key `dev.<dev>`) | sdrd → all (tuning implemented; VFOs, locks, decoder bindings planned) |
+| `sh.v1.dev.<dev>.ctl.<cmd>` | request/reply | api/pluginhost → sdrd (tune, state, vfo.create/update/delete implemented; profile.load, claim, lock planned; see `docs/api-devices.md`) |
+| `sh.v1.dev.<dev>.state` | pub/sub + KV bucket `STATE` (key `dev.<dev>`) | sdrd → all (tuning and VFOs implemented; locks, decoder bindings planned) |
 | `sh.v1.dev.<dev>.spectrum` | pub/sub | sdrd → api (quantised FFT frames) |
-| `sh.v1.dev.<dev>.audio.<stream>` | pub/sub | sdrd / pluginhost → api, recorder (Opus packets) |
+| `sh.v1.dev.<dev>.audio.<stream>` | pub/sub (core NATS, lossy) | sdrd / pluginhost → api, recorder (binary `AudioFrame` v1 with one Opus packet each, see `docs/protocol-audio.md`; `<stream>` is the VFO id for device VFOs) |
 | `sh.v1.events.<plugin>.<type>` | JetStream `EVENTS` | pluginhost → worker (persist), api (live) |
 | `sh.v1.lookup.<key>` | request/reply | api/worker → worker lookup service |
 | `sh.v1.plugin.<id>.ctl` | request/reply | api → pluginhost |

@@ -43,6 +43,9 @@ jobs:
           done
           docker logs nats
           exit 1
+      # superhet-sdrd links the system libopus dynamically (superhet-bus feature opus).
+      - name: Install libopus
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libopus-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy

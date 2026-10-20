@@ -10,7 +10,10 @@
 //! - `sh.v1.lookup.<key>` – lookup requests
 //! - `sh.v1.plugin.<id>.ctl` – plugin control
 
+pub mod audio;
 pub mod config;
+#[cfg(feature = "opus")]
+pub mod opus;
 pub mod spectrum;
 pub mod subjects;
 

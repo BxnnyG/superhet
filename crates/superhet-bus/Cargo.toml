@@ -11,5 +11,9 @@ publish.workspace = true
 async-nats.workspace = true
 thiserror.workspace = true
 
+[features]
+# Safe wrapper around the system libopus (needs libopus-dev at build time).
+opus = []
+
 [lints]
 workspace = true

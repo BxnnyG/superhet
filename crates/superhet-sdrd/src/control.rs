@@ -8,6 +8,8 @@ use std::time::Duration;
 use async_nats::Subject;
 use serde::{Deserialize, Serialize};
 use superhet_device::{DeviceState, Gain, TuneRequest};
+
+use crate::vfo::{Tuning, Vfo, VfoWire};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
@@ -19,7 +21,7 @@ pub const DEBOUNCE: Duration = Duration::from_millis(30);
 pub const MAX_BATCH_WAIT: Duration = Duration::from_millis(150);
 
 /// Upper bound for centre frequencies (sanity check; the device applies its own range).
-const MAX_CENTER_HZ: u64 = 1_000_000_000_000;
+pub(crate) const MAX_CENTER_HZ: u64 = 1_000_000_000_000;
 /// Accepted manual gain range in dB (the device snaps to what the tuner supports).
 const GAIN_RANGE_DB: std::ops::RangeInclusive<f64> = -20.0..=100.0;
 /// Accepted crystal correction in ppm.
@@ -217,11 +219,17 @@ struct StateWire<'a> {
     bias_tee: bool,
     tuning_epoch: u64,
     gains_db: &'a [f32],
+    vfos: Vec<VfoWire>,
 }
 
-/// Encode a device state as the JSON published on the state subject and stored in KV.
+/// Encode a device state, with its VFOs evaluated against the current tuning, as the JSON
+/// published on the state subject and stored in KV.
 #[must_use]
-pub fn state_json(device: &str, state: &DeviceState) -> String {
+pub fn state_json(device: &str, state: &DeviceState, vfos: &[Vfo]) -> String {
+    let tuning = Tuning {
+        center_hz: state.center_hz,
+        sample_rate: state.sample_rate,
+    };
     let wire = StateWire {
         v: VERSION,
         device,
@@ -243,6 +251,7 @@ pub fn state_json(device: &str, state: &DeviceState) -> String {
         bias_tee: state.bias_tee,
         tuning_epoch: state.tuning_epoch,
         gains_db: &state.gains_db,
+        vfos: vfos.iter().map(|v| v.wire(tuning)).collect(),
     };
     // Plain data with string keys: serialisation cannot fail.
     serde_json::to_string(&wire).unwrap_or_else(|_| "{}".to_owned())
@@ -252,6 +261,13 @@ pub fn state_json(device: &str, state: &DeviceState) -> String {
 #[must_use]
 pub fn ok_reply(state_json: &str) -> Vec<u8> {
     format!(r#"{{"v":{VERSION},"ok":true,"state":{state_json}}}"#).into_bytes()
+}
+
+/// Success reply for `vfo.create` / `vfo.update`: the affected VFO plus the new state.
+#[must_use]
+pub fn vfo_reply(vfo: &VfoWire, state_json: &str) -> Vec<u8> {
+    let vfo = serde_json::to_string(vfo).unwrap_or_else(|_| "{}".to_owned());
+    format!(r#"{{"v":{VERSION},"ok":true,"vfo":{vfo},"state":{state_json}}}"#).into_bytes()
 }
 
 /// Failure reply.
@@ -409,7 +425,7 @@ mod tests {
             tuning_epoch: 3,
             gains_db: vec![0.0, 0.9, 28.0],
         };
-        let json = state_json("rtl0", &state);
+        let json = state_json("rtl0", &state, &[]);
         let value: serde_json::Value = serde_json::from_str(&json).expect("json");
         assert_eq!(value["v"], 1);
         assert_eq!(value["device"], "rtl0");
@@ -418,6 +434,7 @@ mod tests {
         assert_eq!(value["gain"]["db"], 28.0);
         assert_eq!(value["tuning_epoch"], 3);
         assert_eq!(value["gains_db"].as_array().map(Vec::len), Some(3));
+        assert_eq!(value["vfos"].as_array().map(Vec::len), Some(0));
 
         let reply: serde_json::Value = serde_json::from_slice(&ok_reply(&json)).expect("json");
         assert_eq!(reply["ok"], true);
@@ -429,7 +446,8 @@ mod tests {
             gain: None,
             ..state
         };
-        let value: serde_json::Value = serde_json::from_str(&state_json("f", &file)).expect("json");
+        let value: serde_json::Value =
+            serde_json::from_str(&state_json("f", &file, &[])).expect("json");
         assert!(value.get("tuner").is_none());
         assert!(value["gain"].is_null());
 

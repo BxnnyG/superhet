@@ -1,6 +1,9 @@
 //! NATS side of device control: serves `sh.v1.dev.<dev>.ctl.*` requests and keeps the device
 //! state published (core subject `state(dev)` plus KV bucket `STATE`, key `dev.<dev>`).
 //!
+//! VFO requests (`ctl.vfo.create|update|delete`) change the shared `VfoShared` registry, which the
+//! audio engine follows, and refresh the state document (it carries the VFOs and their status).
+//!
 //! Tune requests are validated on arrival, folded into batches (see `control::collect_batch`)
 //! and applied on a blocking thread, so slow USB control transfers never stall the bus loop.
 //! State publishing is decoupled through a `watch` channel: the control path only stores the
@@ -17,10 +20,13 @@ use superhet_device::DeviceControl;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
+use superhet_device::DeviceState;
+
 use crate::control::{
     self, CtlError, DEBOUNCE, MAX_BATCH_WAIT, TuneJob, collect_batch, error_reply, ok_reply,
-    state_json,
+    state_json, vfo_reply,
 };
+use crate::vfo::{self, Tuning, VfoShared};
 
 /// Tune requests queued between the bus loop and the executor.
 const QUEUE_JOBS: usize = 64;
@@ -49,16 +55,20 @@ pub async fn start(
     client: Client,
     device: String,
     control: Arc<dyn DeviceControl>,
+    vfos: Arc<VfoShared>,
 ) -> Result<Service, Box<dyn std::error::Error>> {
     let ctl_subject = subjects::ctl_all(&device)?;
     let state_subject = subjects::state(&device)?;
     let key = subjects::state_key(&device)?;
 
-    let (state_tx, state_rx) = watch::channel(Some(Arc::<str>::from(state_json(
-        &device,
-        &control.state(),
-    ))));
-    let state_tx = Arc::new(state_tx);
+    let (state_tx, state_rx) = watch::channel(None);
+    let ctx = Arc::new(Context {
+        device,
+        control,
+        vfos,
+        state: state_tx,
+    });
+    ctx.refresh_state(&ctx.control.state());
 
     let mut subscription = client.subscribe(ctl_subject).await?;
     let (job_tx, job_rx) = mpsc::channel(QUEUE_JOBS);
@@ -69,18 +79,12 @@ pub async fn start(
         key.clone(),
         state_rx,
     ));
-    let executor = tokio::spawn(execute_jobs(
-        job_rx,
-        client.clone(),
-        device.clone(),
-        Arc::clone(&control),
-        Arc::clone(&state_tx),
-    ));
+    let executor = tokio::spawn(execute_jobs(job_rx, client.clone(), Arc::clone(&ctx)));
     let server = {
         let client = client.clone();
         tokio::spawn(async move {
             while let Some(message) = subscription.next().await {
-                handle_message(&client, &device, &job_tx, &state_tx, message).await;
+                handle_message(&client, &ctx, &job_tx, message).await;
             }
         })
     };
@@ -113,6 +117,32 @@ impl Service {
     }
 }
 
+/// Everything the handlers share.
+struct Context {
+    device: String,
+    control: Arc<dyn DeviceControl>,
+    vfos: Arc<VfoShared>,
+    state: StateTx,
+}
+
+impl Context {
+    /// Encode the state document for `device_state` plus the current VFOs and publish it if it
+    /// changed. Returns the JSON for replies.
+    fn refresh_state(&self, device_state: &DeviceState) -> Arc<str> {
+        let vfos = self.vfos.with(|r| r.list().to_vec());
+        let json: Arc<str> = state_json(&self.device, device_state, &vfos).into();
+        self.state.send_if_modified(|current| {
+            if current.as_deref() == Some(&*json) {
+                false
+            } else {
+                *current = Some(Arc::clone(&json));
+                true
+            }
+        });
+        json
+    }
+}
+
 async fn respond(client: &Client, message: &Message, payload: Vec<u8>) {
     if let Some(reply) = &message.reply
         && let Err(e) = client.publish(reply.clone(), payload.into()).await
@@ -123,12 +153,15 @@ async fn respond(client: &Client, message: &Message, payload: Vec<u8>) {
 
 async fn handle_message(
     client: &Client,
-    device: &str,
+    ctx: &Arc<Context>,
     jobs: &mpsc::Sender<TuneJob>,
-    state: &StateTx,
     message: Message,
 ) {
-    let command = message.subject.as_str().rsplit('.').next().unwrap_or("");
+    let command = message
+        .subject
+        .as_str()
+        .split_once(".ctl.")
+        .map_or("", |(_, command)| command);
     match command {
         "tune" => match control::parse_tune(&message.payload) {
             Ok(request) => {
@@ -147,7 +180,7 @@ async fn handle_message(
             Err(err) => respond(client, &message, error_reply(&err)).await,
         },
         "state" => {
-            let current = state.borrow().clone();
+            let current = ctx.state.borrow().clone();
             let reply = match current {
                 Some(json) => ok_reply(&json),
                 None => error_reply(&CtlError {
@@ -157,25 +190,86 @@ async fn handle_message(
             };
             respond(client, &message, reply).await;
         }
+        "vfo.create" | "vfo.update" | "vfo.delete" => {
+            let reply = match tokio::task::spawn_blocking({
+                let ctx = Arc::clone(ctx);
+                let command = command.to_owned();
+                let payload = message.payload.clone();
+                move || handle_vfo(&ctx, &command, &payload)
+            })
+            .await
+            {
+                Ok(reply) => reply,
+                Err(e) => {
+                    tracing::error!(error = %e, "vfo task panicked");
+                    error_reply(&CtlError {
+                        code: control::ErrorCode::Device,
+                        message: "internal error".into(),
+                    })
+                }
+            };
+            respond(client, &message, reply).await;
+        }
         other => {
-            tracing::debug!(device, command = other, "unknown control command");
+            tracing::debug!(device = %ctx.device, command = other, "unknown control command");
             let err = CtlError::invalid(format!("unknown command {other:?}"));
             respond(client, &message, error_reply(&err)).await;
         }
     }
 }
 
-async fn execute_jobs(
-    mut jobs: mpsc::Receiver<TuneJob>,
-    client: Client,
-    device: String,
-    control: Arc<dyn DeviceControl>,
-    state: Arc<StateTx>,
-) {
+/// Execute a VFO command and build the reply. Runs on a blocking thread because validating a
+/// VFO designs its filter chain.
+fn handle_vfo(ctx: &Context, command: &str, payload: &[u8]) -> Vec<u8> {
+    match run_vfo(ctx, command, payload) {
+        Ok(reply) => reply,
+        Err(err) => {
+            tracing::debug!(device = %ctx.device, command, error = %err.message, "vfo request rejected");
+            error_reply(&err)
+        }
+    }
+}
+
+fn run_vfo(ctx: &Context, command: &str, payload: &[u8]) -> Result<Vec<u8>, CtlError> {
+    let rate = ctx.control.state().sample_rate;
+    let affected = match command {
+        "vfo.create" => {
+            let request = vfo::parse_create(payload)?;
+            let vfo = ctx.vfos.with(|r| r.create(request, rate))?;
+            tracing::info!(id = vfo.id, freq_hz = vfo.freq_hz, mode = ?vfo.mode, "vfo created");
+            Some(vfo)
+        }
+        "vfo.update" => {
+            let patch = vfo::parse_update(payload)?;
+            let vfo = ctx.vfos.with(|r| r.update(&patch, rate))?;
+            tracing::info!(id = vfo.id, freq_hz = vfo.freq_hz, mode = ?vfo.mode, "vfo updated");
+            Some(vfo)
+        }
+        _ => {
+            let id = vfo::parse_delete(payload)?;
+            ctx.vfos.with(|r| r.delete(id))?;
+            tracing::info!(id, "vfo deleted");
+            None
+        }
+    };
+    // Read the tuning again so a concurrent retune is not overwritten with a stale state.
+    let device_state = ctx.control.state();
+    let tuning = Tuning {
+        center_hz: device_state.center_hz,
+        sample_rate: device_state.sample_rate,
+    };
+    let state = ctx.refresh_state(&device_state);
+    Ok(match affected {
+        Some(vfo) => vfo_reply(&vfo.wire(tuning), &state),
+        None => ok_reply(&state),
+    })
+}
+
+async fn execute_jobs(mut jobs: mpsc::Receiver<TuneJob>, client: Client, ctx: Arc<Context>) {
     while let Some(first) = jobs.recv().await {
         let batch = collect_batch(first, &mut jobs, DEBOUNCE, MAX_BATCH_WAIT).await;
         let request = batch.request;
-        let device_control = Arc::clone(&control);
+        let device_control = Arc::clone(&ctx.control);
         let outcome = tokio::task::spawn_blocking(move || {
             let result = device_control.apply(&request);
             // After a failure the device may be half-way applied; report what it really runs.
@@ -193,15 +287,8 @@ async fn execute_jobs(
             }
         };
 
-        let json: Arc<str> = state_json(&device, &new_state).into();
-        state.send_if_modified(|current| {
-            if current.as_deref() == Some(&*json) {
-                false
-            } else {
-                *current = Some(Arc::clone(&json));
-                true
-            }
-        });
+        // The state carries the VFOs, whose status follows the new tuning.
+        let json = ctx.refresh_state(&new_state);
         let reply = match result {
             Ok(_) => {
                 tracing::info!(

@@ -2,14 +2,17 @@
 //!
 //! With `SUPERHET_DEVICE` set (e.g. `file:/data/capture.cu8?format=cu8&rate=2048000&freq=100000000`)
 //! and NATS configured, spectrum frames are published on `sh.v1.dev.<id>.spectrum`, control
-//! requests are served on `sh.v1.dev.<id>.ctl.*` and the device state is kept in the KV bucket
+//! requests are served on `sh.v1.dev.<id>.ctl.*` (including VFOs, whose Opus audio goes to
+//! `sh.v1.dev.<id>.audio.<vfo>`) and the device state is kept in the KV bucket
 //! `STATE` (see `docs/api-devices.md`).
 
+mod audio;
 mod config;
 mod control;
 mod pipeline;
 mod publish;
 mod service;
+mod vfo;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -87,8 +90,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let config = config::Config::from_env()?;
-    // Keep the pipeline alive for the lifetime of the process.
-    let (_pipeline, control_service, deps) = start_pipeline(&config).await?;
+    // Keep the running parts alive for the lifetime of the process.
+    let (_running, control_service, deps) = start_pipeline(&config).await?;
 
     let listen = std::env::var("SUPERHET_LISTEN").unwrap_or_else(|_| DEFAULT_LISTEN.to_owned());
     let addr: SocketAddr = listen.parse()?;
@@ -103,12 +106,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Open the device and start the pipeline. NATS connects in the background, so a missing or
+/// The device pipeline and the VFO audio thread; dropped in field order (device first).
+struct Running {
+    _pipeline: pipeline::Pipeline,
+    _audio: audio::AudioEngine,
+}
+
+/// Open the device and start the pipelines. NATS connects in the background, so a missing or
 /// restarting server never prevents start-up; frames are dropped until it is reachable.
 async fn start_pipeline(
     config: &config::Config,
-) -> Result<(Option<pipeline::Pipeline>, Option<service::Service>, Deps), Box<dyn std::error::Error>>
-{
+) -> Result<(Option<Running>, Option<service::Service>, Deps), Box<dyn std::error::Error>> {
     let Some(spec) = &config.device_spec else {
         tracing::warn!("SUPERHET_DEVICE not set; running health-only");
         return Ok((None, None, Deps::default()));
@@ -125,11 +133,19 @@ async fn start_pipeline(
     let subject = superhet_bus::subjects::spectrum(&config.device_id)?;
     let device = superhet_device::open_from_spec(spec)?;
     tracing::info!(device = device.name(), %subject, "starting spectrum pipeline");
+    let vfos = Arc::new(vfo::VfoShared::default());
+    let audio_sink = publish::spawn_audio_publisher(client.clone(), &config.device_id)?;
+    let audio = audio::AudioEngine::start(Arc::clone(&vfos), audio_sink)?;
     let sink = publish::spawn_spectrum_publisher(client.clone(), subject);
-    let pipeline = pipeline::Pipeline::start(device, &config.spectrum, sink)?;
+    let pipeline = pipeline::Pipeline::start(device, &config.spectrum, sink, Some(audio.tap()))?;
     deps.pipeline_running = Some(pipeline.running_flag());
-    let service = service::start(client, config.device_id.clone(), pipeline.control()).await?;
-    Ok((Some(pipeline), Some(service), deps))
+    let service =
+        service::start(client, config.device_id.clone(), pipeline.control(), vfos).await?;
+    let running = Running {
+        _pipeline: pipeline,
+        _audio: audio,
+    };
+    Ok((Some(running), Some(service), deps))
 }
 
 async fn shutdown_signal() {
