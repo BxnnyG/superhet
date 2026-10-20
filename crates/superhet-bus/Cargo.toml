@@ -1,0 +1,15 @@
+[package]
+name = "superhet-bus"
+description = "NATS bus layer: versioned subjects and connection helper."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-nats.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

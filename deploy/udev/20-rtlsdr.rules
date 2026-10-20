@@ -1,0 +1,5 @@
+# RTL-SDR (Realtek RTL2832U) USB dongles: allow access for the plugdev group
+# and the logged-in user. Install to /etc/udev/rules.d/ and run:
+#   udevadm control --reload-rules && udevadm trigger
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2832", MODE="0660", GROUP="plugdev", TAG+="uaccess"

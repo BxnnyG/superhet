@@ -1,0 +1,28 @@
+[package]
+name = "superhet-api"
+description = "Superhet API service: HTTP, WebSocket and auth edge."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "superhet-api"
+path = "src/main.rs"
+
+[dependencies]
+async-nats.workspace = true
+axum.workspace = true
+superhet-bus.workspace = true
+superhet-db.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+http-body-util.workspace = true
+
+[lints]
+workspace = true

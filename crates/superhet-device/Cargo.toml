@@ -1,0 +1,11 @@
+[package]
+name = "superhet-device"
+description = "Device abstraction layer (RTL-SDR first; Soapy and rtl_tcp later)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

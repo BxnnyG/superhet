@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Fast pre-commit checks: Rust formatting and (if web/ changed) frontend lint.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if git diff --cached --name-only | grep -qE '\.rs$|Cargo\.(toml|lock)$'; then
+    cargo fmt --all --check || { echo "pre-commit: run 'cargo fmt --all'" >&2; exit 1; }
+fi
+
+if git diff --cached --name-only | grep -q '^web/'; then
+    pnpm -C web lint --silent >/dev/null || { echo "pre-commit: web lint failed (run 'pnpm -C web lint')" >&2; exit 1; }
+fi
+
+if command -v gitleaks >/dev/null; then
+    # `gitleaks git` replaced the deprecated `protect` in v8.19+.
+    if gitleaks git --help >/dev/null 2>&1; then
+        gitleaks_scan=(git --staged)
+    else
+        gitleaks_scan=(protect --staged)
+    fi
+    gitleaks "${gitleaks_scan[@]}" --redact --no-banner --config .gitleaks.toml >/dev/null \
+        || { echo "pre-commit: gitleaks found potential secrets (run 'gitleaks ${gitleaks_scan[*]} -v')" >&2; exit 1; }
+else
+    echo "pre-commit: gitleaks not installed; skipping secret scan (CI still runs it)" >&2
+fi

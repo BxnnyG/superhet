@@ -1,0 +1,25 @@
+[package]
+name = "superhet-pluginhost"
+description = "Superhet plugin host: supervises out-of-process plugins."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "superhet-pluginhost"
+path = "src/main.rs"
+
+[dependencies]
+axum.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+http-body-util.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,71 @@
+# Roadmap
+
+Each phase ends with: acceptance criteria checked, `HANDOFF.md` updated, a tagged pre-release (`v0.N.0`) with changelog. Criteria must be verifiable (automated test, measurement or a short manual check script in `docs/`).
+
+## P0 – Foundation (current)
+
+- [x] Name check, repository, license (AGPL-3.0-only + NOTICE), README with legal notice
+- [x] CLAUDE.md, agents, SCOPE, ARCHITECTURE, ADRs 0001–0006, ROADMAP
+- [x] Build skeleton (Cargo workspace, web app, Docker, CI, git hooks)
+
+## P1 – Core receiver
+
+Scope: services sdrd / api / worker with NATS JetStream and PostgreSQL in compose; device layer (RTL-SDR + file backend), IQ bus, spectrum/waterfall, free tuning (free/sticky/center) + profiles + lock, analog demodulation incl. SDR# MVP items (SCOPE §1b), Opus audio in the browser, local admin login, settings persistence, host setup docs.
+
+Acceptance criteria:
+1. `docker compose up` on a fresh Arch host (after following `docs/setup-host.md`) shows the login page; first-run creates the admin; login/logout works; unauthenticated WebSocket upgrade is rejected (test).
+2. With the RTL-SDR attached, the waterfall runs at ≥ 25 fps in Chromium and Firefox with 2.4 MS/s for 1 h without sample drops (metric `superhet_device_dropped_blocks_total` = 0) and without browser memory growth > 50 MB.
+3. Free tuning: dragging a VFO beyond the window edge retunes the center; a bound VFO outside the window is shown as paused; tuning lock rejects center changes with a visible reason (integration test with file backend + manual check).
+4. NFM, AM, WFM (mono + stereo), USB, LSB, CW demodulate correctly: unit tests with synthetic signals (frequency response, SNR ≥ 30 dB on clean test tones) and a manual check on a local FM broadcast station and a 2 m/70 cm repeater.
+5. ≥ 4 simultaneous VFOs with independent audio streams; glass-to-ear audio latency ≤ 500 ms on LAN (measured with a test tone + timestamps).
+6. Profiles: save current state as profile, reload restores center, rate, gain, PPM, VFOs exactly (round-trip test).
+7. CPU: core + waterfall + 4 NFM VFOs ≤ 25 % of one core on the dev PC (documented measurement in `docs/perf.md`).
+8. CI green (fmt, clippy -D warnings, tests incl. PostgreSQL/NATS integration, cargo-deny, gitleaks, web lint/typecheck/build), Docker image builds in CI.
+9. Restarting `superhet-api` or `superhet-worker` does not interrupt reception or audio recording in sdrd (dropped blocks stay 0, test with compose stack).
+
+## P2 – Plugin system and first plugins
+
+Scope: plugin contract v1 (manifest, simple + framed transport), plugin host + supervisor, install from local path, plugin management UI, decoder states in the UI, exclusive claims. Plugins: POCSAG/FLEX (multimon-ng), APRS (direwolf), rtl_433, ADS-B (readsb, exclusive), RDS (redsea).
+
+Acceptance criteria:
+1. Contract documented in `docs/plugin-contract.md` with JSON Schemas; a reference plugin in `plugins/example-echo` passes the contract test suite (`cargo test -p superhet-plugin-protocol`).
+2. Each of the five plugins decodes a committed reference recording (SigMF) in CI to the expected events (golden-file test).
+3. Live: APRS packets on 144.800 MHz and rtl_433 sensors appear in the UI within 2 s of reception.
+4. ADS-B profile claims the device, pauses all other decoders (visible state), and restores the previous state on release (integration test).
+5. Killing a plugin process restarts it with backoff; after 5 crashes in 5 min the instance enters `Error` (test).
+6. Invalid event lines are rejected and counted (test).
+
+## P3 – Digital voice, TETRA, codecs, lookups
+
+Scope: spike dsd-fme vs. digiham (ADR addendum); DMR, D-Star, YSF, NXDN, P25, M17 decoder plugins; codec router; Codec2 plugin; separate repos `superhet-codec-mbe` and `superhet-codec-tetra` (fetch & build locally with acknowledgement); native TETRA stack (PHY → lower MAC → TMO signalling → DMO → voice frames; osmo-tetra/tetra-kit as CI oracles); AIS, ACARS, VDL2; container runtime for plugins; install from Git URL; lookups (RadioID dump, HamQTH, QRZ optional, adsbdb/hexdb, OpenSky DB, ITU MID).
+
+Acceptance criteria:
+1. DMR reference recording: correct source/destination IDs, talkgroup, slot, call start/end events in CI. With codec plugin installed locally: intelligible audio (manual check); without: identical events, UI shows "codec not installed".
+2. M17 voice plays with the bundled Codec2 plugin (reference recording).
+3. TETRA TMO reference recordings (own cell): MCC/MNC, LA, cell, neighbour cells, registrations, group calls, SDS/status and encryption state decoded; PDUs match osmo-tetra/tetra-kit output on the same recordings (CI). TETRA DMO reference recordings (own MTM hotspot, gateway and repeater mode): call setup and SDS decoded. Voice from own unencrypted TMO and DMO calls is intelligible with the ETSI codec plugin (manual check), live on own equipment within 1 s latency.
+4. Codec plugin install shows license/patent notice and only proceeds after confirmation; checksum mismatch aborts install (test).
+5. Lookups: cache hit rate observable, per-source switch disables all network calls of that source (test with mock server), configured rate limits are never exceeded (test).
+6. No restricted codec code in the main repo, images or release artifacts (CI check script scanning for known file names/hashes).
+
+## P4 – Recording, Instant Replay, event log, scanner, bookmarks
+
+Scope: audio recording per VFO/call, SigMF IQ recording, Instant Replay (audio always on, IQ optional RAM/disk), event log with FTS5 search, filters, timeline, export; bookmarks, frequency lists (CSV, SDR# Frequency Manager), bandplan overlay; scanner.
+
+Acceptance criteria:
+1. Instant Replay: shortcut saves the last N minutes (default 5) of all active VFO audio as clips within 2 s; IQ ring buffer shows its memory/disk requirement before enabling and produces a valid SigMF file (validated with `sigmf` reference tooling in CI).
+2. IQ recording at 2.4 MS/s for 10 min without dropped blocks on the dev PC (SSD).
+3. Event search over 1 M synthetic events returns filtered results in < 200 ms (benchmark test).
+4. SDR# frequency manager file round-trips (import → export → identical entries); CSV import/export round-trips.
+5. Scanner: list scan stops on squelch open, resumes after hold time, skips skipped channels, priority channel checked at the configured interval (integration test with file backend).
+
+## P5 – OIDC, UI plugins, install script, metrics, hardening, multi-device prep
+
+Scope: OIDC (generic, tested with Zitadel), UI plugin API + two UI plugins (ADS-B map, TETRA cell map), install script for Debian/Arch VM with systemd, Prometheus metrics, security hardening, device manager prepared for multiple devices, SoapySDR backend.
+
+Acceptance criteria:
+1. OIDC login against a Zitadel test instance (CI with a containerised Zitadel or mock OIDC provider); local admin fallback can be disabled.
+2. UI plugin API documented; both UI plugins load from their own packages without changes to the core frontend.
+3. Install script brings up a working instance on fresh Debian 13 and Arch VMs (scripted test in CI with containers/VM where possible, otherwise documented manual run).
+4. `/metrics` exposes CPU, dropped blocks, USB overruns, decoder states, plugin restarts; example Grafana dashboard in `deploy/`.
+5. Security review: CSP, session hardening, rate-limited login, dependency audit (`cargo deny`, `pnpm audit`) in CI, plugin install warnings.
+6. Two device managers can run in the same process in tests (file backend ×2); SoapySDR backend works with at least the RTL-SDR via SoapyRTLSDR.

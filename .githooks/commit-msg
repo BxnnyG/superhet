@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Enforce Conventional Commits on the first line; allow Merge/Revert messages.
+set -euo pipefail
+
+subject="$(head -n 1 "$1")"
+types='feat|fix|docs|chore|refactor|test|ci|build|perf|style'
+
+if [[ "$subject" =~ ^(Merge|Revert)\  ]]; then
+    exit 0
+fi
+
+if [[ ! "$subject" =~ ^($types)(\([a-z0-9._/-]+\))?!?:\ .+ ]]; then
+    echo "commit-msg: subject must follow Conventional Commits:" >&2
+    echo "  <type>(<scope>)?: <description>   types: ${types//|/, }" >&2
+    echo "  got: $subject" >&2
+    exit 1
+fi
