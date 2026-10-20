@@ -4,7 +4,8 @@ import type { SpectrumFrame } from "./frame";
 import type { DisplayRange } from "./levels";
 
 const AXIS_HEIGHT = 18;
-const LEFT_PAD = 34;
+/** Left margin (CSS px) reserved for the dB labels; the waterfall is offset by the same amount. */
+export const PLOT_LEFT_PAD = 34;
 
 /** Pick a "nice" tick step (1, 2, 5 × 10^n) giving roughly `target` ticks over `span`. */
 export function niceStep(span: number, target: number): number {
@@ -76,7 +77,7 @@ export class SpectrumPlot {
     const frame = this.frame;
     if (!frame || frame.binCount === 0) return;
 
-    const left = LEFT_PAD * dpr;
+    const left = PLOT_LEFT_PAD * dpr;
     const axisH = AXIS_HEIGHT * dpr;
     const plotW = w - left;
     const plotH = h - axisH;

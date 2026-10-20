@@ -1,8 +1,12 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { SpectrumFrame } from "./frame";
 import { LevelController, MIN_SPAN_DB, loadLevelSettings, saveLevelSettings } from "./levels";
-import { SpectrumPlot } from "./plot";
+import { SpectrumInteraction } from "./interaction";
+import { PLOT_LEFT_PAD, SpectrumPlot } from "./plot";
 import { SpectrumSocket, clampBins, type SocketStatus } from "./socket";
+import { TuningControls } from "./TuningControls";
+import { TuningController } from "./tuning";
+import { ViewController, deviceSpan } from "./view";
 import { Waterfall } from "./waterfall";
 
 interface Props {
@@ -45,10 +49,14 @@ export function SpectrumView({ device = "dev0" }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<HTMLCanvasElement>(null);
   const waterfallRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState<SocketStatus>("connecting");
   const [info, setInfo] = useState<Info | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const resetZoom = useRef<() => void>(() => undefined);
   const [controller] = useState(() => new LevelController(loadLevelSettings()));
+  const tuning = useMemo(() => new TuningController({ device }), [device]);
+  const tuningSnap = useSyncExternalStore(tuning.subscribe, tuning.getSnapshot);
   const [levels, setLevels] = useState<LevelsUi>(() => ({
     auto: controller.auto,
     lowDb: Math.round(controller.range.lowDb),
@@ -59,7 +67,8 @@ export function SpectrumView({ device = "dev0" }: Props) {
     const container = containerRef.current;
     const plotCanvas = plotRef.current;
     const wfCanvas = waterfallRef.current;
-    if (!container || !plotCanvas || !wfCanvas) return;
+    const overlay = overlayRef.current;
+    if (!container || !plotCanvas || !wfCanvas || !overlay) return;
 
     let plot: SpectrumPlot;
     let waterfall: Waterfall;
@@ -73,13 +82,15 @@ export function SpectrumView({ device = "dev0" }: Props) {
     }
 
     let last: Info | null = null;
+    let interaction: SpectrumInteraction | null = null;
     const socket = new SpectrumSocket({
       device,
-      getBins: () => clampBins(container.clientWidth * window.devicePixelRatio),
+      getBins: () => clampBins(wfCanvas.clientWidth * window.devicePixelRatio),
       onFrame: (frame: SpectrumFrame) => {
         controller.onFrame(frame, performance.now());
         plot.push(frame);
         waterfall.push(frame);
+        interaction?.setFrameSpan(frame.centerHz, frame.sampleRate);
         if (
           !last ||
           last.centerHz !== frame.centerHz ||
@@ -96,15 +107,39 @@ export function SpectrumView({ device = "dev0" }: Props) {
           setInfo(last);
         }
       },
-      onStatus: setStatus,
+      onStatus: (s) => {
+        setStatus(s);
+        if (s === "connected") void tuning.refresh();
+      },
       onError: (msg) => setError(msg),
     });
+
+    const view = new ViewController({
+      apply: (span) => socket.setView(span ? { startHz: span.startHz, endHz: span.endHz } : {}),
+    });
+    interaction = new SpectrumInteraction({
+      canvas: overlay,
+      leftPad: PLOT_LEFT_PAD,
+      view,
+      onTune: (hz) => tuning.request({ centerHz: hz }),
+    });
+    // Keep the zoom limits in step with the confirmed device tuning.
+    let lastState: unknown = null;
+    const offTuning = tuning.subscribe(() => {
+      const state = tuning.getSnapshot().state;
+      if (!state || state === lastState) return;
+      lastState = state;
+      view.setDevice(deviceSpan(state.centerHz, state.sampleRate));
+    });
+    resetZoom.current = () => view.reset();
+    tuning.start();
 
     const layout = () => {
       const dpr = window.devicePixelRatio;
       const w = container.clientWidth * dpr;
       plot.resize(w, plotCanvas.clientHeight * dpr, dpr);
-      waterfall.resize(w, wfCanvas.clientHeight * dpr);
+      waterfall.resize(wfCanvas.clientWidth * dpr, wfCanvas.clientHeight * dpr);
+      interaction?.resize(w, overlay.clientHeight * dpr, dpr);
       socket.notifyResize();
     };
     layout();
@@ -130,6 +165,11 @@ export function SpectrumView({ device = "dev0" }: Props) {
     }, AUTO_UI_REFRESH_MS);
 
     return () => {
+      resetZoom.current = () => undefined;
+      offTuning();
+      tuning.stop();
+      view.dispose();
+      interaction?.destroy();
       window.clearInterval(timer);
       offChange();
       observer.disconnect();
@@ -137,7 +177,7 @@ export function SpectrumView({ device = "dev0" }: Props) {
       plot.destroy();
       waterfall.destroy();
     };
-  }, [device, controller]);
+  }, [device, controller, tuning]);
 
   const applyManual = (lowDb: number, highDb: number) => {
     controller.setManual(lowDb, highDb);
@@ -165,9 +205,17 @@ export function SpectrumView({ device = "dev0" }: Props) {
         <span className="text-neutral-500">{device}</span>
         {info && (
           <span className="font-mono tabular-nums">
-            {(info.centerHz / 1e6).toFixed(3)} MHz · span {(info.sampleRate / 1e6).toFixed(3)} MHz
+            view {(info.centerHz / 1e6).toFixed(3)} MHz ± {(info.sampleRate / 2e3).toFixed(1)} kHz
           </span>
         )}
+        <button
+          type="button"
+          className="rounded border border-neutral-600 px-2 py-0.5"
+          title="Show the full device span (or double-click the display)"
+          onClick={() => resetZoom.current()}
+        >
+          Full span
+        </button>
         <div className="ml-auto flex items-center gap-3" role="group" aria-label="Display levels">
           <label className="flex items-center gap-1">
             <input
@@ -227,9 +275,22 @@ export function SpectrumView({ device = "dev0" }: Props) {
           </span>
         )}
       </header>
-      <div ref={containerRef} className="flex min-h-0 flex-1 flex-col overflow-hidden rounded">
+      <TuningControls tuning={tuningSnap} onTune={(patch) => tuning.request(patch)} />
+      <div
+        ref={containerRef}
+        className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded"
+      >
         <canvas ref={plotRef} className="block h-56 w-full shrink-0" />
-        <canvas ref={waterfallRef} className="block min-h-0 w-full flex-1" />
+        <canvas
+          ref={waterfallRef}
+          className="block min-h-0 flex-1"
+          style={{ marginLeft: PLOT_LEFT_PAD }}
+        />
+        <canvas
+          ref={overlayRef}
+          className="absolute inset-0 size-full cursor-crosshair touch-none"
+          aria-label="Spectrum: wheel zooms, shift-drag pans, click tunes, double-click resets zoom"
+        />
       </div>
     </section>
   );
