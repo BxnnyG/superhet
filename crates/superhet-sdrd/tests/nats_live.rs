@@ -400,9 +400,9 @@ async fn vfo_audio_flows_through_real_nats_and_follows_retunes() {
             "invalid",
         ),
         ("vfo.create", "nope", "invalid"),
-        ("vfo.update", r#"{"v":1,"id":99,"freq_hz":5}"#, "invalid"),
+        ("vfo.update", r#"{"v":1,"id":99,"freq_hz":5}"#, "not_found"),
         ("vfo.update", r#"{"v":1,"id":1}"#, "invalid"),
-        ("vfo.delete", r#"{"v":1,"id":99}"#, "invalid"),
+        ("vfo.delete", r#"{"v":1,"id":99}"#, "not_found"),
         ("vfo.bogus", "{}", "invalid"),
     ] {
         let reply = request_json(&client, ctl(cmd), body).await;

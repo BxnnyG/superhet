@@ -32,6 +32,8 @@ const PPM_RANGE: std::ops::RangeInclusive<i32> = -1000..=1000;
 pub enum ErrorCode {
     /// Malformed request or out-of-range value.
     Invalid,
+    /// The request names something that does not exist (unknown VFO id).
+    NotFound,
     /// The device cannot do what was asked.
     Unsupported,
     /// The device failed while applying the request.
@@ -42,6 +44,7 @@ impl ErrorCode {
     fn as_str(self) -> &'static str {
         match self {
             Self::Invalid => "invalid",
+            Self::NotFound => "not_found",
             Self::Unsupported => "unsupported",
             Self::Device => "device",
         }

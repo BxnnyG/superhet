@@ -2,12 +2,11 @@
 
 Runtime control of an SDR: `superhet-sdrd` serves control requests on the bus and publishes the
 device state; `superhet-api` exposes both over REST. Architecture background: `docs/ARCHITECTURE.md`
-sections 2 and 3. VFOs are bus-only so far (no REST route yet). Not covered yet: tuning
-locks/claims, profiles.
+sections 2 and 3. Not covered yet: tuning locks/claims, profiles.
 
 ## REST (superhet-api, port 8073)
 
-Both routes sit behind `auth::require_session` (currently a pass-through, see `docs/protocol-ws.md`).
+All routes sit behind `auth::require_session` (currently a pass-through, see `docs/protocol-ws.md`).
 `{dev}` is the device id (`SUPERHET_DEVICE_ID` of the daemon).
 
 ### `GET /api/v1/devices/{dev}/state`
@@ -24,13 +23,35 @@ Body (at most 4 KiB, `Content-Type: application/json`), every field optional but
 - `v` defaults to 1. Unknown fields are rejected. `gain` is `"auto"` or manual dB; the device snaps
   to the nearest supported step and the reply reports the applied value.
 - The API forwards the body as `ctl.tune` request and returns the daemon's reply unchanged:
-  `{"v":1,"ok":true,"state":{...}}` or `{"v":1,"ok":false,"code":"invalid|unsupported|device","error":"..."}`.
+  `{"v":1,"ok":true,"state":{...}}` or `{"v":1,"ok":false,"code":"invalid|not_found|unsupported|device","error":"..."}`.
 - Status codes: `200` applied; `400` invalid body/value (`invalid`) or a setting the device lacks
   (`unsupported`, e.g. gain on a file replay); `403` `Origin` not allowed; `413` body too large;
   `415` wrong content type; `502` device or bus failure; `503` no bus, or nobody serves this device;
   `504` no answer within 2 s.
 - CSRF: same `Origin` policy as the WebSocket (`SUPERHET_ALLOWED_ORIGINS`, default same-origin;
   requests without `Origin` pass, they are subject to authentication only).
+
+### VFO routes
+
+`GET /api/v1/devices/{dev}/vfos`, `POST /api/v1/devices/{dev}/vfos`,
+`PATCH /api/v1/devices/{dev}/vfos/{id}`, `DELETE /api/v1/devices/{dev}/vfos/{id}`. VFO semantics,
+fields and limits: section "VFOs" below. Bodies are at most 4 KiB, `Content-Type: application/json`
+(POST, PATCH); `v` defaults to 1.
+
+- `GET`: `{"v":1,"vfos":[...]}`, taken from the device state (same source as `/state`, so it may
+  lag a change by a moment).
+- `POST`: body as `ctl.vfo.create`. `201` with the daemon's reply unchanged
+  (`{"v":1,"ok":true,"vfo":{...},"state":{...}}`) and `Location: /api/v1/devices/{dev}/vfos/{id}`.
+- `PATCH`: partial update as `ctl.vfo.update`; the id comes from the URL (a different `"id"` in the
+  body is a `400`). At least one field is required; `null` resets `bandwidth_hz`, `squelch_dbfs`
+  and `deemphasis`. `200` with the daemon's reply.
+- `DELETE`: `204` without body.
+- Errors use the shape of the tune route: `400` invalid body/value, non-numeric id, or the daemon's
+  `invalid`/`unsupported` (including the limit of 8 VFOs); `404` the daemon's `not_found` (unknown
+  VFO id, PATCH and DELETE); `403` `Origin` not allowed; `413`; `415`; `502`; `503`; `504` as for
+  `/tune`.
+- Same CSRF policy as `/tune`; audio is fetched through the audio WebSocket
+  (`docs/protocol-audio.md`).
 
 ## Bus
 
@@ -92,8 +113,9 @@ shape as `ctl.tune`. VFO requests are not coalesced.
   mode or bandwidth rebuilds the channel (a short audio gap); frequency and squelch changes do not.
 - `sh.v1.dev.<dev>.ctl.vfo.delete`: `{"v":1,"id":..}`.
 
-Error codes: `invalid` (malformed or out-of-range request, unknown id, unrealisable bandwidth,
-de-emphasis on AM) and `unsupported` (the limit of 8 VFOs is reached).
+Error codes: `invalid` (malformed or out-of-range request, unrealisable bandwidth, de-emphasis on
+AM), `not_found` (unknown VFO id in update/delete) and `unsupported` (the limit of 8 VFOs is
+reached).
 
 ## Tuning epoch
 

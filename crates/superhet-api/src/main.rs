@@ -1,5 +1,7 @@
 //! Superhet API service (HTTP edge). Port 8073 by default.
 
+mod audio_hub;
+mod audio_ws;
 mod auth;
 mod devices;
 mod hub;
@@ -23,12 +25,18 @@ struct Deps {
     nats: Option<async_nats::Client>,
 }
 
-fn app(deps: Deps, ws: ws::WsState, devices: devices::DevicesState) -> Router {
+fn app(
+    deps: Deps,
+    ws: ws::WsState,
+    audio: audio_ws::AudioState,
+    devices: devices::DevicesState,
+) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .with_state(deps)
         .merge(ws::router(ws))
+        .merge(audio_ws::router(audio))
         .merge(devices::router(devices))
 }
 
@@ -78,13 +86,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let origins = origin::OriginPolicy::from_env();
     let ws = ws::WsState::new(Arc::new(hub::Hub::new(nats.clone())), origins.clone());
+    let audio = audio_ws::AudioState::new(
+        Arc::new(audio_hub::AudioHub::new(nats.clone())),
+        origins.clone(),
+    );
     let devices = devices::DevicesState::new(nats.clone(), origins);
 
     let listen = std::env::var("SUPERHET_LISTEN").unwrap_or_else(|_| DEFAULT_LISTEN.to_owned());
     let addr: SocketAddr = listen.parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "superhet-api listening");
-    axum::serve(listener, app(Deps { db, nats }, ws, devices))
+    axum::serve(listener, app(Deps { db, nats }, ws, audio, devices))
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     Ok(())
@@ -110,8 +122,12 @@ mod tests {
             Arc::new(hub::Hub::new(None)),
             origin::OriginPolicy::default(),
         );
+        let audio = audio_ws::AudioState::new(
+            Arc::new(audio_hub::AudioHub::new(None)),
+            origin::OriginPolicy::default(),
+        );
         let devices = devices::DevicesState::new(None, origin::OriginPolicy::default());
-        let response = app(Deps::default(), ws, devices)
+        let response = app(Deps::default(), ws, audio, devices)
             .oneshot(
                 Request::builder()
                     .uri(path)
