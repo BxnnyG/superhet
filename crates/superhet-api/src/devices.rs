@@ -16,13 +16,11 @@ use axum::{
     body::{Body, Bytes},
     extract::{DefaultBodyLimit, Path, State},
     http::{HeaderMap, StatusCode, header},
-    middleware,
     response::Response,
     routing::{get, post},
 };
 use superhet_bus::subjects;
 
-use crate::auth;
 use crate::origin::OriginPolicy;
 
 /// Largest accepted request body.
@@ -68,7 +66,6 @@ pub fn router(state: DevicesState) -> Router {
                 .delete(delete_vfo)
                 .layer(DefaultBodyLimit::max(MAX_BODY_BYTES)),
         )
-        .route_layer(middleware::from_fn(auth::require_session))
         .with_state(state)
 }
 
