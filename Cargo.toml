@@ -22,7 +22,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
-async-nats = { version = "0.50", default-features = false, features = ["ring", "jetstream", "nkeys"] }
+async-nats = { version = "0.50", default-features = false, features = ["ring", "jetstream", "kv", "nkeys"] }
 sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls", "migrate", "macros", "uuid", "time"] }
 thiserror = "2"
 futures-util = { version = "0.3", default-features = false }

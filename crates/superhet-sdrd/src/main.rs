@@ -1,11 +1,15 @@
 //! Superhet SDR daemon (device and DSP, one instance per SDR). Port 8074 by default.
 //!
 //! With `SUPERHET_DEVICE` set (e.g. `file:/data/capture.cu8?format=cu8&rate=2048000&freq=100000000`)
-//! and NATS configured, spectrum frames are published on `sh.v1.dev.<id>.spectrum`.
+//! and NATS configured, spectrum frames are published on `sh.v1.dev.<id>.spectrum`, control
+//! requests are served on `sh.v1.dev.<id>.ctl.*` and the device state is kept in the KV bucket
+//! `STATE` (see `docs/api-devices.md`).
 
 mod config;
+mod control;
 mod pipeline;
 mod publish;
+mod service;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -84,7 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = config::Config::from_env()?;
     // Keep the pipeline alive for the lifetime of the process.
-    let (_pipeline, deps) = start_pipeline(&config).await?;
+    let (_pipeline, control_service, deps) = start_pipeline(&config).await?;
 
     let listen = std::env::var("SUPERHET_LISTEN").unwrap_or_else(|_| DEFAULT_LISTEN.to_owned());
     let addr: SocketAddr = listen.parse()?;
@@ -93,6 +97,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, app(deps))
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+    if let Some(service) = control_service {
+        service.shutdown().await;
+    }
     Ok(())
 }
 
@@ -100,10 +107,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// restarting server never prevents start-up; frames are dropped until it is reachable.
 async fn start_pipeline(
     config: &config::Config,
-) -> Result<(Option<pipeline::Pipeline>, Deps), Box<dyn std::error::Error>> {
+) -> Result<(Option<pipeline::Pipeline>, Option<service::Service>, Deps), Box<dyn std::error::Error>>
+{
     let Some(spec) = &config.device_spec else {
         tracing::warn!("SUPERHET_DEVICE not set; running health-only");
-        return Ok((None, Deps::default()));
+        return Ok((None, None, Deps::default()));
     };
     let mut deps = Deps {
         device_expected: true,
@@ -111,16 +119,17 @@ async fn start_pipeline(
     };
     let Some(client) = superhet_bus::connect_background_from_env("superhet-sdrd").await? else {
         tracing::warn!("SUPERHET_NATS_URL not set; spectrum pipeline disabled");
-        return Ok((None, deps));
+        return Ok((None, None, deps));
     };
     deps.nats = Some(client.clone());
     let subject = superhet_bus::subjects::spectrum(&config.device_id)?;
     let device = superhet_device::open_from_spec(spec)?;
     tracing::info!(device = device.name(), %subject, "starting spectrum pipeline");
-    let sink = publish::spawn_spectrum_publisher(client, subject);
+    let sink = publish::spawn_spectrum_publisher(client.clone(), subject);
     let pipeline = pipeline::Pipeline::start(device, &config.spectrum, sink)?;
     deps.pipeline_running = Some(pipeline.running_flag());
-    Ok((Some(pipeline), deps))
+    let service = service::start(client, config.device_id.clone(), pipeline.control()).await?;
+    Ok((Some(pipeline), Some(service), deps))
 }
 
 async fn shutdown_signal() {

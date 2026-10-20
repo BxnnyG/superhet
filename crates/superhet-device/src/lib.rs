@@ -10,6 +10,7 @@ mod file;
 mod rtlsdr;
 mod rtlsdr_config;
 mod spec;
+mod tuning;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -34,6 +35,9 @@ pub enum Error {
     /// The operation is not valid in the current state (e.g. already streaming).
     #[error("invalid device state: {0}")]
     State(&'static str),
+    /// The backend does not support the requested setting.
+    #[error("unsupported by this device: {0}")]
+    Unsupported(&'static str),
 }
 
 /// A block of complex baseband samples with the tuning it was captured at.
@@ -43,6 +47,9 @@ pub struct IqBlock {
     pub center_hz: u64,
     /// Sample rate in Hz at capture time.
     pub sample_rate: u32,
+    /// Tuning generation at capture time; incremented by every applied retune (centre, rate,
+    /// gain or ppm change). Consumers reset averaging state when it changes.
+    pub tuning_epoch: u64,
     /// Samples, normalised to roughly [-1.0, 1.0] (full scale = 1.0).
     pub samples: Vec<Complex32>,
 }
@@ -67,6 +74,79 @@ impl IqStream {
     }
 }
 
+/// A runtime change of the device settings. `None` leaves a setting untouched.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct TuneRequest {
+    /// New centre frequency in Hz.
+    pub center_hz: Option<u64>,
+    /// New sample rate in Hz.
+    pub sample_rate: Option<u32>,
+    /// New tuner gain.
+    pub gain: Option<Gain>,
+    /// New crystal correction in ppm.
+    pub ppm: Option<i32>,
+    /// Bias tee on or off.
+    pub bias_tee: Option<bool>,
+}
+
+impl TuneRequest {
+    /// Whether the request changes nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Fold a later request into this one: for every field the later value wins.
+    pub fn merge(&mut self, later: &Self) {
+        self.center_hz = later.center_hz.or(self.center_hz);
+        self.sample_rate = later.sample_rate.or(self.sample_rate);
+        self.gain = later.gain.or(self.gain);
+        self.ppm = later.ppm.or(self.ppm);
+        self.bias_tee = later.bias_tee.or(self.bias_tee);
+    }
+}
+
+/// Snapshot of the settings a device is actually running with.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeviceState {
+    /// Backend name, e.g. `rtlsdr` or `file`.
+    pub driver: &'static str,
+    /// Tuner chip, if known.
+    pub tuner: Option<String>,
+    /// Centre frequency in Hz.
+    pub center_hz: u64,
+    /// Sample rate in Hz.
+    pub sample_rate: u32,
+    /// Gain as applied (a manual value is the one the tuner snapped to); `None` if the device
+    /// has no gain control.
+    pub gain: Option<Gain>,
+    /// Crystal correction in ppm.
+    pub ppm: i32,
+    /// Bias tee state.
+    pub bias_tee: bool,
+    /// Tuning generation, see [`IqBlock::tuning_epoch`].
+    pub tuning_epoch: u64,
+    /// Selectable manual gains in dB (empty if not applicable).
+    pub gains_db: Vec<f32>,
+}
+
+/// Thread-safe control handle of a device; stays valid while the device streams.
+///
+/// Calls are serialised internally. Hardware settings are changed while the read thread keeps
+/// running; blocks affected by the change are marked through [`IqBlock::tuning_epoch`].
+pub trait DeviceControl: Send + Sync {
+    /// Current settings.
+    fn state(&self) -> DeviceState;
+    /// Apply the requested changes after validating all of them first, and return the
+    /// resulting settings. A request that only repeats current values changes nothing.
+    ///
+    /// # Errors
+    /// [`Error::Config`] for out-of-range values, [`Error::Unsupported`] for settings the
+    /// backend lacks, otherwise a device error. On a device error, changes made before the
+    /// failure stay applied (see [`DeviceControl::state`]).
+    fn apply(&self, request: &TuneRequest) -> Result<DeviceState, Error>;
+}
+
 /// An SDR device (or a replacement such as a file replay).
 pub trait Device: Send {
     /// Human-readable backend name, e.g. `file`.
@@ -85,6 +165,32 @@ pub trait Device: Send {
     /// # Errors
     /// Fails if the device rejects the rate.
     fn set_sample_rate(&mut self, hz: u32) -> Result<(), Error>;
+    /// Set the tuner gain.
+    ///
+    /// # Errors
+    /// [`Error::Unsupported`] unless the backend has a gain control.
+    fn set_gain(&mut self, gain: Gain) -> Result<(), Error> {
+        let _ = gain;
+        Err(Error::Unsupported("gain"))
+    }
+    /// Set the crystal correction in ppm.
+    ///
+    /// # Errors
+    /// [`Error::Unsupported`] unless the backend supports it.
+    fn set_ppm(&mut self, ppm: i32) -> Result<(), Error> {
+        let _ = ppm;
+        Err(Error::Unsupported("ppm correction"))
+    }
+    /// Switch the bias tee.
+    ///
+    /// # Errors
+    /// [`Error::Unsupported`] unless the backend supports it.
+    fn set_bias_tee(&mut self, on: bool) -> Result<(), Error> {
+        let _ = on;
+        Err(Error::Unsupported("bias tee"))
+    }
+    /// Cloneable handle for changing settings from other threads, also while streaming.
+    fn control(&self) -> Arc<dyn DeviceControl>;
     /// Start streaming. `queue_blocks` bounds the channel between device and consumer.
     ///
     /// # Errors

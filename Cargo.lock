@@ -1983,6 +1983,8 @@ dependencies = [
  "axum",
  "futures-util",
  "http-body-util",
+ "serde",
+ "serde_json",
  "superhet-bus",
  "superhet-device",
  "superhet-dsp",

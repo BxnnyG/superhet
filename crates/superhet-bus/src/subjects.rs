@@ -53,6 +53,36 @@ pub fn ctl(device: &str, cmd: &str) -> Result<String, InvalidToken> {
     Ok(format!("{PREFIX}.dev.{device}.ctl.{cmd}"))
 }
 
+/// Subscription pattern for every control command of one device: `sh.v1.dev.<dev>.ctl.>`.
+///
+/// # Errors
+/// Fails if `device` is not a single valid token.
+pub fn ctl_all(device: &str) -> Result<String, InvalidToken> {
+    check(device)?;
+    Ok(format!("{PREFIX}.dev.{device}.ctl.>"))
+}
+
+/// Name of the JetStream KV bucket holding the latest state of every device.
+pub const STATE_BUCKET: &str = "STATE";
+
+/// Key of a device in the [`STATE_BUCKET`]: `dev.<dev>`.
+///
+/// Stricter than a subject token because KV keys only allow `A-Za-z0-9`, `-`, `_` and `=`
+/// within a token.
+///
+/// # Errors
+/// Fails if `device` is not a single valid token or contains other characters.
+pub fn state_key(device: &str) -> Result<String, InvalidToken> {
+    check(device)?;
+    if !device
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '='))
+    {
+        return Err(InvalidToken(device.to_owned()));
+    }
+    Ok(format!("dev.{device}"))
+}
+
 /// State subject of a device: `sh.v1.dev.<dev>.state`.
 ///
 /// # Errors
@@ -120,6 +150,8 @@ mod tests {
             Ok("sh.v1.dev.rtl0.ctl.tune")
         );
         assert_eq!(state("rtl0").as_deref(), Ok("sh.v1.dev.rtl0.state"));
+        assert_eq!(ctl_all("rtl0").as_deref(), Ok("sh.v1.dev.rtl0.ctl.>"));
+        assert_eq!(state_key("rtl-0_a").as_deref(), Ok("dev.rtl-0_a"));
         assert_eq!(spectrum("rtl0").as_deref(), Ok("sh.v1.dev.rtl0.spectrum"));
         assert_eq!(
             audio("rtl0", "main").as_deref(),
@@ -142,6 +174,14 @@ mod tests {
             assert!(lookup(bad).is_err(), "{bad:?}");
             assert!(plugin_ctl(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn state_keys_are_restricted_to_kv_safe_characters() {
+        for bad in ["", "a.b", "a b", "a:b", "a*", "ä", "a/b"] {
+            assert!(state_key(bad).is_err(), "{bad:?}");
+        }
+        assert!(ctl_all("*").is_err());
     }
 
     #[test]

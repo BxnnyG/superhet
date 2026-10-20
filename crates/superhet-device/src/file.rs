@@ -5,14 +5,15 @@ use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{TrySendError, sync_channel};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use num_complex::Complex32;
 
-use crate::{Device, Error, IqBlock, IqStream};
+use crate::tuning::TuningCell;
+use crate::{Device, DeviceControl, DeviceState, Error, IqBlock, IqStream, TuneRequest};
 
 /// Default samples per emitted block.
 const DEFAULT_BLOCK_LEN: usize = 16_384;
@@ -101,12 +102,57 @@ impl FileConfig {
     }
 }
 
-/// Tuning shared between the control side and the producer thread.
+/// Tuning shared between the control side and the producer thread. Doubles as the control
+/// handle: the centre frequency is a label only, everything else is fixed by the recording.
 #[derive(Debug)]
 struct Shared {
-    center_hz: AtomicU64,
-    sample_rate: AtomicU32,
+    tuning: TuningCell,
     stop: AtomicBool,
+}
+
+impl Shared {
+    fn snapshot(&self, t: crate::tuning::Tuning) -> DeviceState {
+        DeviceState {
+            driver: "file",
+            tuner: None,
+            center_hz: t.center_hz,
+            sample_rate: t.sample_rate,
+            gain: None,
+            ppm: 0,
+            bias_tee: false,
+            tuning_epoch: t.epoch,
+            gains_db: Vec::new(),
+        }
+    }
+}
+
+impl DeviceControl for Shared {
+    fn state(&self) -> DeviceState {
+        self.snapshot(self.tuning.get())
+    }
+
+    fn apply(&self, request: &TuneRequest) -> Result<DeviceState, Error> {
+        let mut t = self.tuning.lock();
+        if request.sample_rate.is_some_and(|r| r != t.sample_rate) {
+            return Err(Error::Unsupported("file replay has a fixed sample rate"));
+        }
+        if request.gain.is_some() {
+            return Err(Error::Unsupported("file replay has no gain control"));
+        }
+        if request.ppm.is_some_and(|p| p != 0) {
+            return Err(Error::Unsupported("file replay has no ppm correction"));
+        }
+        if request.bias_tee == Some(true) {
+            return Err(Error::Unsupported("file replay has no bias tee"));
+        }
+        if let Some(hz) = request.center_hz
+            && hz != t.center_hz
+        {
+            t.center_hz = hz;
+            t.epoch += 1;
+        }
+        Ok(self.snapshot(*t))
+    }
 }
 
 /// File replay device.
@@ -131,8 +177,7 @@ impl FileDevice {
             )));
         }
         let shared = Arc::new(Shared {
-            center_hz: AtomicU64::new(config.center_hz),
-            sample_rate: AtomicU32::new(config.sample_rate),
+            tuning: TuningCell::new(config.center_hz, config.sample_rate),
             stop: AtomicBool::new(false),
         });
         Ok(Self {
@@ -149,24 +194,33 @@ impl Device for FileDevice {
     }
 
     fn center_freq(&self) -> u64 {
-        self.shared.center_hz.load(Ordering::Relaxed)
+        self.shared.tuning.get().center_hz
     }
 
     fn sample_rate(&self) -> u32 {
-        self.shared.sample_rate.load(Ordering::Relaxed)
+        self.shared.tuning.get().sample_rate
     }
 
     fn set_center_freq(&mut self, hz: u64) -> Result<(), Error> {
-        self.shared.center_hz.store(hz, Ordering::Relaxed);
-        Ok(())
+        self.shared
+            .apply(&TuneRequest {
+                center_hz: Some(hz),
+                ..TuneRequest::default()
+            })
+            .map(|_| ())
     }
 
     fn set_sample_rate(&mut self, hz: u32) -> Result<(), Error> {
-        if hz == 0 {
-            return Err(Error::Config("sample rate must be non-zero".into()));
-        }
-        self.shared.sample_rate.store(hz, Ordering::Relaxed);
-        Ok(())
+        self.shared
+            .apply(&TuneRequest {
+                sample_rate: Some(hz),
+                ..TuneRequest::default()
+            })
+            .map(|_| ())
+    }
+
+    fn control(&self) -> Arc<dyn DeviceControl> {
+        Arc::clone(&self.shared) as Arc<dyn DeviceControl>
     }
 
     fn start(&mut self, queue_blocks: usize) -> Result<IqStream, Error> {
@@ -220,11 +274,11 @@ impl Producer {
         let mut raw = vec![0u8; self.block_len * self.format.bytes_per_sample()];
         let mut anchor = Instant::now();
         let mut emitted: u64 = 0;
-        let mut rate = self.shared.sample_rate.load(Ordering::Relaxed);
+        let mut rate = self.shared.tuning.get().sample_rate;
         while !self.shared.stop.load(Ordering::Relaxed) {
-            let new_rate = self.shared.sample_rate.load(Ordering::Relaxed);
-            if new_rate != rate {
-                rate = new_rate;
+            let tuning = self.shared.tuning.get();
+            if tuning.sample_rate != rate {
+                rate = tuning.sample_rate;
                 anchor = Instant::now();
                 emitted = 0;
             }
@@ -237,8 +291,9 @@ impl Producer {
             };
             emitted += samples.len() as u64;
             let block = IqBlock {
-                center_hz: self.shared.center_hz.load(Ordering::Relaxed),
+                center_hz: tuning.center_hz,
                 sample_rate: rate,
+                tuning_epoch: tuning.epoch,
                 samples,
             };
             match tx.try_send(block) {
@@ -431,6 +486,94 @@ mod tests {
         let path = temp_file("empty.cu8", &[]);
         let cfg = FileConfig::parse(&path.display().to_string()).expect("valid");
         assert!(FileDevice::open(cfg).is_err());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn control_retunes_while_streaming_and_bumps_epoch() {
+        let path = temp_file("ctl.cu8", &vec![128u8; 4096]);
+        let cfg = FileConfig::parse(&format!(
+            "{}?rate=100000&freq=1000&block=1000",
+            path.display()
+        ))
+        .expect("valid");
+        let mut dev = FileDevice::open(cfg).expect("open");
+        let control = dev.control();
+        let stream = dev.start(4).expect("start");
+        let first = stream
+            .blocks
+            .recv_timeout(Duration::from_secs(2))
+            .expect("block");
+        assert_eq!((first.center_hz, first.tuning_epoch), (1000, 0));
+
+        let state = control
+            .apply(&TuneRequest {
+                center_hz: Some(2000),
+                ..TuneRequest::default()
+            })
+            .expect("retune");
+        assert_eq!((state.center_hz, state.tuning_epoch), (2000, 1));
+        // Repeating the current value is not a retune.
+        let again = control
+            .apply(&TuneRequest {
+                center_hz: Some(2000),
+                sample_rate: Some(100_000),
+                ..TuneRequest::default()
+            })
+            .expect("no-op");
+        assert_eq!(again.tuning_epoch, 1);
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let block = stream
+                .blocks
+                .recv_timeout(Duration::from_secs(2))
+                .expect("block");
+            if block.tuning_epoch == 1 {
+                assert_eq!(block.center_hz, 2000);
+                break;
+            }
+            assert!(Instant::now() < deadline, "retune never reached the stream");
+        }
+        dev.stop();
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn control_rejects_unsupported_settings_without_side_effects() {
+        let path = temp_file("unsup.cu8", &[128u8; 64]);
+        let cfg =
+            FileConfig::parse(&format!("{}?rate=100000&freq=1000", path.display())).expect("valid");
+        let dev = FileDevice::open(cfg).expect("open");
+        let control = dev.control();
+        for request in [
+            TuneRequest {
+                center_hz: Some(5),
+                sample_rate: Some(200_000),
+                ..TuneRequest::default()
+            },
+            TuneRequest {
+                center_hz: Some(5),
+                gain: Some(crate::Gain::Auto),
+                ..TuneRequest::default()
+            },
+            TuneRequest {
+                bias_tee: Some(true),
+                ..TuneRequest::default()
+            },
+            TuneRequest {
+                ppm: Some(3),
+                ..TuneRequest::default()
+            },
+        ] {
+            assert!(matches!(
+                control.apply(&request),
+                Err(Error::Unsupported(_))
+            ));
+        }
+        let state = control.state();
+        assert_eq!((state.center_hz, state.tuning_epoch), (1000, 0));
+        assert_eq!(state.gain, None);
         let _ = std::fs::remove_file(path);
     }
 }
