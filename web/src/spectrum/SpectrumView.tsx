@@ -78,6 +78,7 @@ export function SpectrumView({
   const plotRef = useRef<HTMLCanvasElement>(null);
   const waterfallRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
+  const waterfallNoticeRef = useRef<HTMLDivElement>(null);
   const [plotHeight, setPlotHeight] = useState(loadPlotHeight);
   // Callbacks and values read by long-running listeners come from here, not from effect deps.
   const live = useRef({ step, registerView, onStatus, onInfo, onError });
@@ -90,17 +91,25 @@ export function SpectrumView({
     const plotCanvas = plotRef.current;
     const wfCanvas = waterfallRef.current;
     const overlay = overlayRef.current;
+    const wfNotice = waterfallNoticeRef.current;
     if (!container || !plotCanvas || !wfCanvas || !overlay) return;
 
     let plot: SpectrumPlot;
-    let waterfall: Waterfall;
     try {
       plot = new SpectrumPlot(plotCanvas, controller.range);
-      waterfall = new Waterfall(wfCanvas, controller.range);
     } catch (e) {
       live.current.onError(e instanceof Error ? e.message : String(e));
       return;
     }
+    // The waterfall is optional: without WebGL2 everything else (state, tuning, VFOs, audio, the
+    // 2D plot) keeps working and only the waterfall pane shows a notice.
+    let waterfall: Waterfall | null = null;
+    try {
+      waterfall = new Waterfall(wfCanvas, controller.range);
+    } catch {
+      waterfall = null;
+    }
+    if (wfNotice) wfNotice.hidden = waterfall !== null;
 
     let last: SpectrumInfo | null = null;
     let interaction: SpectrumInteraction | null = null;
@@ -111,7 +120,7 @@ export function SpectrumView({
         metrics.frames++;
         controller.onFrame(frame, performance.now());
         plot.push(frame);
-        waterfall.push(frame);
+        waterfall?.push(frame);
         interaction?.setFrameSpan(frame.centerHz, frame.sampleRate);
         if (
           !last ||
@@ -175,7 +184,7 @@ export function SpectrumView({
       const dpr = window.devicePixelRatio;
       const w = container.clientWidth * dpr;
       plot.resize(w, plotCanvas.clientHeight * dpr, dpr);
-      waterfall.resize(wfCanvas.clientWidth * dpr, wfCanvas.clientHeight * dpr);
+      waterfall?.resize(wfCanvas.clientWidth * dpr, wfCanvas.clientHeight * dpr);
       interaction?.resize(w, overlay.clientHeight * dpr, dpr);
       socket.notifyResize();
     };
@@ -188,7 +197,7 @@ export function SpectrumView({
     // Manual changes redraw immediately; auto mode redraws with the next frame anyway.
     const offChange = controller.onChange(() => {
       plot.redraw();
-      waterfall.redraw();
+      waterfall?.redraw();
     });
     return () => {
       live.current.registerView({ reset: () => undefined, zoom: () => undefined });
@@ -201,7 +210,7 @@ export function SpectrumView({
       observer.disconnect();
       socket.stop();
       plot.destroy();
-      waterfall.destroy();
+      waterfall?.destroy();
     };
   }, [device, controller, tuning, vfoCtl, createVfoAt, metrics]);
 
@@ -258,11 +267,17 @@ export function SpectrumView({
       >
         <span className="h-px w-full bg-zinc-800 transition-colors duration-150 group-hover/split:bg-indigo-400 group-focus-visible/split:bg-indigo-400" />
       </div>
-      <canvas
-        ref={waterfallRef}
-        className="block min-h-24 flex-1"
-        style={{ marginLeft: PLOT_LEFT_PAD }}
-      />
+      <div className="relative min-h-24 flex-1" style={{ marginLeft: PLOT_LEFT_PAD }}>
+        <canvas ref={waterfallRef} className="block size-full" />
+        <div
+          ref={waterfallNoticeRef}
+          hidden
+          role="status"
+          className="absolute inset-0 flex items-center justify-center px-4 text-center text-sm text-zinc-500"
+        >
+          Waterfall needs WebGL2, which this browser has disabled.
+        </div>
+      </div>
       <canvas
         ref={overlayRef}
         className="absolute inset-0 size-full cursor-crosshair touch-none"
