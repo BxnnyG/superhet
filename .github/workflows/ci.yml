@@ -82,7 +82,7 @@ jobs:
           cp .env.example .env
           docker compose config --quiet
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/docker/Dockerfile
