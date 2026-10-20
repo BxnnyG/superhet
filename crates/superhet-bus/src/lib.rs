@@ -3,7 +3,7 @@
 //! Subject layout (version 1, prefix [`subjects::PREFIX`]):
 //!
 //! - `sh.v1.dev.<dev>.ctl.<cmd>` – control commands to the daemon owning `<dev>`
-//! - `sh.v1.dev.<dev>.state` – device state
+//! - `sh.v1.dev.<dev>.state` – device state (also kept in KV bucket `STATE`, key `dev.<dev>`)
 //! - `sh.v1.dev.<dev>.spectrum` – spectrum frames
 //! - `sh.v1.dev.<dev>.audio.<stream>` – demodulated audio streams
 //! - `sh.v1.events.<plugin>.<type>` – plugin events

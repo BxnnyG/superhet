@@ -70,7 +70,7 @@ impl Config {
     /// Fails on unparsable or inconsistent values.
     pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
         let device_id = get("SUPERHET_DEVICE_ID").unwrap_or_else(|| "dev0".to_owned());
-        subjects::spectrum(&device_id).map_err(|e| ConfigError::Invalid {
+        subjects::state_key(&device_id).map_err(|e| ConfigError::Invalid {
             var: "SUPERHET_DEVICE_ID",
             reason: e.to_string(),
         })?;

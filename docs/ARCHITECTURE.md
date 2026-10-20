@@ -81,8 +81,8 @@ Concurrency inside sdrd: tokio for I/O; DSP runs on dedicated OS threads (device
 
 | Subject | Kind | Producer → consumer |
 |---|---|---|
-| `sh.v1.dev.<dev>.ctl.<cmd>` | request/reply | api/pluginhost → sdrd (tune, vfo.*, profile.load, claim, lock) |
-| `sh.v1.dev.<dev>.state` | KV bucket `STATE` | sdrd → all (tuning, VFOs, locks, decoder bindings) |
+| `sh.v1.dev.<dev>.ctl.<cmd>` | request/reply | api/pluginhost → sdrd (tune, state implemented; vfo.*, profile.load, claim, lock planned; see `docs/api-devices.md`) |
+| `sh.v1.dev.<dev>.state` | pub/sub + KV bucket `STATE` (key `dev.<dev>`) | sdrd → all (tuning implemented; VFOs, locks, decoder bindings planned) |
 | `sh.v1.dev.<dev>.spectrum` | pub/sub | sdrd → api (quantised FFT frames) |
 | `sh.v1.dev.<dev>.audio.<stream>` | pub/sub | sdrd / pluginhost → api, recorder (Opus packets) |
 | `sh.v1.events.<plugin>.<type>` | JetStream `EVENTS` | pluginhost → worker (persist), api (live) |

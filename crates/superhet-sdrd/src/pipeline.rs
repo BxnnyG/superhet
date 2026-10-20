@@ -9,13 +9,15 @@ use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use superhet_bus::spectrum::SpectrumFrame;
-use superhet_device::{Device, IqStream};
+use superhet_device::{Device, DeviceControl, IqStream};
 use superhet_dsp::{SpectrumConfig, SpectrumError, SpectrumProcessor};
 
 use crate::config::SpectrumSettings;
 
 /// Blocks buffered between device thread and DSP thread.
 const QUEUE_BLOCKS: usize = 16;
+/// Blocks thrown away after a retune while the front end settles.
+const SETTLE_BLOCKS: usize = 1;
 /// Interval for reporting dropped IQ blocks.
 const DROP_REPORT: Duration = Duration::from_secs(5);
 
@@ -36,6 +38,7 @@ pub enum PipelineError {
 /// A running pipeline; dropping it stops the device and joins the DSP thread.
 pub struct Pipeline {
     device: Box<dyn Device>,
+    control: Arc<dyn DeviceControl>,
     thread: Option<JoinHandle<()>>,
     running: Arc<AtomicBool>,
 }
@@ -56,6 +59,12 @@ impl Pipeline {
         Arc::clone(&self.running)
     }
 
+    /// Handle for changing the device settings while the pipeline runs.
+    #[must_use]
+    pub fn control(&self) -> Arc<dyn DeviceControl> {
+        Arc::clone(&self.control)
+    }
+
     /// Start streaming from `device` and call `sink` with each encoded [`SpectrumFrame`].
     ///
     /// # Errors
@@ -72,6 +81,7 @@ impl Pipeline {
             sample_rate: device.sample_rate(),
         })?;
         let (min_db, max_db) = (settings.min_db, settings.max_db);
+        let control = device.control();
         let stream: IqStream = device.start(QUEUE_BLOCKS)?;
         let running = Arc::new(AtomicBool::new(true));
         let guard = RunningGuard(Arc::clone(&running));
@@ -79,15 +89,25 @@ impl Pipeline {
             .name("sdrd-dsp".into())
             .spawn(move || {
                 let _guard = guard;
-                let mut tuning = (0u64, 0u32);
+                let mut epoch = 0u64;
+                let mut settle = 0usize;
                 let mut last_report = std::time::Instant::now();
                 let mut reported_drops = 0;
                 while let Ok(block) = stream.blocks.recv() {
-                    if tuning != (block.center_hz, block.sample_rate) {
-                        tuning = (block.center_hz, block.sample_rate);
+                    if block.tuning_epoch != epoch
+                        || block.sample_rate != processor.config().sample_rate
+                    {
+                        // Retuned: drop averaging/overlap state and the first block(s), which
+                        // may still hold the front end's settling transient.
                         if processor.set_sample_rate(block.sample_rate).is_err() {
                             continue;
                         }
+                        epoch = block.tuning_epoch;
+                        settle = SETTLE_BLOCKS;
+                    }
+                    if settle > 0 {
+                        settle -= 1;
+                        continue;
                     }
                     for frame in processor.push(&block.samples) {
                         let quantised = SpectrumFrame::quantize(
@@ -116,6 +136,7 @@ impl Pipeline {
             })?;
         Ok(Self {
             device,
+            control,
             thread: Some(thread),
             running,
         })
@@ -147,9 +168,11 @@ mod tests {
     use std::sync::mpsc::channel;
 
     /// Write a cu8 file with a complex tone at `offset_hz`.
-    fn write_tone(offset_hz: f64, rate: u32, samples: usize) -> std::path::PathBuf {
-        let path =
-            std::env::temp_dir().join(format!("superhet-sdrd-tone-{}.cu8", std::process::id()));
+    fn write_tone(tag: &str, offset_hz: f64, rate: u32, samples: usize) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "superhet-sdrd-tone-{tag}-{}.cu8",
+            std::process::id()
+        ));
         let mut bytes = Vec::with_capacity(samples * 2);
         for i in 0..samples {
             let ph = std::f64::consts::TAU * offset_hz * i as f64 / f64::from(rate);
@@ -166,7 +189,7 @@ mod tests {
     fn file_device_produces_spectrum_frames_with_tone_in_expected_bin() {
         let rate = 1_024_000;
         // 50 kHz offset, 1024 bins over 1.024 MHz = 1 kHz per bin → bin 512 + 50.
-        let path = write_tone(50_000.0, rate, 8 * 4096);
+        let path = write_tone("basic", 50_000.0, rate, 8 * 4096);
         let spec = format!(
             "file:{}?format=cu8&rate={rate}&freq=433920000&block=4096",
             path.display()
@@ -201,5 +224,63 @@ mod tests {
             .expect("bins");
         assert_eq!(peak, 512 + 50);
         assert!(frame.db(peak).expect("db") > -3.0);
+    }
+
+    #[test]
+    fn retune_switches_frames_to_new_center_without_mixing() {
+        let rate = 1_024_000;
+        let path = write_tone("retune", 50_000.0, rate, 8 * 4096);
+        let spec = format!(
+            "file:{}?format=cu8&rate={rate}&freq=433920000&block=4096",
+            path.display()
+        );
+        let device = superhet_device::open_from_spec(&spec).expect("device");
+        let settings = SpectrumSettings {
+            fft_size: 4096,
+            bins: 1024,
+            fps: 50.0,
+            min_db: -120.0,
+            max_db: 0.0,
+        };
+        let (tx, rx) = channel();
+        let pipeline = Pipeline::start(device, &settings, move |frame| {
+            let _ = tx.send(frame);
+        })
+        .expect("start");
+        let first = rx.recv_timeout(Duration::from_secs(5)).expect("frame");
+        assert_eq!(
+            SpectrumFrame::decode(&first).expect("decode").center_hz,
+            433_920_000
+        );
+
+        let state = pipeline
+            .control()
+            .apply(&superhet_device::TuneRequest {
+                center_hz: Some(145_500_000),
+                ..superhet_device::TuneRequest::default()
+            })
+            .expect("retune");
+        assert_eq!(state.tuning_epoch, 1);
+
+        // Frames queued before the retune keep their old centre; once the new centre shows up
+        // it must stay, with the tone still in the same bin.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut new_frames = 0;
+        while new_frames < 5 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no frames after retune"
+            );
+            let bytes = rx.recv_timeout(Duration::from_secs(5)).expect("frame");
+            let frame = SpectrumFrame::decode(&bytes).expect("decode");
+            if frame.center_hz == 145_500_000 {
+                new_frames += 1;
+                assert_eq!(frame.sample_rate, rate);
+            } else {
+                assert_eq!(new_frames, 0, "old centre after new centre");
+            }
+        }
+        drop(pipeline);
+        let _ = std::fs::remove_file(path);
     }
 }

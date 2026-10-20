@@ -1,7 +1,9 @@
 //! Superhet API service (HTTP edge). Port 8073 by default.
 
 mod auth;
+mod devices;
 mod hub;
+mod origin;
 mod view;
 mod ws;
 
@@ -21,12 +23,13 @@ struct Deps {
     nats: Option<async_nats::Client>,
 }
 
-fn app(deps: Deps, ws: ws::WsState) -> Router {
+fn app(deps: Deps, ws: ws::WsState, devices: devices::DevicesState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .with_state(deps)
         .merge(ws::router(ws))
+        .merge(devices::router(devices))
 }
 
 async fn healthz() -> &'static str {
@@ -73,16 +76,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if nats.is_some() {
         tracing::info!("nats client started (connecting in the background)");
     }
-    let ws = ws::WsState::new(
-        Arc::new(hub::Hub::new(nats.clone())),
-        ws::OriginPolicy::from_env(),
-    );
+    let origins = origin::OriginPolicy::from_env();
+    let ws = ws::WsState::new(Arc::new(hub::Hub::new(nats.clone())), origins.clone());
+    let devices = devices::DevicesState::new(nats.clone(), origins);
 
     let listen = std::env::var("SUPERHET_LISTEN").unwrap_or_else(|_| DEFAULT_LISTEN.to_owned());
     let addr: SocketAddr = listen.parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "superhet-api listening");
-    axum::serve(listener, app(Deps { db, nats }, ws))
+    axum::serve(listener, app(Deps { db, nats }, ws, devices))
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     Ok(())
@@ -104,8 +106,12 @@ mod tests {
     use tower::ServiceExt;
 
     async fn get_path(path: &str) -> (StatusCode, Vec<u8>) {
-        let ws = ws::WsState::new(Arc::new(hub::Hub::new(None)), ws::OriginPolicy::default());
-        let response = app(Deps::default(), ws)
+        let ws = ws::WsState::new(
+            Arc::new(hub::Hub::new(None)),
+            origin::OriginPolicy::default(),
+        );
+        let devices = devices::DevicesState::new(None, origin::OriginPolicy::default());
+        let response = app(Deps::default(), ws, devices)
             .oneshot(
                 Request::builder()
                     .uri(path)
