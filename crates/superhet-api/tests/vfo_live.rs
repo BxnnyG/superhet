@@ -1,9 +1,11 @@
 //! End-to-end test of the VFO routes and the audio WebSocket: real NATS server, real
 //! `superhet-api` and `superhet-sdrd` binaries (file device, no hardware).
-//! Skipped unless `SUPERHET_TEST_NATS_URL` is set (optional `SUPERHET_TEST_NATS_USER` /
-//! `SUPERHET_TEST_NATS_PASSWORD`, also forwarded to both services). The sdrd binary must have been
+//! Skipped unless `SUPERHET_TEST_NATS_URL` and `DATABASE_URL` are set (optional
+//! `SUPERHET_TEST_NATS_USER` / `SUPERHET_TEST_NATS_PASSWORD`, also forwarded to both services). The sdrd binary must have been
 //! built (`cargo build -p superhet-sdrd`, done by `cargo test --workspace`); it is looked up next
 //! to the API binary.
+
+mod common;
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -73,6 +75,10 @@ struct Stack {
     device: String,
     nats: async_nats::Client,
     tone: std::path::PathBuf,
+    /// Session cookie (`name=value`) of the admin created for this stack.
+    cookie: String,
+    /// Dropped last: the api must be gone before its database is.
+    _db: common::TestDb,
 }
 
 impl Drop for Stack {
@@ -81,7 +87,8 @@ impl Drop for Stack {
     }
 }
 
-async fn start_stack(url: &str, tag: &str) -> Stack {
+async fn start_stack(url: &str, tag: &str) -> Option<Stack> {
+    let db = common::TestDb::create(tag).await?;
     let pid = std::process::id();
     let device = format!("{tag}{pid}");
     let tone = std::env::temp_dir().join(format!("superhet-api-{tag}-{pid}.cu8"));
@@ -137,6 +144,8 @@ async fn start_stack(url: &str, tag: &str) -> Stack {
     let api = Proc(
         api.env("SUPERHET_LISTEN", format!("127.0.0.1:{api_port}"))
             .env("SUPERHET_NATS_URL", url)
+            .env("SUPERHET_DATABASE_URL", &db.url)
+            .env("SUPERHET_SETUP_TOKEN", common::SETUP_TOKEN)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -144,14 +153,17 @@ async fn start_stack(url: &str, tag: &str) -> Stack {
     );
     wait_ready(sdrd_port, "sdrd").await;
     wait_ready(api_port, "api").await;
-    Stack {
+    let cookie = common::setup_admin(api_port);
+    Some(Stack {
         _sdrd: sdrd,
         _api: api,
         api_port,
         device,
         nats,
         tone,
-    }
+        cookie,
+        _db: db,
+    })
 }
 
 struct Reply {
@@ -199,9 +211,14 @@ impl Stack {
         body: &'static str,
     ) -> Reply {
         let port = self.api_port;
-        tokio::task::spawn_blocking(move || http(port, method, &path, &headers, body))
-            .await
-            .expect("join")
+        let cookie = self.cookie.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut headers = headers;
+            headers.push(("Cookie", cookie.as_str()));
+            http(port, method, &path, &headers, body)
+        })
+        .await
+        .expect("join")
     }
 
     async fn json_rest(&self, method: &'static str, path: String, body: &'static str) -> Reply {
@@ -225,7 +242,10 @@ async fn vfo_rest_crud_against_a_real_sdrd() {
         eprintln!("SUPERHET_TEST_NATS_URL not set; skipping");
         return;
     };
-    let stack = start_stack(&url, "vr").await;
+    let Some(stack) = start_stack(&url, "vr").await else {
+        eprintln!("DATABASE_URL not set; skipping");
+        return;
+    };
     let list = stack.vfos_path();
 
     let reply = stack.rest("GET", list.clone(), vec![], "").await;
@@ -367,7 +387,10 @@ async fn audio_ws_forwards_subscribed_vfos_only() {
         eprintln!("SUPERHET_TEST_NATS_URL not set; skipping");
         return;
     };
-    let stack = start_stack(&url, "va").await;
+    let Some(stack) = start_stack(&url, "va").await else {
+        eprintln!("DATABASE_URL not set; skipping");
+        return;
+    };
     let list = stack.vfos_path();
     for body in [
         r#"{"freq_hz":433970000,"mode":"nfm"}"#,
@@ -388,7 +411,9 @@ async fn audio_ws_forwards_subscribed_vfos_only() {
         "ws://127.0.0.1:{}/api/v1/ws/audio?dev={}",
         stack.api_port, stack.device
     );
-    let (mut ws, _) = tokio_tungstenite::connect_async(ws_url).await.expect("ws");
+    let mut ws = common::ws_connect_with_cookie(&ws_url, &stack.cookie)
+        .await
+        .expect("ws");
     ws.send(Message::text(r#"{"type":"subscribe","vfos":[1]}"#))
         .await
         .expect("send");

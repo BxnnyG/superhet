@@ -14,14 +14,12 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, StatusCode},
-    middleware,
     routing::get,
 };
 use serde::Deserialize;
 use tokio::sync::{Semaphore, broadcast};
 use tokio::time::Instant;
 
-use crate::auth;
 use crate::hub::{Hub, HubError};
 use crate::origin::OriginPolicy;
 use crate::view::{View, crop_decimate, parse_control};
@@ -59,7 +57,6 @@ impl WsState {
 pub fn router(state: WsState) -> Router {
     Router::new()
         .route(PATH, get(spectrum_ws))
-        .route_layer(middleware::from_fn(auth::require_session))
         .with_state(state)
 }
 

@@ -1,6 +1,9 @@
-//! End-to-end test: real NATS server, real `superhet-api` binary, WebSocket client.
-//! Skipped unless `SUPERHET_TEST_NATS_URL` is set (optional: `SUPERHET_TEST_NATS_USER` /
-//! `SUPERHET_TEST_NATS_PASSWORD`, also forwarded to the API under test).
+//! End-to-end test: real NATS server, real PostgreSQL, real `superhet-api` binary, WebSocket
+//! client with a session cookie. Skipped unless `SUPERHET_TEST_NATS_URL` and `DATABASE_URL` are
+//! set (optional: `SUPERHET_TEST_NATS_USER` / `SUPERHET_TEST_NATS_PASSWORD`, also forwarded to
+//! the API under test).
+
+mod common;
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -37,6 +40,10 @@ async fn nats_frames_reach_websocket_client_cropped() {
         eprintln!("SUPERHET_TEST_NATS_URL not set; skipping");
         return;
     };
+    let Some(db) = common::TestDb::create("ws").await else {
+        eprintln!("DATABASE_URL not set; skipping");
+        return;
+    };
     let device = format!("it{}", std::process::id());
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .and_then(|l| l.local_addr())
@@ -58,6 +65,8 @@ async fn nats_frames_reach_websocket_client_cropped() {
     let _api = Api(command
         .env("SUPERHET_LISTEN", format!("127.0.0.1:{port}"))
         .env("SUPERHET_NATS_URL", &url)
+        .env("SUPERHET_DATABASE_URL", &db.url)
+        .env("SUPERHET_SETUP_TOKEN", common::SETUP_TOKEN)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -69,9 +78,11 @@ async fn nats_frames_reach_websocket_client_cropped() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    let (mut ws, _) = tokio_tungstenite::connect_async(format!(
-        "ws://127.0.0.1:{port}/api/v1/ws/spectrum?dev={device}"
-    ))
+    let cookie = common::setup_admin(port);
+    let mut ws = common::ws_connect_with_cookie(
+        &format!("ws://127.0.0.1:{port}/api/v1/ws/spectrum?dev={device}"),
+        &cookie,
+    )
     .await
     .expect("ws connect");
     ws.send(Message::text(

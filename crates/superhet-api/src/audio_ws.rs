@@ -13,14 +13,12 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, StatusCode},
-    middleware,
     routing::get,
 };
 use serde::Deserialize;
 use tokio::sync::Semaphore;
 
 use crate::audio_hub::{AudioHub, HubError, Session};
-use crate::auth;
 use crate::origin::OriginPolicy;
 use crate::ws::send;
 
@@ -55,10 +53,7 @@ impl AudioState {
 
 /// Routes of the gateway, behind the authentication hook.
 pub fn router(state: AudioState) -> Router {
-    Router::new()
-        .route(PATH, get(audio_ws))
-        .route_layer(middleware::from_fn(auth::require_session))
-        .with_state(state)
+    Router::new().route(PATH, get(audio_ws)).with_state(state)
 }
 
 #[derive(Debug, Deserialize)]

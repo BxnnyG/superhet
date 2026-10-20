@@ -1,7 +1,13 @@
 //! End-to-end test of the device REST routes: real NATS server (JetStream enabled), real
 //! `superhet-api` binary, and a mock `sdrd` answering control requests.
-//! Skipped unless `SUPERHET_TEST_NATS_URL` is set (optional `SUPERHET_TEST_NATS_USER` /
-//! `SUPERHET_TEST_NATS_PASSWORD`, also forwarded to the API under test).
+//! Skipped unless `SUPERHET_TEST_NATS_URL` and `DATABASE_URL` are set (optional
+//! `SUPERHET_TEST_NATS_USER` / `SUPERHET_TEST_NATS_PASSWORD`, also forwarded to the API under
+//! test). The test logs in as the admin it creates through the setup endpoint.
+
+mod common;
+
+/// Session cookie sent with every request of this test.
+static COOKIE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -55,7 +61,11 @@ async fn request(
     body: &'static str,
 ) -> (u16, Value) {
     tokio::task::spawn_blocking(move || {
-        let headers: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let mut headers: Vec<(&str, &str)> =
+            headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        if let Some(cookie) = COOKIE.get() {
+            headers.push(("Cookie", cookie.as_str()));
+        }
         http(port, method, &path, &headers, body)
     })
     .await
@@ -83,6 +93,10 @@ fn state_doc(device: &str, center_hz: u64) -> Value {
 async fn rest_state_and_tune_roundtrip_over_real_nats() {
     let Ok(url) = std::env::var("SUPERHET_TEST_NATS_URL") else {
         eprintln!("SUPERHET_TEST_NATS_URL not set; skipping");
+        return;
+    };
+    let Some(db) = common::TestDb::create("dev").await else {
+        eprintln!("DATABASE_URL not set; skipping");
         return;
     };
     let pid = std::process::id();
@@ -175,6 +189,8 @@ async fn rest_state_and_tune_roundtrip_over_real_nats() {
     let _api = Api(command
         .env("SUPERHET_LISTEN", format!("127.0.0.1:{port}"))
         .env("SUPERHET_NATS_URL", &url)
+        .env("SUPERHET_DATABASE_URL", &db.url)
+        .env("SUPERHET_SETUP_TOKEN", common::SETUP_TOKEN)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -187,6 +203,10 @@ async fn rest_state_and_tune_roundtrip_over_real_nats() {
         assert!(Instant::now() < deadline, "/readyz never became 200");
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+
+    COOKIE
+        .set(common::setup_admin(port))
+        .expect("cookie set once");
 
     let json_ct = || vec![("Content-Type", "application/json".to_owned())];
 

@@ -25,19 +25,25 @@ struct Deps {
     nats: Option<async_nats::Client>,
 }
 
+/// Everything except the health probes and `/api/v1/auth/*` requires a valid session; routes
+/// added to `protected` are covered automatically.
 fn app(
     deps: Deps,
+    auth: auth::AuthState,
     ws: ws::WsState,
     audio: audio_ws::AudioState,
     devices: devices::DevicesState,
 ) -> Router {
+    let protected = Router::new()
+        .merge(ws::router(ws))
+        .merge(audio_ws::router(audio))
+        .merge(devices::router(devices));
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .with_state(deps)
-        .merge(ws::router(ws))
-        .merge(audio_ws::router(audio))
-        .merge(devices::router(devices))
+        .merge(auth::router(auth.clone()))
+        .merge(auth::protect(protected, auth))
 }
 
 async fn healthz() -> &'static str {
@@ -85,6 +91,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("nats client started (connecting in the background)");
     }
     let origins = origin::OriginPolicy::from_env();
+    let auth = auth::AuthState::new(db.clone(), origins.clone(), auth::AuthConfig::from_env()?)?;
+    auth.prepare_setup().await?;
+    auth.spawn_maintenance();
     let ws = ws::WsState::new(Arc::new(hub::Hub::new(nats.clone())), origins.clone());
     let audio = audio_ws::AudioState::new(
         Arc::new(audio_hub::AudioHub::new(nats.clone())),
@@ -96,9 +105,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = listen.parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "superhet-api listening");
-    axum::serve(listener, app(Deps { db, nats }, ws, audio, devices))
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    let app = app(Deps { db, nats }, auth, ws, audio, devices);
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
     Ok(())
 }
 
@@ -127,7 +140,13 @@ mod tests {
             origin::OriginPolicy::default(),
         );
         let devices = devices::DevicesState::new(None, origin::OriginPolicy::default());
-        let response = app(Deps::default(), ws, audio, devices)
+        let auth = auth::AuthState::new(
+            None,
+            origin::OriginPolicy::default(),
+            auth::AuthConfig::default(),
+        )
+        .expect("auth state");
+        let response = app(Deps::default(), auth, ws, audio, devices)
             .oneshot(
                 Request::builder()
                     .uri(path)
@@ -158,5 +177,27 @@ mod tests {
         let (status, body) = get_path("/readyz").await;
         assert!(status.is_success());
         assert_eq!(&body[..], b"ok");
+    }
+
+    #[tokio::test]
+    async fn protected_routes_and_unknown_paths_answer_401_without_a_session() {
+        for path in [
+            "/api/v1/devices/rtl0/state",
+            "/api/v1/ws/spectrum?dev=rtl0",
+            "/api/v1/ws/audio?dev=rtl0",
+            "/api/v1/does/not/exist",
+            "/",
+        ] {
+            let (status, body) = get_path(path).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
+            assert_eq!(&body[..], br#"{"error":"unauthenticated"}"#, "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn auth_endpoints_are_public_but_need_a_database() {
+        let (status, body) = get_path("/api/v1/auth/status").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(&body[..], br#"{"error":"unavailable"}"#);
     }
 }

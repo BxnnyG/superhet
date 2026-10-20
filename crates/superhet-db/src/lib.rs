@@ -1,5 +1,7 @@
 //! PostgreSQL access layer shared by Superhet services.
 
+pub mod auth;
+
 use std::time::Duration;
 
 use sqlx::postgres::PgPoolOptions;
