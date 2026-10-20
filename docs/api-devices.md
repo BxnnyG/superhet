@@ -6,7 +6,8 @@ sections 2 and 3. Not covered yet: tuning locks/claims, profiles.
 
 ## REST (superhet-api, port 8073)
 
-All routes sit behind `auth::require_session` (currently a pass-through, see `docs/protocol-ws.md`).
+All routes require a session cookie and answer `401 {"error":"unauthenticated"}` without one
+(`docs/api-auth.md`).
 `{dev}` is the device id (`SUPERHET_DEVICE_ID` of the daemon).
 
 ### `GET /api/v1/devices/{dev}/state`

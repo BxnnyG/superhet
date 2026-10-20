@@ -11,8 +11,8 @@ browser-facing edge described in `docs/ARCHITECTURE.md` (section 2, step 3a). Th
 - `Origin` check: with `SUPERHET_ALLOWED_ORIGINS` (comma separated, e.g. `https://sdr.example.org`)
   only exact matches pass; without it the origin must equal the `Host` header (same-origin).
   Requests without `Origin` (non-browser clients) pass the check.
-- Auth: the route sits behind `auth::require_session`. **Currently a pass-through** until local
-  auth (session cookie, ARCHITECTURE section 7) lands; do not expose the API publicly before.
+- Auth: the upgrade requires a valid session cookie (`docs/api-auth.md`); without one the server
+  answers `401` before upgrading. The `Origin` check applies on top.
 
 ## Server to client
 

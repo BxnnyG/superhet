@@ -161,7 +161,7 @@ Paused decoders keep their process alive for a grace period (default 60 s) and a
 
 ## 5. Persistence
 
-PostgreSQL (ADR-0006) via `sqlx`, schema `superhet`, migrations embedded in `superhet-db` and applied by the worker on start. Main tables (draft): `settings`, `users`, `sessions`, `oidc_identities`, `profiles`, `bookmarks`, `frequency_lists`, `plugins`, `plugin_instances`, `events` (partitioned by month, JSONB payload, generated `tsvector` + GIN, `pg_trgm` on identifiers), `lookup_cache`, `recordings`, `tetra_cells`, `tetra_subscribers` (self-learned from own network), `aircraft`, `vessels`.
+PostgreSQL (ADR-0006) via `sqlx`, schema `superhet`, migrations embedded in `superhet-db` and applied by api on start (sqlx serialises concurrent runs with a PostgreSQL advisory lock, so any further service may do the same; api needs the auth tables before it can serve a single request). Main tables (draft): `settings`, `users`, `sessions`, `oidc_identities`, `profiles`, `bookmarks`, `frequency_lists`, `plugins`, `plugin_instances`, `events` (partitioned by month, JSONB payload, generated `tsvector` + GIN, `pg_trgm` on identifiers), `lookup_cache`, `recordings`, `tetra_cells`, `tetra_subscribers` (self-learned from own network), `aircraft`, `vessels`.
 
 DB roles: `superhet_api` (read most, write settings/profiles/bookmarks/sessions), `superhet_worker` (write events, lookups, partitions), `superhet_pluginhost` (plugin registry). Large binaries (recordings, IQ, ring buffer on disk) live on the `/data` volume, referenced by path; an S3-compatible storage backend is an option for later.
 
@@ -246,9 +246,10 @@ Install via pluginhost (Git URL or local path → copy to `/data/plugins/<id>/<v
 
 ## 7. Auth
 
-- Auth lives in **api** only. First run: create a local admin (Argon2id hash). Login → server-side session in PostgreSQL, `HttpOnly; Secure; SameSite=Strict` cookie.
+- Auth lives in **api** only (ADR-0008, contract in `docs/api-auth.md`). First run: create the local admin (Argon2id hash), guarded by a one-time setup token that api logs at startup. Login → server-side session in PostgreSQL (`superhet.users`, `superhet.sessions`; only the SHA-256 of the cookie token is stored; 7 d idle / 30 d absolute), `HttpOnly; SameSite=Strict` cookie, `Secure` when served over https. Failed logins are rate limited per client address and globally.
+- Everything except `/healthz`, `/readyz` and `/api/v1/auth/*` sits behind the session check (deny by default, including unknown paths).
 - OIDC (P5): Authorization Code + PKCE via the `openidconnect` crate, generic issuer discovery, tested against Zitadel; claim → local user mapping; local admin stays as fallback (can be disabled).
-- WebSocket upgrade requires a valid session and an `Origin` check. All config changes go through authenticated endpoints. No anonymous listening mode (single user).
+- WebSocket upgrade requires a valid session and an `Origin` check; state-changing HTTP routes check `Origin` too. All config changes go through authenticated endpoints. No anonymous listening mode (single user).
 
 ## 8. Deployment & security
 
