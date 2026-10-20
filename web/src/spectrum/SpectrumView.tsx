@@ -1,4 +1,9 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { AudioControls } from "../audio/AudioControls";
+import { AudioController } from "../audio/controller";
+import { VfoController } from "../vfo/controller";
+import { defaultModeFor, snapFrequency, stepFor, toMarker, type StepChoice } from "../vfo/model";
+import { VfoPanel } from "../vfo/VfoPanel";
 import type { SpectrumFrame } from "./frame";
 import { LevelController, MIN_SPAN_DB, loadLevelSettings, saveLevelSettings } from "./levels";
 import { SpectrumInteraction } from "./interaction";
@@ -57,6 +62,24 @@ export function SpectrumView({ device = "dev0" }: Props) {
   const [controller] = useState(() => new LevelController(loadLevelSettings()));
   const tuning = useMemo(() => new TuningController({ device }), [device]);
   const tuningSnap = useSyncExternalStore(tuning.subscribe, tuning.getSnapshot);
+  const vfoCtl = useMemo(() => new VfoController({ device }), [device]);
+  const vfoSnap = useSyncExternalStore(vfoCtl.subscribe, vfoCtl.getSnapshot);
+  const audio = useMemo(() => new AudioController({ device }), [device]);
+  const audioSnap = useSyncExternalStore(audio.subscribe, audio.getSnapshot);
+  const [step, setStep] = useState<StepChoice>("auto");
+  // Pointer callbacks live in a long-running effect; they read the latest values from here.
+  const live = useRef({ step });
+  useEffect(() => {
+    live.current = { step };
+  });
+  const createVfoAt = useCallback(
+    (hz: number | null) => {
+      if (hz === null) return;
+      const mode = defaultModeFor(hz);
+      vfoCtl.create({ freqHz: snapFrequency(hz, stepFor(live.current.step, mode)), mode });
+    },
+    [vfoCtl],
+  );
   const [levels, setLevels] = useState<LevelsUi>(() => ({
     auto: controller.auto,
     lowDb: Math.round(controller.range.lowDb),
@@ -122,7 +145,19 @@ export function SpectrumView({ device = "dev0" }: Props) {
       leftPad: PLOT_LEFT_PAD,
       view,
       onTune: (hz) => tuning.request({ centerHz: hz }),
+      onVfoSelect: (id) => vfoCtl.select(id),
+      onVfoMove: (id, hz) => {
+        const v = vfoCtl.getSnapshot().vfos.find((x) => x.id === id);
+        if (v) vfoCtl.update(id, { freqHz: snapFrequency(hz, stepFor(live.current.step, v.mode)) });
+      },
+      onVfoCreate: (hz) => createVfoAt(hz),
     });
+    const pushVfos = () => {
+      const snap = vfoCtl.getSnapshot();
+      interaction?.setVfos(snap.vfos.map(toMarker), snap.selectedId);
+    };
+    pushVfos();
+    const offVfos = vfoCtl.subscribe(pushVfos);
     // Keep the zoom limits in step with the confirmed device tuning.
     let lastState: unknown = null;
     const offTuning = tuning.subscribe(() => {
@@ -167,6 +202,7 @@ export function SpectrumView({ device = "dev0" }: Props) {
     return () => {
       resetZoom.current = () => undefined;
       offTuning();
+      offVfos();
       tuning.stop();
       view.dispose();
       interaction?.destroy();
@@ -177,7 +213,34 @@ export function SpectrumView({ device = "dev0" }: Props) {
       plot.destroy();
       waterfall.destroy();
     };
-  }, [device, controller, tuning]);
+  }, [device, controller, tuning, vfoCtl, createVfoAt]);
+
+  // VFO list polling and the audio socket live as long as the view.
+  useEffect(() => {
+    vfoCtl.start();
+    audio.start();
+    return () => {
+      vfoCtl.stop();
+      audio.stop();
+    };
+  }, [vfoCtl, audio]);
+
+  // Subscribe to the audio of every VFO (frames also drive the S-meter while audio is off).
+  const vfoIds = vfoSnap.vfos.map((v) => v.id).join(",");
+  useEffect(() => {
+    audio.setVfos(vfoIds === "" ? [] : vfoIds.split(",").map(Number));
+  }, [audio, vfoIds]);
+
+  // Escape deselects the VFO again (a plain click then tunes the device centre).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target;
+      const typing = t instanceof HTMLElement && /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName);
+      if (e.key === "Escape" && !typing) vfoCtl.select(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [vfoCtl]);
 
   const applyManual = (lowDb: number, highDb: number) => {
     controller.setManual(lowDb, highDb);
@@ -276,6 +339,18 @@ export function SpectrumView({ device = "dev0" }: Props) {
         )}
       </header>
       <TuningControls tuning={tuningSnap} onTune={(patch) => tuning.request(patch)} />
+      <AudioControls audio={audio} snapshot={audioSnap} />
+      <VfoPanel
+        vfos={vfoSnap}
+        audio={audio}
+        audioSnap={audioSnap}
+        step={step}
+        onStep={setStep}
+        onCreate={() => createVfoAt(tuningSnap.display?.centerHz ?? null)}
+        onSelect={(id) => vfoCtl.select(id)}
+        onUpdate={(id, patch) => vfoCtl.update(id, patch)}
+        onRemove={(id) => vfoCtl.remove(id)}
+      />
       <div
         ref={containerRef}
         className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded"
@@ -289,7 +364,7 @@ export function SpectrumView({ device = "dev0" }: Props) {
         <canvas
           ref={overlayRef}
           className="absolute inset-0 size-full cursor-crosshair touch-none"
-          aria-label="Spectrum: wheel zooms, shift-drag pans, click tunes, double-click resets zoom"
+          aria-label="Spectrum: wheel zooms, shift-drag pans, click moves the selected VFO or tunes the centre, Alt/Ctrl-click creates a VFO, drag a VFO to retune it, double-click resets zoom"
         />
       </div>
     </section>
