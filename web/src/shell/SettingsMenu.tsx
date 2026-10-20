@@ -1,5 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { Field, IconButton, SegmentedControl, SettingsIcon } from "../ui";
+import { ChangePasswordDialog } from "../auth/ChangePasswordDialog";
+import { useAuth } from "../auth/context";
+import {
+  Button,
+  Field,
+  IconButton,
+  KeyIcon,
+  LogOutIcon,
+  SegmentedControl,
+  SettingsIcon,
+  UserIcon,
+} from "../ui";
 import { type ThemePreference } from "../ui/theme";
 
 interface Props {
@@ -10,6 +21,8 @@ interface Props {
 /** Settings popover (theme for now); the slot for future preferences. */
 export function SettingsMenu({ theme, onTheme }: Props) {
   const [open, setOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const auth = useAuth();
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -61,7 +74,43 @@ export function SettingsMenu({ theme, onTheme }: Props) {
             />
           </Field>
           <p className="text-xs text-fg-subtle">Saved in this browser.</p>
+          {auth && (
+            <div className="flex flex-col gap-1 border-t border-border pt-3">
+              <div className="flex min-w-0 items-center gap-2 px-1 pb-1 text-sm">
+                <UserIcon className="shrink-0 text-fg-subtle" />
+                <span className="sr-only">Signed in as</span>
+                <span className="truncate font-medium" data-testid="signed-in-user">
+                  {auth.username}
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                icon={<KeyIcon />}
+                className="justify-start"
+                onClick={() => {
+                  setOpen(false);
+                  setPasswordOpen(true);
+                }}
+              >
+                Change password
+              </Button>
+              <Button
+                variant="ghost"
+                icon={<LogOutIcon />}
+                className="justify-start"
+                onClick={() => {
+                  setOpen(false);
+                  void auth.signOut();
+                }}
+              >
+                Sign out
+              </Button>
+            </div>
+          )}
         </div>
+      )}
+      {passwordOpen && auth && (
+        <ChangePasswordDialog client={auth.client} onClose={() => setPasswordOpen(false)} />
       )}
     </div>
   );

@@ -1,7 +1,7 @@
 import { AudioButton } from "../audio/AudioControls";
 import type { SocketStatus } from "../spectrum/socket";
 import { formatRate } from "../spectrum/TuningControls";
-import { Badge, IconButton, MenuIcon, Slider, type BadgeTone } from "../ui";
+import { Badge, IconButton, Logo, MenuIcon, Slider, type BadgeTone } from "../ui";
 import type { ThemePreference } from "../ui/theme";
 import { ReceiverFrequency } from "./ReceiverFrequency";
 import { SettingsMenu } from "./SettingsMenu";
@@ -21,24 +21,6 @@ interface Props {
   onMenu: () => void;
 }
 
-function Wordmark() {
-  return (
-    <div className="flex items-center gap-2">
-      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" className="text-accent">
-        <rect width="24" height="24" rx="6" fill="currentColor" />
-        <path
-          d="M4 14c2.5 0 2.5-4 5-4s2.5 6 5 6 2.5-8 6-8"
-          fill="none"
-          stroke="var(--accent-fg)"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-      </svg>
-      <span className="text-sm font-semibold tracking-tight">Superhet</span>
-    </div>
-  );
-}
-
 export function TopBar({ r, theme, onTheme, drawerOpen, onMenu }: Props) {
   const st = STATUS[r.status];
   const display = r.tuningSnap.display;
@@ -56,7 +38,7 @@ export function TopBar({ r, theme, onTheme, drawerOpen, onMenu }: Props) {
           <MenuIcon />
         </IconButton>
       </div>
-      <Wordmark />
+      <Logo />
       <div role="status" className="flex items-center gap-2">
         <Badge tone={st.tone} dot pulse={st.pulse}>
           {st.label}

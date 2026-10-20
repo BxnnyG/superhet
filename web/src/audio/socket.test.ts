@@ -1,3 +1,4 @@
+import { notifyUnauthorized } from "../auth/session";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AudioSocket, audioUrl, normalizeVfoIds, subscribeMessage } from "./socket";
 
@@ -131,5 +132,77 @@ describe("AudioSocket", () => {
     expect(errors).toHaveLength(2);
     expect(errors[1]).toBe("too many");
     s.stop();
+  });
+});
+
+describe("AudioSocket while logged out", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", Object.assign(FakeSocket, { OPEN: 1 }));
+    FakeSocket.instances = [];
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  const build = () =>
+    new AudioSocket({
+      device: "dev0",
+      onFrame: () => undefined,
+      createSocket: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+
+  it("does not reconnect after the session was lost", () => {
+    const sock = build();
+    sock.start();
+    FakeSocket.instances[0]!.open();
+    notifyUnauthorized();
+    FakeSocket.instances[0]!.drop();
+    vi.advanceTimersByTime(60_000);
+    expect(FakeSocket.instances).toHaveLength(1);
+    sock.stop();
+  });
+
+  it("does not connect while logged out", () => {
+    notifyUnauthorized();
+    const sock = build();
+    sock.start();
+    expect(FakeSocket.instances).toHaveLength(0);
+    sock.stop();
+  });
+
+  it("stops reconnecting when a rejected upgrade is caused by auth", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ setup_required: false, authenticated: false }), {
+          status: 200,
+        }),
+      ),
+    );
+    const sock = build();
+    sock.start();
+    FakeSocket.instances[0]!.drop(); // closed without ever opening
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(FakeSocket.instances).toHaveLength(1);
+    sock.stop();
+  });
+
+  it("keeps the normal backoff when the session is still valid", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ setup_required: false, authenticated: true }), {
+          status: 200,
+        }),
+      ),
+    );
+    const sock = build();
+    sock.start();
+    FakeSocket.instances[0]!.drop();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(FakeSocket.instances).toHaveLength(2);
+    sock.stop();
   });
 });

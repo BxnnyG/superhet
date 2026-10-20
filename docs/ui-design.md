@@ -58,7 +58,18 @@ Tooltip (CSS only, hover and focus), Select (styled native), Slider (label, valu
 live markers), Toggle (switch), SegmentedControl (radio group, arrow keys), NumberField (typed
 value, optional parse/format, arrow stepping), Section (collapsible) and Panel, Badge, Meter (bar,
 marker, tick scale; can be driven imperatively), Field, EmptyState, Kbd, RowButton (selectable list
-row), FrequencyReadout (digit-tunable), icons (inline SVG only), `theme.ts`.
+row), FrequencyReadout (digit-tunable), TextField and PasswordField (label, hint, error; show/hide
+toggle), Alert (inline danger / warn / info message), Dialog (modal: portal, Esc and backdrop close,
+focus trap and restore), Logo (mark + wordmark), icons (inline SVG only), `theme.ts`.
+
+## Auth screens (`web/src/auth/`)
+
+Setup, login and the "cannot reach server" state share `AuthLayout`: a centred card (max 448 px,
+scrolls on short screens) under the logo, in both themes, usable at 375 px. Forms use
+`autocomplete` hints (`username`, `current-password`, `new-password`) so password managers work,
+focus the first field and submit on Enter. Errors are inline `Alert`s or field errors; rate limiting
+disables the submit button with a seconds countdown. A 401 from any request or an auth-rejected
+WebSocket returns the user to the login page; sockets do not reconnect while logged out.
 
 ## Rules
 

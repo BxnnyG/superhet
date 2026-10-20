@@ -1,5 +1,6 @@
 // Typed wrappers for the VFO REST routes (docs/api-devices.md) with runtime validation.
 
+import { apiFetch } from "../auth/session";
 import { ApiError, deviceUrl, httpError, isRec, readJson, type Rec } from "../spectrum/api";
 
 export type VfoMode = "wfm" | "nfm" | "am";
@@ -118,7 +119,7 @@ export function patchBody(patch: VfoPatch): Rec {
   return body;
 }
 
-export function createVfoApi(fetchImpl: typeof fetch = (...a) => fetch(...a)): VfoApi {
+export function createVfoApi(fetchImpl: typeof fetch = apiFetch): VfoApi {
   async function call(url: string, init: RequestInit): Promise<{ res: Response; body: unknown }> {
     let res: Response;
     try {

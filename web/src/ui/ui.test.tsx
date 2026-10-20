@@ -1,8 +1,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { expect, it, vi } from "vitest";
+import { Alert } from "./Alert";
 import { Badge } from "./Badge";
 import { Button } from "./Button";
+import { Dialog } from "./Dialog";
 import { IconButton } from "./IconButton";
 import { Meter } from "./Meter";
 import { NumberField } from "./NumberField";
@@ -10,6 +12,7 @@ import { Section } from "./Section";
 import { SegmentedControl } from "./SegmentedControl";
 import { Select } from "./Select";
 import { Slider, markerLeft } from "./Slider";
+import { PasswordField, TextField } from "./TextField";
 import { Toggle } from "./Toggle";
 import { Tooltip } from "./Tooltip";
 
@@ -161,4 +164,50 @@ it("Badge and Meter render", () => {
   );
   expect(screen.getByText("OK")).toBeInTheDocument();
   expect(screen.getByRole("meter", { name: "Level" })).toHaveAttribute("aria-valuenow", "0.5");
+});
+
+it("TextField wires label, hint and error to the input", () => {
+  render(<TextField label="Name" hint="Pick one" error="Required" />);
+  const input = screen.getByLabelText("Name");
+  expect(input).toHaveAttribute("aria-invalid", "true");
+  expect(input.getAttribute("aria-describedby")?.split(" ")).toHaveLength(2);
+  expect(screen.getByText("Required")).toBeInTheDocument();
+});
+
+it("PasswordField toggles visibility", () => {
+  render(<PasswordField label="Secret" />);
+  const input = screen.getByLabelText("Secret", { selector: "input" });
+  expect(input).toHaveAttribute("type", "password");
+  fireEvent.click(screen.getByRole("button", { name: "Show password" }));
+  expect(input).toHaveAttribute("type", "text");
+  fireEvent.click(screen.getByRole("button", { name: "Hide password" }));
+  expect(input).toHaveAttribute("type", "password");
+});
+
+it("Dialog traps focus, closes on Escape and backdrop, restores focus", () => {
+  const onClose = vi.fn();
+  render(
+    <>
+      <Button>opener</Button>
+      <Dialog title="Hello" onClose={onClose}>
+        <TextField label="First" />
+        <Button>last</Button>
+      </Dialog>
+    </>,
+  );
+  const dialog = screen.getByRole("dialog", { name: "Hello" });
+  expect(dialog).toHaveAttribute("aria-modal", "true");
+  expect(screen.getByLabelText("First")).toHaveFocus();
+  screen.getByRole("button", { name: "last" }).focus();
+  fireEvent.keyDown(document, { key: "Tab" });
+  expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(onClose).toHaveBeenCalledTimes(1);
+  fireEvent.pointerDown(dialog.parentElement!);
+  expect(onClose).toHaveBeenCalledTimes(2);
+});
+
+it("Alert announces errors", () => {
+  render(<Alert>Broken</Alert>);
+  expect(screen.getByRole("alert")).toHaveTextContent("Broken");
 });
