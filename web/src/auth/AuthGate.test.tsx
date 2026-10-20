@@ -117,6 +117,15 @@ describe("login errors", () => {
     expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled();
   });
 
+  it("formats long cooldowns as m:ss", async () => {
+    await openLogin(vi.fn().mockRejectedValue(new AuthError("rate_limited", "x", 885)));
+    expect(await screen.findByRole("button", { name: "Try again in 14:45" })).toBeDisabled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(screen.getByRole("button", { name: "Try again in 14:44" })).toBeDisabled();
+  });
+
   it("shows a loading state while the request is pending", async () => {
     let resolve: () => void = () => undefined;
     const login = vi.fn(() => new Promise<void>((r) => (resolve = r)));
