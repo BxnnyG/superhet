@@ -123,6 +123,10 @@
   #root {
     height: 100%;
   }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
   body {
     margin: 0;
     overflow: hidden;
