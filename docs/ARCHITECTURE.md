@@ -103,6 +103,8 @@ Concurrency inside sdrd: tokio for I/O; DSP runs on dedicated OS threads (device
 
 ### WebSocket framing (draft)
 
+The spectrum socket is specified in `docs/protocol-ws.md` (implemented: `/api/v1/ws/spectrum`); it reuses the bus frame format instead of the envelope below.
+
 Binary frame: `u8 kind | u8 flags | u16 stream_id | u32 seq | u64 timestamp_us | payload`.
 
 | kind | payload |
