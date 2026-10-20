@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AudioController } from "../audio/controller";
+import { cn } from "../ui";
 import { fpsBetween, type SpectrumMetrics } from "./metrics";
 import { formatDrift, summarizeDebug, type StatusSummary } from "./statusSummary";
 
@@ -15,14 +16,20 @@ function Stat({
   value,
   warn,
   title,
+  secondary,
 }: {
   label: string;
   value: string;
   warn?: boolean;
   title?: string;
+  /** Hidden below the shell breakpoint to keep the bar on one line. */
+  secondary?: boolean;
 }) {
   return (
-    <span className="inline-flex items-baseline gap-1.5" title={title}>
+    <span
+      className={cn("inline-flex items-baseline gap-1.5", secondary && "max-shell:hidden")}
+      title={title}
+    >
       <span className="text-fg-subtle">{label}</span>
       <span className={warn ? "text-warn" : "text-fg-muted"}>{value}</span>
     </span>
@@ -49,11 +56,11 @@ export function StatusBar({ audio, metrics }: Props) {
 
   return (
     <footer
-      className="flex h-7 shrink-0 items-center gap-4 overflow-x-auto border-t border-border bg-surface-1 px-4 font-mono text-[11px] whitespace-nowrap num"
+      className="flex h-7 shrink-0 items-center gap-3 overflow-x-auto border-t border-border bg-surface-1 px-4 font-mono text-[11px] whitespace-nowrap num"
       aria-label="Status"
     >
-      <Stat label="buffer" value={summary.buffer ?? "–"} />
-      <Stat label="drift" value={formatDrift(summary.driftPct)} />
+      <Stat secondary label="buffer" value={summary.buffer ?? "–"} />
+      <Stat secondary label="drift" value={formatDrift(summary.driftPct)} />
       <Stat
         label="latency"
         value={summary.latencyMs === null ? "–" : `${Math.round(summary.latencyMs)} ms`}
@@ -61,6 +68,7 @@ export function StatusBar({ audio, metrics }: Props) {
       />
       <Stat label="underruns" value={String(summary.underruns)} warn={summary.underruns > 0} />
       <Stat
+        secondary
         label="dropped"
         value={`${summary.lostSamples} smp`}
         warn={summary.lostSamples > 0}

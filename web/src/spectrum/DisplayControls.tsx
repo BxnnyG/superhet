@@ -108,6 +108,10 @@ export function DisplayControls({ controller, info, viewActions }: Props) {
       />
       <Slider
         label="Floor"
+        disabled={levels.auto}
+        title={
+          levels.auto ? "Automatic levels are on: switch them off to set the floor" : undefined
+        }
         min={dbMin}
         max={dbMax - MIN_SPAN_DB}
         value={levels.lowDb}
@@ -116,6 +120,10 @@ export function DisplayControls({ controller, info, viewActions }: Props) {
       />
       <Slider
         label="Ceiling"
+        disabled={levels.auto}
+        title={
+          levels.auto ? "Automatic levels are on: switch them off to set the ceiling" : undefined
+        }
         min={dbMin + MIN_SPAN_DB}
         max={dbMax}
         value={levels.highDb}
