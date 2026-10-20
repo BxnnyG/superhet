@@ -11,10 +11,13 @@ RUN pnpm build
 
 # ---- Stage 2: build all service binaries ----
 FROM rust:1-bookworm AS rust
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends librtlsdr-dev \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml rustfmt.toml ./
 COPY crates/ crates/
-RUN cargo build --release --locked \
+RUN cargo build --release --locked --features superhet-sdrd/rtlsdr \
     --bin superhet-api --bin superhet-sdrd --bin superhet-pluginhost --bin superhet-worker
 
 # ---- Stage 3: runtime ----

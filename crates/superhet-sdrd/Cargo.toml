@@ -28,5 +28,9 @@ tokio = { workspace = true, features = ["time"] }
 tower.workspace = true
 http-body-util.workspace = true
 
+[features]
+# RTL-SDR backend (links the system librtlsdr).
+rtlsdr = ["superhet-device/rtlsdr"]
+
 [lints]
 workspace = true
