@@ -25,7 +25,9 @@ Phase 0 (foundation) done and pushed → next: P1 core receiver (docs/ROADMAP.md
 - Done: CI release.yml – main → ghcr.io/bxnnyg/superhet:edge + sha-*, tag vX.Y.Z → semver image + GitHub Release (docs/releasing.md). amd64 only; first release needs version bump (0.0.0); set GHCR package public after first push.
 - Done: UI redesign (modern NetBird/Linear look, light+dark, web/src/ui kit + web/src/shell layout, digit-tunable readout, docs/ui-design.md, ROADMAP P1 criterion 10). ESLint blocks raw <button>/<select> outside web/src/ui. Open: device dropped_blocks not shown in browser, tooltips not touch-friendly.
 - Repo flow: short-lived feature branches → PR to main (CI green) → merge, delete branch; tags only on green main.
-- Next: merge feat/p1-spectrum via PR; then local auth (feat/p1-auth, before any exposure), then locks/claims/profiles, /metrics.
+- Done: local admin auth (ADR-0008, docs/api-auth.md): setup token in api log, Argon2id, PG sessions (7 d idle / 30 d abs), rate limit 5/IP + 50 global per 15 min, all /api/v1 + WS require session; web Setup/Login/AuthGate, change password, sign out, 401 → login, sockets pause when logged out. Live-tested with throwaway PG/NATS + file device. Waterfall degrades gracefully without WebGL2. CI now runs NATS live tests.
+- Dev: `SUPERHET_DEV_API=http://127.0.0.1:8083 vite --port 5174` to run next to a compose stack on :8073.
+- Next: locks/claims/profiles (P1 crit. 3, 6), /metrics + dropped_blocks to UI, then WFM stereo + SSB/CW demods (crit. 4), perf doc (crit. 7).
 - P1 start order: file device backend + IQ bus + FFT in sdrd → spectrum via NATS → api WS gateway → WebGL waterfall; then librtlsdr backend, tuning model, demods, Opus audio, local auth.
 - Spike before P3: confirm no usable open-source TETRA DMO decoder; collect own TMO/DMO reference recordings (review for private data before committing, SECURITY.md).
 - Tooling: TypeScript pinned 6.0.3 (typescript-eslint), gitleaks installed locally, cargo-nextest not; gitleaks-action needs license if repo moves to an org.
