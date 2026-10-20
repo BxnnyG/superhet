@@ -10,7 +10,7 @@ External components run as **separate processes** (plugins) or are **dynamically
 | SoapySDR | device backend (later) | BSL-1.0 | system package | – |
 | PostgreSQL | database (separate container) | PostgreSQL License | official image | – |
 | NATS server | message bus (separate container) | Apache-2.0 | official image | – |
-| libopus | audio encoding | BSD-3-Clause | system package / crate | – |
+| libopus | VFO audio encoding in `superhet-sdrd` (dynamic link, in-repo FFI in `superhet-bus` feature `opus`; also decodes in tests) | BSD-3-Clause | system package in image (`libopus0`; `libopus-dev` only in the build stage) | not vendored or bundled; hand-written FFI like librtlsdr |
 | rustfft and other Rust crates | core | MIT / Apache-2.0 (checked by `cargo deny` in CI) | compiled in | – |
 | multimon-ng | POCSAG/FLEX plugin | GPL-2.0 | plugin image | – |
 | direwolf | APRS plugin | GPL-2.0 | plugin image | – |

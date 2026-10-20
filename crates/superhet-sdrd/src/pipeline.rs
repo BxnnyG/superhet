@@ -12,6 +12,7 @@ use superhet_bus::spectrum::SpectrumFrame;
 use superhet_device::{Device, DeviceControl, IqStream};
 use superhet_dsp::{SpectrumConfig, SpectrumError, SpectrumProcessor};
 
+use crate::audio::IqTap;
 use crate::config::SpectrumSettings;
 
 /// Blocks buffered between device thread and DSP thread.
@@ -66,6 +67,8 @@ impl Pipeline {
     }
 
     /// Start streaming from `device` and call `sink` with each encoded [`SpectrumFrame`].
+    /// Every IQ block is also offered (as a shared `Arc`, not copied) to `tap` if given; a lagging
+    /// tap drops blocks and never delays the spectrum path.
     ///
     /// # Errors
     /// Fails if the settings are invalid or the device cannot start.
@@ -73,6 +76,7 @@ impl Pipeline {
         mut device: Box<dyn Device>,
         settings: &SpectrumSettings,
         mut sink: impl FnMut(Vec<u8>) + Send + 'static,
+        tap: Option<IqTap>,
     ) -> Result<Self, PipelineError> {
         let mut processor = SpectrumProcessor::new(SpectrumConfig {
             fft_size: settings.fft_size,
@@ -94,6 +98,10 @@ impl Pipeline {
                 let mut last_report = std::time::Instant::now();
                 let mut reported_drops = 0;
                 while let Ok(block) = stream.blocks.recv() {
+                    let block = Arc::new(block);
+                    if let Some(tap) = &tap {
+                        tap.send(&block);
+                    }
                     if block.tuning_epoch != epoch
                         || block.sample_rate != processor.config().sample_rate
                     {
@@ -203,9 +211,14 @@ mod tests {
             max_db: 0.0,
         };
         let (tx, rx) = channel();
-        let pipeline = Pipeline::start(device, &settings, move |frame| {
-            let _ = tx.send(frame);
-        })
+        let pipeline = Pipeline::start(
+            device,
+            &settings,
+            move |frame| {
+                let _ = tx.send(frame);
+            },
+            None,
+        )
         .expect("start");
         let bytes = rx.recv_timeout(Duration::from_secs(5)).expect("frame");
         drop(pipeline);
@@ -243,9 +256,14 @@ mod tests {
             max_db: 0.0,
         };
         let (tx, rx) = channel();
-        let pipeline = Pipeline::start(device, &settings, move |frame| {
-            let _ = tx.send(frame);
-        })
+        let pipeline = Pipeline::start(
+            device,
+            &settings,
+            move |frame| {
+                let _ = tx.send(frame);
+            },
+            None,
+        )
         .expect("start");
         let first = rx.recv_timeout(Duration::from_secs(5)).expect("frame");
         assert_eq!(

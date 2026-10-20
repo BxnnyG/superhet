@@ -2,7 +2,8 @@
 
 Runtime control of an SDR: `superhet-sdrd` serves control requests on the bus and publishes the
 device state; `superhet-api` exposes both over REST. Architecture background: `docs/ARCHITECTURE.md`
-sections 2 and 3. Not covered yet: VFOs, tuning locks/claims, profiles.
+sections 2 and 3. VFOs are bus-only so far (no REST route yet). Not covered yet: tuning
+locks/claims, profiles.
 
 ## REST (superhet-api, port 8073)
 
@@ -48,10 +49,51 @@ Body (at most 4 KiB, `Content-Type: application/json`), every field optional but
 
 ## State object
 
-`{"v":1,"device","driver","tuner"?,"center_hz","sample_rate","gain":{"mode":"auto"|"manual","db":null|number}|null,"ppm","bias_tee","tuning_epoch","gains_db":[...]}`
+`{"v":1,"device","driver","tuner"?,"center_hz","sample_rate","gain":{"mode":"auto"|"manual","db":null|number}|null,"ppm","bias_tee","tuning_epoch","gains_db":[...],"vfos":[...]}`
+
+`vfos` lists the device's VFOs (see below) with their current `status`; it is re-published on
+every VFO change and every retune (status follows the tuning). VFOs live in the daemon's memory
+and in this document; they are not restored after a daemon restart.
 
 `gain` is `null` for devices without gain control (file replay); `gains_db` lists the selectable
 manual steps. `tuner` is omitted when unknown.
+
+## VFOs
+
+A VFO is a demodulated channel at an absolute frequency inside the passband of the device. The
+daemon runs one channelizer per VFO on a dedicated thread, encodes the audio to Opus (48 kHz mono,
+20 ms frames, VBR; 64 kbit/s WFM, 24 kbit/s NFM/AM) and publishes it as binary `AudioFrame` v1 on
+`sh.v1.dev.<dev>.audio.<vfo_id>` (core NATS, lossy; format in `docs/protocol-audio.md`). At most 8
+VFOs per device.
+
+VFO object (in `vfos` and in replies):
+`{"id","freq_hz","mode":"wfm"|"nfm"|"am","bandwidth_hz","squelch_dbfs":null|number,"deemphasis":"none"|"50us"|"75us"|null,"offset_hz","status":"active"|"paused"}`
+
+- `id` is assigned by the daemon (starting at 1, increasing, not reused while the daemon runs).
+- `bandwidth_hz` is the effective value (mode default: WFM 180 kHz, NFM 12.5 kHz, AM 10 kHz).
+  `deemphasis` is the effective value (WFM 50 us, NFM none) and `null` for AM.
+- `offset_hz` = `freq_hz` minus the device centre, recomputed on every retune.
+- `status` is `paused` when `|offset_hz| + bandwidth_hz / 2 > sample_rate / 2`: no DSP, no audio
+  frames; the VFO resumes (channel reset) as soon as a retune brings it back into the passband.
+  While the squelch is closed frames keep flowing (they are tiny) with the squelch flag cleared.
+
+Requests (request/reply, JSON, `v` required, unknown fields rejected). Success replies are
+`{"v":1,"ok":true,"vfo":{...},"state":{...}}` (create, update) or
+`{"v":1,"ok":true,"state":{...}}` (delete); failures use the same `{"ok":false,"code","error"}`
+shape as `ctl.tune`. VFO requests are not coalesced.
+
+- `sh.v1.dev.<dev>.ctl.vfo.create`: `{"v":1,"freq_hz":..,"mode":"wfm"|"nfm"|"am","bandwidth_hz"?:..,
+  "squelch_dbfs"?:..,"deemphasis"?:..}`. `freq_hz` 1..1 THz, `bandwidth_hz` 1000..1000000 (and
+  realisable for the mode at the device's sample rate), `squelch_dbfs` -200..0 (absent or `null`
+  = off), `deemphasis` only for WFM/NFM. A VFO outside the passband is created `paused`.
+- `sh.v1.dev.<dev>.ctl.vfo.update`: `{"v":1,"id":..}` plus any of the fields above (partial patch,
+  at least one). `null` for `bandwidth_hz` / `squelch_dbfs` / `deemphasis` resets to the default /
+  off. Changing `mode` drops a `deemphasis` override unless given in the same request. Changing
+  mode or bandwidth rebuilds the channel (a short audio gap); frequency and squelch changes do not.
+- `sh.v1.dev.<dev>.ctl.vfo.delete`: `{"v":1,"id":..}`.
+
+Error codes: `invalid` (malformed or out-of-range request, unknown id, unrealisable bandwidth,
+de-emphasis on AM) and `unsupported` (the limit of 8 VFOs is reached).
 
 ## Tuning epoch
 
@@ -61,7 +103,8 @@ in. The RTL-SDR backend discards the samples around a change (the hardware is be
 two USB buffers may still hold old data); the spectrum pipeline resets its averaging and overlap
 state when the epoch changes and drops the first block. Spectrum frames take `center_hz` and
 `sample_rate` from the block, so they carry the new tuning from the first frame after the change;
-the frame wire format is unchanged.
+the frame wire format is unchanged. The VFO thread does the same: on an epoch change it recomputes
+every offset, resets the channels and ignores the first block.
 
 ## Devices
 

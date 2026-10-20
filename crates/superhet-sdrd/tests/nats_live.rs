@@ -291,3 +291,195 @@ async fn tune_over_ctl_updates_state_kv_and_spectrum_frames() {
     assert_eq!(reply["state"]["center_hz"], 145_500_000);
     let _ = std::fs::remove_file(&path);
 }
+
+/// Receive audio frames until `count` arrived or `timeout` passed.
+async fn recv_audio(
+    sub: &mut async_nats::Subscriber,
+    count: usize,
+    timeout: Duration,
+) -> Vec<superhet_bus::audio::AudioFrame> {
+    let deadline = Instant::now() + timeout;
+    let mut frames = Vec::new();
+    while frames.len() < count && Instant::now() < deadline {
+        if let Ok(Some(msg)) = tokio::time::timeout(Duration::from_millis(200), sub.next()).await {
+            frames.push(superhet_bus::audio::AudioFrame::decode(&msg.payload).expect("decode"));
+        }
+    }
+    frames
+}
+
+/// Throw away whatever is buffered or arrives within `quiet`.
+async fn drain_audio(sub: &mut async_nats::Subscriber, quiet: Duration) {
+    while let Ok(Some(_)) = tokio::time::timeout(quiet, sub.next()).await {}
+}
+
+#[tokio::test]
+async fn vfo_audio_flows_through_real_nats_and_follows_retunes() {
+    use superhet_bus::audio::FRAME_SAMPLES;
+    use superhet_bus::opus::Decoder;
+
+    let Ok(url) = std::env::var("SUPERHET_TEST_NATS_URL") else {
+        eprintln!("SUPERHET_TEST_NATS_URL not set; skipping");
+        return;
+    };
+    let pid = std::process::id();
+    let device_id = format!("vfo{pid}");
+    let path = std::env::temp_dir().join(format!("superhet-sdrd-vfo-{pid}.cu8"));
+    write_tone(&path);
+
+    let client = connect(&url).await;
+    let mut audio = client
+        .subscribe(format!("sh.v1.dev.{device_id}.audio.*"))
+        .await
+        .expect("subscribe");
+    client.flush().await.expect("flush");
+    let _daemon = start_daemon(&url, &device_id, &path).await;
+    let ctl = |cmd: &str| format!("sh.v1.dev.{device_id}.ctl.{cmd}");
+
+    // No VFO, no audio; the state document lists none.
+    let reply = request_json(&client, ctl("state"), "").await;
+    assert_eq!(reply["state"]["vfos"], serde_json::json!([]));
+    assert!(
+        recv_audio(&mut audio, 1, Duration::from_millis(500))
+            .await
+            .is_empty()
+    );
+
+    // Create a VFO on the 50 kHz tone.
+    let reply = request_json(
+        &client,
+        ctl("vfo.create"),
+        r#"{"v":1,"freq_hz":433970000,"mode":"nfm","squelch_dbfs":-40}"#,
+    )
+    .await;
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["vfo"]["id"], 1);
+    assert_eq!(reply["vfo"]["status"], "active");
+    assert_eq!(reply["vfo"]["offset_hz"], 50_000.0);
+    assert_eq!(reply["vfo"]["bandwidth_hz"], 12_500);
+    assert_eq!(reply["state"]["vfos"][0]["id"], 1);
+
+    let frames = recv_audio(&mut audio, 30, Duration::from_secs(10)).await;
+    assert!(frames.len() >= 25, "got {} frames", frames.len());
+    for pair in frames.windows(2) {
+        assert_eq!(pair[1].seq, pair[0].seq.wrapping_add(1));
+        assert_eq!(
+            pair[1].sample_pos,
+            pair[0].sample_pos + FRAME_SAMPLES as u64
+        );
+        assert!(pair[1].capture_unix_ns >= pair[0].capture_unix_ns);
+    }
+    let now_ns = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos() as u64;
+    for frame in &frames {
+        assert_eq!(frame.vfo_id, 1);
+        assert_eq!(frame.sample_rate, 48_000);
+        assert_eq!(frame.channels, 1);
+        assert!(frame.capture_unix_ns <= now_ns);
+        assert!(now_ns - frame.capture_unix_ns < 30_000_000_000);
+        assert!(frame.power_dbfs > -20.0, "tone should read near 0 dBFS");
+    }
+    let mut decoder = Decoder::new().expect("decoder");
+    let mut pcm = vec![0f32; FRAME_SAMPLES];
+    let decoded = decoder
+        .decode_float(&frames[0].payload, &mut pcm)
+        .expect("opus decode");
+    assert_eq!(decoded, FRAME_SAMPLES);
+
+    // The state document (and its KV copy) shows the VFO.
+    let reply = request_json(&client, ctl("state"), "").await;
+    assert_eq!(reply["state"]["vfos"][0]["status"], "active");
+
+    // Bad requests are rejected with the usual codes; the VFO stays untouched.
+    for (cmd, body, code) in [
+        (
+            "vfo.create",
+            r#"{"v":1,"freq_hz":1,"mode":"ssb"}"#,
+            "invalid",
+        ),
+        ("vfo.create", "nope", "invalid"),
+        ("vfo.update", r#"{"v":1,"id":99,"freq_hz":5}"#, "invalid"),
+        ("vfo.update", r#"{"v":1,"id":1}"#, "invalid"),
+        ("vfo.delete", r#"{"v":1,"id":99}"#, "invalid"),
+        ("vfo.bogus", "{}", "invalid"),
+    ] {
+        let reply = request_json(&client, ctl(cmd), body).await;
+        assert_eq!(
+            (reply["ok"].clone(), reply["code"].clone()),
+            (false.into(), code.into()),
+            "{cmd} {body}: {reply}"
+        );
+    }
+
+    // Partial update: only the given fields change.
+    let reply = request_json(
+        &client,
+        ctl("vfo.update"),
+        r#"{"v":1,"id":1,"squelch_dbfs":null,"bandwidth_hz":8000}"#,
+    )
+    .await;
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["vfo"]["squelch_dbfs"], serde_json::Value::Null);
+    assert_eq!(reply["vfo"]["bandwidth_hz"], 8000);
+    assert_eq!(reply["vfo"]["freq_hz"], 433_970_000u64);
+    assert_eq!(reply["vfo"]["mode"], "nfm");
+
+    // Retune away: the VFO pauses and the audio stops ...
+    let reply = request_json(&client, ctl("tune"), r#"{"v":1,"center_hz":440000000}"#).await;
+    assert_eq!(reply["state"]["vfos"][0]["status"], "paused", "{reply}");
+    drain_audio(&mut audio, Duration::from_millis(400)).await;
+    assert!(
+        recv_audio(&mut audio, 1, Duration::from_millis(700))
+            .await
+            .is_empty()
+    );
+    // ... and comes back with the offset recomputed.
+    let reply = request_json(&client, ctl("tune"), r#"{"v":1,"center_hz":433920000}"#).await;
+    assert_eq!(reply["state"]["vfos"][0]["status"], "active", "{reply}");
+    let resumed = recv_audio(&mut audio, 10, Duration::from_secs(10)).await;
+    assert!(resumed.len() >= 10, "audio did not resume");
+
+    // Limit of eight VFOs.
+    for n in 2..=8 {
+        let reply = request_json(
+            &client,
+            ctl("vfo.create"),
+            r#"{"v":1,"freq_hz":433920000,"mode":"am"}"#,
+        )
+        .await;
+        assert_eq!(reply["vfo"]["id"], n, "{reply}");
+    }
+    let reply = request_json(
+        &client,
+        ctl("vfo.create"),
+        r#"{"v":1,"freq_hz":433920000,"mode":"am"}"#,
+    )
+    .await;
+    assert_eq!(
+        (reply["ok"].clone(), reply["code"].clone()),
+        (false.into(), "unsupported".into())
+    );
+    for n in 2..=8 {
+        let reply = request_json(
+            &client,
+            ctl("vfo.delete"),
+            &format!(r#"{{"v":1,"id":{n}}}"#),
+        )
+        .await;
+        assert_eq!(reply["ok"], true, "{reply}");
+    }
+
+    // Delete the last VFO: audio ends and the state is empty again.
+    let reply = request_json(&client, ctl("vfo.delete"), r#"{"v":1,"id":1}"#).await;
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["state"]["vfos"], serde_json::json!([]));
+    drain_audio(&mut audio, Duration::from_millis(400)).await;
+    assert!(
+        recv_audio(&mut audio, 1, Duration::from_millis(700))
+            .await
+            .is_empty()
+    );
+    let _ = std::fs::remove_file(&path);
+}
