@@ -5,7 +5,7 @@ Phase 0 (foundation) done and pushed → next: P1 core receiver (docs/ROADMAP.md
 
 ## Erledigt
 - Name check: "Superhet" free on crates.io/npm/PyPI, no SDR project collision; Docker Hub `djbird/superhet` exists → images go to `ghcr.io/bxnnyg/superhet`.
-- Repo `github.com/BxnnyG/superhet` (private), commits with GitHub noreply identity (repo-local git config).
+- Repo `github.com/BxnnyG/superhet` (public), commits with GitHub noreply identity (repo-local git config).
 - LICENSE (AGPL-3.0), NOTICE (§7(b) attribution), README, SECURITY.md, CLAUDE.md, `.claude/agents/{scout,worker}.md`.
 - docs: SCOPE (incl. SDR# parity + beyond), ARCHITECTURE (services, bus subjects), ROADMAP, licenses, ADR 0001–0007.
 - Skeleton: crates superhet-{api,sdrd,pluginhost,worker} (bins, /healthz), superhet-{bus,db,device,dsp,plugin-protocol} (libs); web (React 19, Vite 8, Tailwind 4); compose with postgres:18.6-alpine + nats:2.15.1-alpine (JetStream, per-service users); gen-secrets.sh; CI (rust w/ Postgres+NATS, web, deny, gitleaks, docker); git hooks; check.sh green.
@@ -22,7 +22,10 @@ Phase 0 (foundation) done and pushed → next: P1 core receiver (docs/ROADMAP.md
 - Done: sdrd VFOs (ctl.vfo.{create,update,delete}, max 8, paused when outside span, in state doc `vfos[]`), one `sdrd-vfo` thread fed by Arc'd blocks (queue 16, drop+count), in-repo libopus FFI (superhet-bus feature `opus`), AudioFrame v1 on `sh.v1.dev.<dev>.audio.<vfo>` (docs/protocol-audio.md). Live NATS test green. Open: VFO restore after sdrd restart (from KV), capture_unix_ns is estimated.
 - Done: api VFO REST (GET/POST /devices/{dev}/vfos, PATCH/DELETE /vfos/{id}, 404 via sdrd code not_found) + audio WS `/api/v1/ws/audio?dev=` (subscribe msg, refcounted NATS sub per (dev,vfo), per-client queue 32 drop-oldest). tests/vfo_live.rs needs sdrd binary built.
 - Done: web audio (WebCodecs Opus → AudioWorklet, jitter 100 ms, PI drift ±0.5 %) + VFO UI (web/README.md gestures). Live on RTL-SDR: WFM 99.2 MHz, buf 100 ms, 0 underruns, drift settles ~0.002 %, latency ≈170 ms. Open: WASM Opus fallback, WFM stereo/RDS, VFO restore after sdrd restart, VFO push via state subject instead of 2 s polling, ear check by user.
-- Next: local auth (before any exposure), then locks/claims/profiles, /metrics.
+- Done: CI release.yml – main → ghcr.io/bxnnyg/superhet:edge + sha-*, tag vX.Y.Z → semver image + GitHub Release (docs/releasing.md). amd64 only; first release needs version bump (0.0.0); set GHCR package public after first push.
+- Done: UI redesign (modern NetBird/Linear look, light+dark, web/src/ui kit + web/src/shell layout, digit-tunable readout, docs/ui-design.md, ROADMAP P1 criterion 10). ESLint blocks raw <button>/<select> outside web/src/ui. Open: device dropped_blocks not shown in browser, tooltips not touch-friendly.
+- Repo flow: short-lived feature branches → PR to main (CI green) → merge, delete branch; tags only on green main.
+- Next: merge feat/p1-spectrum via PR; then local auth (feat/p1-auth, before any exposure), then locks/claims/profiles, /metrics.
 - P1 start order: file device backend + IQ bus + FFT in sdrd → spectrum via NATS → api WS gateway → WebGL waterfall; then librtlsdr backend, tuning model, demods, Opus audio, local auth.
 - Spike before P3: confirm no usable open-source TETRA DMO decoder; collect own TMO/DMO reference recordings (review for private data before committing, SECURITY.md).
 - Tooling: TypeScript pinned 6.0.3 (typescript-eslint), gitleaks installed locally, cargo-nextest not; gitleaks-action needs license if repo moves to an org.
