@@ -81,8 +81,8 @@ Concurrency inside sdrd: tokio for I/O; DSP runs on dedicated OS threads (device
 
 | Subject | Kind | Producer → consumer |
 |---|---|---|
-| `sh.v1.dev.<dev>.ctl.<cmd>` | request/reply | api/pluginhost → sdrd (tune, state, vfo.create/update/delete implemented; profile.load, claim, lock planned; see `docs/api-devices.md`) |
-| `sh.v1.dev.<dev>.state` | pub/sub + KV bucket `STATE` (key `dev.<dev>`) | sdrd → all (tuning and VFOs implemented; locks, decoder bindings planned) |
+| `sh.v1.dev.<dev>.ctl.<cmd>` | request/reply | api/pluginhost → sdrd (tune, state, vfo.create/update/delete, lock.acquire/release, profile.load implemented; claim planned; see `docs/api-devices.md`) |
+| `sh.v1.dev.<dev>.state` | pub/sub + KV bucket `STATE` (key `dev.<dev>`) | sdrd → all (tuning, VFOs and lock holders implemented, one document per change; decoder bindings planned). The KV key `restore.<dev>` keeps the last state across restarts. Browsers receive the documents through `/api/v1/ws/state` (`docs/protocol-ws.md`) |
 | `sh.v1.dev.<dev>.spectrum` | pub/sub | sdrd → api (quantised FFT frames) |
 | `sh.v1.dev.<dev>.audio.<stream>` | pub/sub (core NATS, lossy) | sdrd / pluginhost → api, recorder (binary `AudioFrame` v1 with one Opus packet each, see `docs/protocol-audio.md`; `<stream>` is the VFO id for device VFOs) |
 | `sh.v1.events.<plugin>.<type>` | JetStream `EVENTS` | pluginhost → worker (persist), api (live) |
@@ -118,18 +118,21 @@ Text frames: JSON `{ "type": "...", ... }` for commands (`tune`, `vfo.update`, `
 ## 3. Tuning model
 
 Definitions:
-- **Window**: `[center − usable/2, center + usable/2]`, `usable ≈ 0.85 × sample_rate` (anti-alias roll-off) minus a small DC guard band around the center.
+- **Window**: `[center − usable/2, center + usable/2]`, `usable = 0.85 × sample_rate` (anti-alias roll-off); published in the state document as `window`. A channel is inside if its whole bandwidth is. (A DC guard band is not enforced: the retune rule below keeps the active VFO off the centre.)
 - **Binding**: every VFO and decoder instance has an absolute frequency (and bandwidth). Nothing stores offsets relative to the center.
 
 ### 3.1 Free tuning (default)
 
 - The user drags/clicks anywhere in the spectrum or types a frequency. If the target channel is inside the window, only the VFO moves.
-- If it is outside (or within a margin of the edge), the **center follows**: the new center is chosen so that the active VFO sits at ~¼ of the window from the center (off DC, room to continue in the same direction). If all *bound and running* decoders plus the active VFO fit into the usable span, the center is chosen to keep all of them inside ("fit" mode); otherwise the active VFO wins.
-- Retunes are debounced (~30 ms) during drags. Each retune increments `tuning_epoch`; samples from the settling period are discarded downstream.
+- If it is outside (the roll-off margin at the edge counts as outside), the **center follows**. The rule runs in `superhet-sdrd` when a VFO is created or its frequency, mode or bandwidth changes, so every client behaves the same (`crates/superhet-sdrd/src/window.rs`):
+  - the target puts the active VFO at ¼ of the window width from the center, on the side it came from (off DC, room to continue in the same direction); a channel wider than half the window sits as far in as it fits, one wider than the window never retunes;
+  - "fit" mode: the other VFOs that are inside the window now (later also *bound and running* decoders) are kept inside if they and the active VFO fit into the usable span together; the target center is then pulled just far enough. Otherwise the active VFO wins and the others pause;
+  - with a tuning lock held (3.4) nothing retunes: the VFO stays where the user put it and is `paused` (the reply says `retune:"locked"`).
+- Retunes caused by VFO moves are applied immediately (each moves the window by most of its width, so a drag causes few). Explicit `ctl.tune` requests are coalesced (~30 ms debounce, 150 ms at most). Each retune increments `tuning_epoch`; samples from the settling period are discarded downstream.
 
 ### 3.2 Profiles
 
-A profile is a preset: `center_hz`, `sample_rate`, `gain` (mode + value), `ppm`, `bias_tee`, VFO list (freq, mode, bandwidth, squelch, …), decoder instances (plugin id, freq, config), optional `exclusive` and `lock` flags. Loading applies it atomically; "save as profile" snapshots the current state. Profiles are versioned JSON in the DB and exportable.
+A profile is a preset: `center_hz`, `sample_rate`, `gain` (mode + value), `ppm`, `bias_tee`, VFO list (freq, mode, bandwidth, squelch, …), a `lock` flag, later decoder instances (plugin id, freq, config; the `decoders` array is reserved) and an `exclusive` flag. Loading (`ctl.profile.load`) applies it atomically: everything is validated first, so a refusal (lock, unrealisable VFO, unsupported setting) changes nothing; the VFO set is replaced. "Save as profile" snapshots the daemon's current state. Profiles are versioned JSON (`superhet.profiles`, `data` jsonb, unique name) and exportable; the exact contract is `docs/api-profiles.md`.
 
 ### 3.3 Decoder binding & states
 
@@ -152,7 +155,8 @@ Paused decoders keep their process alive for a grace period (default 60 s) and a
 
 ### 3.4 Tuning lock & exclusive claims
 
-- **Lock holders**: the user (manual lock), running recordings, optional "lock while a call is active" per decoder. While any holder exists, center/sample-rate changes are rejected with a reason listing the holders; VFOs can still move inside the window.
+- **Lock holders**: the user (manual lock), running recordings, optional "lock while a call is active" per decoder. While any holder exists, center/sample-rate changes (`ctl.tune`, profile load) are rejected with `code:"locked"` and the holders listed; VFOs can still move inside the window. Holders are a list of `{kind, id, since_ms}` in the state document (`locks`); only `kind:"user"` is implemented, the rest plugs in without a format change. The user lock is persisted with the restore snapshot.
+- **Restore**: sdrd saves every state document under KV key `restore.<dev>` and re-applies it on start (tuning, VFOs with ids, user lock) when device id and driver match, before it serves any request.
 - **Exclusive decoders** (e.g. ADS-B) send a claim: the device manager snapshots the current state, applies the decoder's `center_hz`/`sample_rate`, takes a lock, pauses all other consumers that do not fit, and restores the snapshot when the claim is released. Only one exclusive claim at a time.
 
 ## 4. Device layer

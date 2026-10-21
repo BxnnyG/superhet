@@ -2,7 +2,8 @@
 
 Runtime control of an SDR: `superhet-sdrd` serves control requests on the bus and publishes the
 device state; `superhet-api` exposes both over REST. Architecture background: `docs/ARCHITECTURE.md`
-sections 2 and 3. Not covered yet: tuning locks/claims, profiles.
+sections 2 and 3. Profiles: `docs/api-profiles.md`. Not covered yet: recording/decoder lock holders
+and exclusive claims.
 
 ## REST (superhet-api, port 8073)
 
@@ -26,11 +27,18 @@ Body (at most 4 KiB, `Content-Type: application/json`), every field optional but
 - The API forwards the body as `ctl.tune` request and returns the daemon's reply unchanged:
   `{"v":1,"ok":true,"state":{...}}` or `{"v":1,"ok":false,"code":"invalid|not_found|unsupported|device","error":"..."}`.
 - Status codes: `200` applied; `400` invalid body/value (`invalid`) or a setting the device lacks
-  (`unsupported`, e.g. gain on a file replay); `403` `Origin` not allowed; `413` body too large;
+  (`unsupported`, e.g. gain on a file replay); `409` the tuning is locked (`locked`, see "Tuning
+  lock"); `403` `Origin` not allowed; `413` body too large;
   `415` wrong content type; `502` device or bus failure; `503` no bus, or nobody serves this device;
   `504` no answer within 2 s.
 - CSRF: same `Origin` policy as the WebSocket (`SUPERHET_ALLOWED_ORIGINS`, default same-origin;
   requests without `Origin` pass, they are subject to authentication only).
+
+### Tuning lock routes
+
+`POST /api/v1/devices/{dev}/lock` takes the user lock, `DELETE /api/v1/devices/{dev}/lock`
+releases it. No body. Both are idempotent and answer `200` with `{"v":1,"ok":true,"state":{...}}`
+(the state carries `locks`). Same CSRF policy and error shape as `/tune`. Semantics: "Tuning lock".
 
 ### VFO routes
 
@@ -42,7 +50,7 @@ fields and limits: section "VFOs" below. Bodies are at most 4 KiB, `Content-Type
 - `GET`: `{"v":1,"vfos":[...]}`, taken from the device state (same source as `/state`, so it may
   lag a change by a moment).
 - `POST`: body as `ctl.vfo.create`. `201` with the daemon's reply unchanged
-  (`{"v":1,"ok":true,"vfo":{...},"state":{...}}`) and `Location: /api/v1/devices/{dev}/vfos/{id}`.
+  (`{"v":1,"ok":true,"vfo":{...},"retune":"none|applied|locked|failed","state":{...}}`) and `Location: /api/v1/devices/{dev}/vfos/{id}`.
 - `PATCH`: partial update as `ctl.vfo.update`; the id comes from the URL (a different `"id"` in the
   body is a `400`). At least one field is required; `null` resets `bandwidth_hz`, `squelch_dbfs`
   and `deemphasis`. `200` with the daemon's reply.
@@ -63,19 +71,35 @@ fields and limits: section "VFOs" below. Bodies are at most 4 KiB, `Content-Type
   to every requester. A caller whose request was superseded sees the final state in the reply.
 - `sh.v1.dev.<dev>.ctl.state` (request/reply): reply `{"v":1,"ok":true,"state":{...}}`.
 - Unknown commands are answered with `ok:false`, `code:"invalid"`.
-- State is published after start-up and every change on `sh.v1.dev.<dev>.state` (core NATS) and
-  written to KV bucket `STATE` (history 1, file storage, created by sdrd if missing), key
-  `dev.<dev>`; it is re-published every 30 s and the key is removed on graceful shutdown. After a
-  crash the last state stays in KV until the daemon is back, so treat it as "last known".
-  KV is updated asynchronously, i.e. shortly *after* the tune reply.
+- `sh.v1.dev.<dev>.ctl.lock.acquire` / `.ctl.lock.release` (request/reply): body `{"v":1}`, reply
+  as `ctl.state`. Take or drop the user lock (idempotent).
+- `sh.v1.dev.<dev>.ctl.profile.load` (request/reply): `{"v":1,"profile":{...}}` (the profile
+  document, `docs/api-profiles.md`), reply as `ctl.state`. Section "Profiles" below.
+- State is published after start-up and on **every change** (tune, gain/ppm/bias, VFO create/update/
+  delete, lock, profile load, free-tuning retune) on `sh.v1.dev.<dev>.state` (core NATS, payload
+  = the state object, nothing else) and written to KV bucket `STATE` (history 1, file storage,
+  created by sdrd if missing), key `dev.<dev>`; it is re-published every 30 s and the key is
+  removed on graceful shutdown. After a crash the last state stays in KV until the daemon is back,
+  so treat it as "last known". KV is updated asynchronously, i.e. shortly *after* the tune reply.
+  Browsers get the same documents pushed through `/api/v1/ws/state` (`docs/protocol-ws.md`).
+- Restore: every published state is also written to KV key `restore.<dev>`, which (unlike
+  `dev.<dev>`) is kept on shutdown. On start the daemon reads it before it serves requests or
+  publishes anything, and applies it if `device` and `driver` match: centre, rate, gain, ppm and
+  bias tee (each on its own; what the device refuses is skipped with a warning), the VFOs with
+  their ids and the user lock. If the bus is not usable within 30 s the daemon starts with the
+  device's own settings and leaves the snapshot alone until the next start.
 
 ## State object
 
-`{"v":1,"device","driver","tuner"?,"center_hz","sample_rate","gain":{"mode":"auto"|"manual","db":null|number}|null,"ppm","bias_tee","tuning_epoch","gains_db":[...],"vfos":[...]}`
+`{"v":1,"device","driver","tuner"?,"center_hz","sample_rate","gain":{"mode":"auto"|"manual","db":null|number}|null,"ppm","bias_tee","tuning_epoch","gains_db":[...],"vfos":[...],"locks":[...],"window":{"start_hz","end_hz"}}`
 
 `vfos` lists the device's VFOs (see below) with their current `status`; it is re-published on
 every VFO change and every retune (status follows the tuning). VFOs live in the daemon's memory
-and in this document; they are not restored after a daemon restart.
+and in this document, and survive a daemon restart through the restore snapshot (above).
+
+`window` is the usable window (85 % of the sample rate around the centre, ARCHITECTURE 3); the
+lower edge can be negative for very low centres. `locks` lists the lock holders (empty = tuning
+is free), see "Tuning lock".
 
 `gain` is `null` for devices without gain control (file replay); `gains_db` lists the selectable
 manual steps. `tuner` is omitted when unknown.
@@ -95,8 +119,9 @@ VFO object (in `vfos` and in replies):
 - `bandwidth_hz` is the effective value (mode default: WFM 180 kHz, NFM 12.5 kHz, AM 10 kHz).
   `deemphasis` is the effective value (WFM 50 us, NFM none) and `null` for AM.
 - `offset_hz` = `freq_hz` minus the device centre, recomputed on every retune.
-- `status` is `paused` when `|offset_hz| + bandwidth_hz / 2 > sample_rate / 2`: no DSP, no audio
-  frames; the VFO resumes (channel reset) as soon as a retune brings it back into the passband.
+- `status` is `paused` when `|offset_hz| + bandwidth_hz / 2 > 0.85 * sample_rate / 2` (outside the
+  usable window): no DSP, no audio frames; the VFO resumes (channel reset) as soon as a retune
+  brings it back into the window.
   While the squelch is closed frames keep flowing (they are tiny) with the squelch flag cleared.
 
 Requests (request/reply, JSON, `v` required, unknown fields rejected). Success replies are
@@ -114,9 +139,43 @@ shape as `ctl.tune`. VFO requests are not coalesced.
   mode or bandwidth rebuilds the channel (a short audio gap); frequency and squelch changes do not.
 - `sh.v1.dev.<dev>.ctl.vfo.delete`: `{"v":1,"id":..}`.
 
+Free tuning: a VFO that is created, or updated in `freq_hz`, `mode` or `bandwidth_hz`, and ends up
+outside the usable window makes the centre follow (rule: ARCHITECTURE 3.1). The daemon does this
+itself, so all clients behave the same. The create/update reply says what happened in `retune`:
+`none` (inside the window, or not moved), `applied` (centre moved, the reply's `state` has it),
+`locked` (outside the window but the tuning is locked: the VFO stays where it is, `paused`, no
+retune) or `failed` (the device refused the retune; the VFO is outside the window). Retunes are
+applied immediately, not debounced: every one moves the window by most of its width, so a drag
+causes few of them.
+
 Error codes: `invalid` (malformed or out-of-range request, unrealisable bandwidth, de-emphasis on
 AM), `not_found` (unknown VFO id in update/delete) and `unsupported` (the limit of 8 VFOs is
 reached).
+
+## Tuning lock
+
+While any lock holder exists, requests that change the centre or sample rate are refused with
+`code:"locked"` (REST `409`): `ctl.tune` (a request that only repeats the current centre/rate is
+fine; gain, ppm and bias tee are not covered) and `ctl.profile.load` when the profile has a
+different centre or rate. VFOs keep working: they can be created, moved and deleted inside the
+window, and one moved outside simply pauses (`retune:"locked"`). The error reply:
+
+`{"v":1,"ok":false,"code":"locked","error":"tuning is locked by: user","holders":[{"kind":"user","id":"user","since_ms":1760000000000}]}`
+
+`holders` entries (also in the state's `locks`) have `kind`, `id` (identifies the holder within its
+kind) and `since_ms` (Unix ms). Only `kind:"user"` exists today (`ctl.lock.*`, the REST lock
+routes, or a profile with `lock:true`); recordings, decoders and exclusive claims will add their
+own kinds without changing this shape. The lock survives a daemon restart (restore snapshot) but
+nothing else releases it: loading a profile never does.
+
+## Profiles
+
+`ctl.profile.load` applies a profile document in one go: nothing is touched if the lock refuses the
+tuning, a VFO is not realisable at the profile's rate, or the device refuses the settings (e.g. a
+different sample rate on a file replay: `unsupported`). Otherwise centre, rate, gain (if the
+profile has one), ppm and bias tee are applied, the VFO set is **replaced** (new ids, continuing
+the sequence) and, if the profile has `lock:true`, the user lock is taken. Reply: the new state.
+The only non-atomic corner is a device that snaps the sample rate to something a VFO cannot use.
 
 ## Tuning epoch
 

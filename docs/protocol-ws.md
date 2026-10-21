@@ -1,6 +1,6 @@
-# WebSocket protocol: spectrum gateway (v1)
+# WebSocket protocol: spectrum gateway and state feed (v1)
 
-Endpoint: `GET /api/v1/ws/spectrum?dev=<device-id>` on **superhet-api** (port 8073). Part of the
+The state feed (`/api/v1/ws/state`) is described at the end. Spectrum endpoint: `GET /api/v1/ws/spectrum?dev=<device-id>` on **superhet-api** (port 8073). Part of the
 browser-facing edge described in `docs/ARCHITECTURE.md` (section 2, step 3a). The audio socket
 (`docs/protocol-audio.md`) follows the same conventions; the event socket will too.
 
@@ -46,3 +46,30 @@ One bus subscription per device is shared by all clients through a small broadca
 (4 frames). A client that does not keep up silently skips the oldest frames; it never delays other
 clients or the bus subscription. A client that cannot accept a message for 5 s is disconnected.
 Spectrum is lossy live data by design.
+
+# State feed
+
+Endpoint: `GET /api/v1/ws/state?dev=<device-id>` on **superhet-api**. Pushes the device state
+(`docs/api-devices.md`, "State object": tuning, gain, VFOs with status, locks, window) whenever
+it changes, so clients do not poll `GET /api/v1/devices/{dev}/state`. Origin check, session
+cookie and the `400`/`403`/`503` refusals work as for the spectrum socket (`400` for an invalid
+`dev`, at most 32 clients).
+
+## Server to client
+
+Text frames only, JSON, always `{"v":1,"type":"state","state":{...}}` with the complete state
+object. There are no diffs: the newest frame replaces everything the client knew.
+
+- The first frame is the current state (asked from the daemon, falling back to the last known
+  one in KV). If the device has no state yet (daemon not running), no frame is sent until it
+  appears.
+- Then one frame per published state: every tune, gain/ppm/bias change, free-tuning retune,
+  VFO create/update/delete, lock change and profile load, plus a re-publish every 30 s. The frames
+  are the daemon's state documents on `sh.v1.dev.<dev>.state`, in order; right after connecting a
+  client can briefly see a document it already has, or one just older than the first frame, so
+  treat the last frame as the truth.
+- The feed does not announce that the daemon went away; clients that need to know watch their
+  own request failures (`503` on control routes) or the missing 30 s re-publish.
+
+A client that cannot accept a frame for 5 s is disconnected. Text sent by the client is ignored.
+Spectrum frames stay on `/api/v1/ws/spectrum`; audio on `/api/v1/ws/audio`.
