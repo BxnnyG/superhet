@@ -6,6 +6,8 @@ mod auth;
 mod devices;
 mod hub;
 mod origin;
+mod profiles;
+mod state_ws;
 mod view;
 mod ws;
 
@@ -37,6 +39,13 @@ fn app(
     let protected = Router::new()
         .merge(ws::router(ws))
         .merge(audio_ws::router(audio))
+        .merge(state_ws::router(state_ws::StateWsState::new(
+            devices.clone(),
+        )))
+        .merge(profiles::router(profiles::ProfilesState::new(
+            devices.clone(),
+            deps.db.clone(),
+        )))
         .merge(devices::router(devices));
     Router::new()
         .route("/healthz", get(healthz))
@@ -185,6 +194,9 @@ mod tests {
             "/api/v1/devices/rtl0/state",
             "/api/v1/ws/spectrum?dev=rtl0",
             "/api/v1/ws/audio?dev=rtl0",
+            "/api/v1/ws/state?dev=rtl0",
+            "/api/v1/profiles",
+            "/api/v1/devices/rtl0/lock",
             "/api/v1/does/not/exist",
             "/",
         ] {

@@ -1,6 +1,6 @@
-//! Device state, tuning and VFOs over REST: `GET /api/v1/devices/{dev}/state`,
-//! `POST /api/v1/devices/{dev}/tune` and `/api/v1/devices/{dev}/vfos[/{id}]`. Protocol:
-//! `docs/api-devices.md`.
+//! Device state, tuning, VFOs and the tuning lock over REST: `GET /api/v1/devices/{dev}/state`,
+//! `POST /api/v1/devices/{dev}/tune`, `/api/v1/devices/{dev}/vfos[/{id}]` and
+//! `POST|DELETE /api/v1/devices/{dev}/lock`. Protocol: `docs/api-devices.md`.
 //!
 //! The API is a thin edge here: tune and VFO bodies are forwarded as `ctl.*` requests to the
 //! daemon owning the device (which validates authoritatively) and its reply is passed through;
@@ -31,8 +31,8 @@ const BUS_TIMEOUT: Duration = Duration::from_secs(2);
 /// Shared state of the device routes.
 #[derive(Clone)]
 pub struct DevicesState {
-    nats: Option<Client>,
-    origins: Arc<OriginPolicy>,
+    pub(crate) nats: Option<Client>,
+    pub(crate) origins: Arc<OriginPolicy>,
 }
 
 impl DevicesState {
@@ -55,6 +55,12 @@ pub fn router(state: DevicesState) -> Router {
             post(post_tune).layer(DefaultBodyLimit::max(MAX_BODY_BYTES)),
         )
         .route(
+            "/api/v1/devices/{dev}/lock",
+            post(post_lock)
+                .delete(delete_lock)
+                .layer(DefaultBodyLimit::max(MAX_BODY_BYTES)),
+        )
+        .route(
             "/api/v1/devices/{dev}/vfos",
             get(list_vfos)
                 .post(post_vfo)
@@ -69,7 +75,7 @@ pub fn router(state: DevicesState) -> Router {
         .with_state(state)
 }
 
-fn json(status: StatusCode, body: impl Into<Body>) -> Response {
+pub(crate) fn json(status: StatusCode, body: impl Into<Body>) -> Response {
     let mut response = Response::new(body.into());
     *response.status_mut() = status;
     response.headers_mut().insert(
@@ -79,7 +85,7 @@ fn json(status: StatusCode, body: impl Into<Body>) -> Response {
     response
 }
 
-fn failure(status: StatusCode, code: &str, message: &str) -> Response {
+pub(crate) fn failure(status: StatusCode, code: &str, message: &str) -> Response {
     json(
         status,
         serde_json::json!({"v": 1, "ok": false, "code": code, "error": message}).to_string(),
@@ -87,7 +93,7 @@ fn failure(status: StatusCode, code: &str, message: &str) -> Response {
 }
 
 /// Why a bus request produced no usable reply.
-enum BusFailure {
+pub(crate) enum BusFailure {
     /// No connection to the bus.
     Offline,
     /// Nobody serves the subject (unknown device or daemon down).
@@ -99,7 +105,7 @@ enum BusFailure {
 }
 
 impl BusFailure {
-    fn into_response(self) -> Response {
+    pub(crate) fn into_response(self) -> Response {
         match self {
             Self::Offline => failure(StatusCode::SERVICE_UNAVAILABLE, "unavailable", "no bus"),
             Self::NoResponders => failure(
@@ -117,14 +123,14 @@ impl BusFailure {
     }
 }
 
-fn connected(nats: Option<&Client>) -> Result<&Client, BusFailure> {
+pub(crate) fn connected(nats: Option<&Client>) -> Result<&Client, BusFailure> {
     match nats {
         Some(client) if client.connection_state() == Connection::Connected => Ok(client),
         _ => Err(BusFailure::Offline),
     }
 }
 
-async fn ctl_request(
+pub(crate) async fn ctl_request(
     client: &Client,
     subject: String,
     payload: Vec<u8>,
@@ -195,7 +201,7 @@ fn parse_vfo_id(raw: &str) -> Result<u32, &'static str> {
 /// CSRF and content-type checks shared by all mutating routes. Cookies are sent along with
 /// cross-site requests, so the Origin check is what keeps a foreign page from controlling the
 /// receiver.
-fn guard_mutation(
+pub(crate) fn guard_mutation(
     state: &DevicesState,
     headers: &HeaderMap,
     has_body: bool,
@@ -219,8 +225,9 @@ fn guard_mutation(
 }
 
 /// Send a control request to the daemon and return its reply if it reports success; a failure
-/// reply or a bus problem becomes the response for the client (`invalid`/`unsupported` are 400, `not_found` 404).
-async fn call_daemon(
+/// reply or a bus problem becomes the response for the client (`invalid`/`unsupported` are 400,
+/// `not_found` 404, `locked` 409).
+pub(crate) async fn call_daemon(
     state: &DevicesState,
     subject: String,
     payload: Vec<u8>,
@@ -235,6 +242,7 @@ async fn call_daemon(
             match value["code"].as_str() {
                 Some("invalid" | "unsupported") => StatusCode::BAD_REQUEST,
                 Some("not_found") => StatusCode::NOT_FOUND,
+                Some("locked") => StatusCode::CONFLICT,
                 _ => StatusCode::BAD_GATEWAY,
             },
             reply,
@@ -267,6 +275,42 @@ async fn post_tune(
         Ok(reply) => json(StatusCode::OK, reply),
         Err(response) => *response,
     }
+}
+
+/// `POST` takes the user lock, `DELETE` releases it; both are idempotent and reply with the new
+/// state like `/tune`.
+async fn set_lock(
+    state: &DevicesState,
+    device: &str,
+    headers: &HeaderMap,
+    action: &str,
+) -> Response {
+    if let Err(response) = guard_mutation(state, headers, false) {
+        return *response;
+    }
+    let Ok(subject) = subjects::ctl_lock(device, action) else {
+        return failure(StatusCode::BAD_REQUEST, "invalid", "invalid device id");
+    };
+    match call_daemon(state, subject, br#"{"v":1}"#.to_vec()).await {
+        Ok(reply) => json(StatusCode::OK, reply),
+        Err(response) => *response,
+    }
+}
+
+async fn post_lock(
+    State(state): State<DevicesState>,
+    Path(device): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    set_lock(&state, &device, &headers, "acquire").await
+}
+
+async fn delete_lock(
+    State(state): State<DevicesState>,
+    Path(device): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    set_lock(&state, &device, &headers, "release").await
 }
 
 async fn post_vfo(
@@ -352,7 +396,7 @@ async fn delete_vfo(
 }
 
 /// The state object from a stored KV value or a `ctl.state` reply.
-async fn read_kv(client: &Client, key: &str) -> Option<Bytes> {
+pub(crate) async fn read_kv(client: &Client, key: &str) -> Option<Bytes> {
     let lookup = async {
         let store = jetstream::new(client.clone())
             .get_key_value(subjects::STATE_BUCKET)
@@ -364,6 +408,29 @@ async fn read_kv(client: &Client, key: &str) -> Option<Bytes> {
         .await
         .ok()
         .flatten()
+}
+
+/// The state object straight from the daemon (`ctl.state`), never from KV.
+pub(crate) async fn ctl_state(
+    state: &DevicesState,
+    device: &str,
+) -> Result<serde_json::Value, Box<Response>> {
+    let Ok(subject) = subjects::ctl(device, "state") else {
+        return Err(Box::new(failure(
+            StatusCode::BAD_REQUEST,
+            "invalid",
+            "invalid device id",
+        )));
+    };
+    let reply = call_daemon(state, subject, Vec::new()).await?;
+    match serde_json::from_slice::<serde_json::Value>(&reply) {
+        Ok(mut value) if value["state"].is_object() => Ok(value["state"].take()),
+        _ => Err(Box::new(failure(
+            StatusCode::BAD_GATEWAY,
+            "bus",
+            "malformed daemon reply",
+        ))),
+    }
 }
 
 /// The state object of a device as JSON bytes: KV first, then a `ctl.state` request.
