@@ -9,10 +9,13 @@
 mod audio;
 mod config;
 mod control;
+mod controller;
+mod lock;
 mod pipeline;
 mod publish;
 mod service;
 mod vfo;
+mod window;
 
 use std::net::SocketAddr;
 use std::sync::Arc;

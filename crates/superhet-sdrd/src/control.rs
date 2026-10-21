@@ -9,7 +9,9 @@ use async_nats::Subject;
 use serde::{Deserialize, Serialize};
 use superhet_device::{DeviceState, Gain, TuneRequest};
 
+use crate::lock::Holder;
 use crate::vfo::{Tuning, Vfo, VfoWire};
+use crate::window;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
@@ -38,6 +40,8 @@ pub enum ErrorCode {
     Unsupported,
     /// The device failed while applying the request.
     Device,
+    /// The tuning lock forbids a centre or sample-rate change.
+    Locked,
 }
 
 impl ErrorCode {
@@ -47,6 +51,7 @@ impl ErrorCode {
             Self::NotFound => "not_found",
             Self::Unsupported => "unsupported",
             Self::Device => "device",
+            Self::Locked => "locked",
         }
     }
 }
@@ -58,14 +63,21 @@ pub struct CtlError {
     pub code: ErrorCode,
     /// Human-readable reason.
     pub message: String,
+    /// For [`ErrorCode::Locked`]: who holds the lock.
+    pub holders: Vec<Holder>,
 }
 
 impl CtlError {
-    pub fn invalid(message: impl Into<String>) -> Self {
+    pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
         Self {
-            code: ErrorCode::Invalid,
+            code,
             message: message.into(),
+            holders: Vec::new(),
         }
+    }
+
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::Invalid, message)
     }
 }
 
@@ -76,10 +88,7 @@ impl From<superhet_device::Error> for CtlError {
             superhet_device::Error::Unsupported(_) => ErrorCode::Unsupported,
             superhet_device::Error::Io(_) | superhet_device::Error::State(_) => ErrorCode::Device,
         };
-        Self {
-            code,
-            message: err.to_string(),
-        }
+        Self::new(code, err.to_string())
     }
 }
 
@@ -154,6 +163,29 @@ fn parse_gain(value: &serde_json::Value) -> Result<Gain, CtlError> {
     }
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EmptyWire {
+    v: u32,
+}
+
+/// Parse a request whose body carries nothing but the protocol version (`ctl.lock.*`).
+///
+/// # Errors
+/// [`ErrorCode::Invalid`] for malformed JSON, unknown fields or a wrong version.
+pub fn parse_empty(payload: &[u8]) -> Result<(), CtlError> {
+    let wire: EmptyWire = serde_json::from_slice(payload)
+        .map_err(|e| CtlError::invalid(format!("malformed request: {e}")))?;
+    if wire.v == VERSION {
+        Ok(())
+    } else {
+        Err(CtlError::invalid(format!(
+            "unsupported protocol version {}",
+            wire.v
+        )))
+    }
+}
+
 /// A validated tune request waiting to be applied.
 #[derive(Debug)]
 pub struct TuneJob {
@@ -223,12 +255,20 @@ struct StateWire<'a> {
     tuning_epoch: u64,
     gains_db: &'a [f32],
     vfos: Vec<VfoWire>,
+    locks: &'a [Holder],
+    window: WindowWire,
+}
+
+#[derive(Serialize)]
+struct WindowWire {
+    start_hz: i64,
+    end_hz: i64,
 }
 
 /// Encode a device state, with its VFOs evaluated against the current tuning, as the JSON
 /// published on the state subject and stored in KV.
 #[must_use]
-pub fn state_json(device: &str, state: &DeviceState, vfos: &[Vfo]) -> String {
+pub fn state_json(device: &str, state: &DeviceState, vfos: &[Vfo], locks: &[Holder]) -> String {
     let tuning = Tuning {
         center_hz: state.center_hz,
         sample_rate: state.sample_rate,
@@ -255,6 +295,11 @@ pub fn state_json(device: &str, state: &DeviceState, vfos: &[Vfo]) -> String {
         tuning_epoch: state.tuning_epoch,
         gains_db: &state.gains_db,
         vfos: vfos.iter().map(|v| v.wire(tuning)).collect(),
+        locks,
+        window: {
+            let (start_hz, end_hz) = window::bounds(tuning);
+            WindowWire { start_hz, end_hz }
+        },
     };
     // Plain data with string keys: serialisation cannot fail.
     serde_json::to_string(&wire).unwrap_or_else(|_| "{}".to_owned())
@@ -266,24 +311,53 @@ pub fn ok_reply(state_json: &str) -> Vec<u8> {
     format!(r#"{{"v":{VERSION},"ok":true,"state":{state_json}}}"#).into_bytes()
 }
 
-/// Success reply for `vfo.create` / `vfo.update`: the affected VFO plus the new state.
+/// What free tuning did about a created or moved VFO.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Retune {
+    /// The VFO is inside the window (or was not moved); the centre stays.
+    None,
+    /// The centre followed the VFO.
+    Applied,
+    /// The VFO is outside the window but the tuning lock holds the centre; the VFO is paused.
+    Locked,
+    /// The centre had to follow but the device refused; the VFO is outside the window.
+    Failed,
+}
+
+impl Retune {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Applied => "applied",
+            Self::Locked => "locked",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// Success reply for `vfo.create` / `vfo.update`: the affected VFO, what free tuning did, and
+/// the new state.
 #[must_use]
-pub fn vfo_reply(vfo: &VfoWire, state_json: &str) -> Vec<u8> {
+pub fn vfo_reply(vfo: &VfoWire, retune: Retune, state_json: &str) -> Vec<u8> {
     let vfo = serde_json::to_string(vfo).unwrap_or_else(|_| "{}".to_owned());
-    format!(r#"{{"v":{VERSION},"ok":true,"vfo":{vfo},"state":{state_json}}}"#).into_bytes()
+    let retune = retune.as_str();
+    format!(r#"{{"v":{VERSION},"ok":true,"vfo":{vfo},"retune":"{retune}","state":{state_json}}}"#)
+        .into_bytes()
 }
 
 /// Failure reply.
 #[must_use]
 pub fn error_reply(error: &CtlError) -> Vec<u8> {
-    serde_json::json!({
+    let mut reply = serde_json::json!({
         "v": VERSION,
         "ok": false,
         "code": error.code.as_str(),
         "error": error.message,
-    })
-    .to_string()
-    .into_bytes()
+    });
+    if error.code == ErrorCode::Locked {
+        reply["holders"] = serde_json::to_value(&error.holders).unwrap_or_default();
+    }
+    reply.to_string().into_bytes()
 }
 
 #[cfg(test)]
@@ -428,7 +502,7 @@ mod tests {
             tuning_epoch: 3,
             gains_db: vec![0.0, 0.9, 28.0],
         };
-        let json = state_json("rtl0", &state, &[]);
+        let json = state_json("rtl0", &state, &[], &[Holder::user_since(7)]);
         let value: serde_json::Value = serde_json::from_str(&json).expect("json");
         assert_eq!(value["v"], 1);
         assert_eq!(value["device"], "rtl0");
@@ -438,6 +512,11 @@ mod tests {
         assert_eq!(value["tuning_epoch"], 3);
         assert_eq!(value["gains_db"].as_array().map(Vec::len), Some(3));
         assert_eq!(value["vfos"].as_array().map(Vec::len), Some(0));
+        assert_eq!(value["locks"][0]["kind"], "user");
+        assert_eq!(value["locks"][0]["since_ms"], 7);
+        // 85 % of 2.048 MS/s around 100 MHz.
+        assert_eq!(value["window"]["start_hz"], 99_129_600);
+        assert_eq!(value["window"]["end_hz"], 100_870_400);
 
         let reply: serde_json::Value = serde_json::from_slice(&ok_reply(&json)).expect("json");
         assert_eq!(reply["ok"], true);
@@ -450,7 +529,7 @@ mod tests {
             ..state
         };
         let value: serde_json::Value =
-            serde_json::from_str(&state_json("f", &file, &[])).expect("json");
+            serde_json::from_str(&state_json("f", &file, &[], &[])).expect("json");
         assert!(value.get("tuner").is_none());
         assert!(value["gain"].is_null());
 
@@ -461,5 +540,13 @@ mod tests {
             (false.into(), "invalid".into())
         );
         assert_eq!(err["error"], "nope");
+        assert!(err.get("holders").is_none());
+
+        let mut locks = crate::lock::LockSet::default();
+        locks.acquire(Holder::user_since(1));
+        let err: serde_json::Value =
+            serde_json::from_slice(&error_reply(&locks.error("tuning"))).expect("json");
+        assert_eq!(err["code"], "locked");
+        assert_eq!(err["holders"][0]["kind"], "user");
     }
 }

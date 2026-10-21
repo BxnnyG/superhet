@@ -73,6 +73,27 @@ pub fn ctl_vfo(device: &str, action: &str) -> Result<String, InvalidToken> {
     Ok(format!("{PREFIX}.dev.{device}.ctl.vfo.{action}"))
 }
 
+/// Device lock subject: `sh.v1.dev.<dev>.ctl.lock.<action>` with `action` one of `acquire`,
+/// `release`.
+///
+/// # Errors
+/// Fails if a token is invalid.
+pub fn ctl_lock(device: &str, action: &str) -> Result<String, InvalidToken> {
+    check(device)?;
+    check(action)?;
+    Ok(format!("{PREFIX}.dev.{device}.ctl.lock.{action}"))
+}
+
+/// Profile subject: `sh.v1.dev.<dev>.ctl.profile.<action>` with `action` `load`.
+///
+/// # Errors
+/// Fails if a token is invalid.
+pub fn ctl_profile(device: &str, action: &str) -> Result<String, InvalidToken> {
+    check(device)?;
+    check(action)?;
+    Ok(format!("{PREFIX}.dev.{device}.ctl.profile.{action}"))
+}
+
 /// Name of the JetStream KV bucket holding the latest state of every device.
 pub const STATE_BUCKET: &str = "STATE";
 
@@ -92,6 +113,16 @@ pub fn state_key(device: &str) -> Result<String, InvalidToken> {
         return Err(InvalidToken(device.to_owned()));
     }
     Ok(format!("dev.{device}"))
+}
+
+/// Key of the persistent restore snapshot of a device in the [`STATE_BUCKET`]: `restore.<dev>`.
+/// Unlike [`state_key`] it survives a graceful daemon shutdown, so the daemon can restore its
+/// last tuning, VFOs and lock on start.
+///
+/// # Errors
+/// Same as [`state_key`].
+pub fn restore_key(device: &str) -> Result<String, InvalidToken> {
+    state_key(device).map(|key| format!("restore.{}", &key["dev.".len()..]))
 }
 
 /// State subject of a device: `sh.v1.dev.<dev>.state`.
@@ -173,6 +204,16 @@ mod tests {
             Ok("sh.v1.dev.rtl0.ctl.vfo.create")
         );
         assert!(ctl_vfo("rtl0", "a.b").is_err());
+        assert_eq!(
+            ctl_lock("rtl0", "acquire").as_deref(),
+            Ok("sh.v1.dev.rtl0.ctl.lock.acquire")
+        );
+        assert_eq!(
+            ctl_profile("rtl0", "load").as_deref(),
+            Ok("sh.v1.dev.rtl0.ctl.profile.load")
+        );
+        assert_eq!(restore_key("rtl0").as_deref(), Ok("restore.rtl0"));
+        assert!(restore_key("a.b").is_err());
         assert_eq!(
             event("adsb", "position").as_deref(),
             Ok("sh.v1.events.adsb.position")

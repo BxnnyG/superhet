@@ -20,13 +20,11 @@ use superhet_device::DeviceControl;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
-use superhet_device::DeviceState;
-
 use crate::control::{
     self, CtlError, DEBOUNCE, MAX_BATCH_WAIT, TuneJob, collect_batch, error_reply, ok_reply,
-    state_json, vfo_reply,
 };
-use crate::vfo::{self, Tuning, VfoShared};
+use crate::controller::Controller;
+use crate::vfo::VfoShared;
 
 /// Tune requests queued between the bus loop and the executor.
 const QUEUE_JOBS: usize = 64;
@@ -36,9 +34,10 @@ const JS_TIMEOUT: Duration = Duration::from_secs(5);
 const REPUBLISH: Duration = Duration::from_secs(30);
 /// Retry delay after a failed state publish.
 const RETRY: Duration = Duration::from_secs(2);
-
-/// Latest encoded state, `None` until the first one is known.
-type StateTx = watch::Sender<Option<Arc<str>>>;
+/// How long start-up waits for the bus to read the saved state before it gives up restoring.
+const RESTORE_WAIT: Duration = Duration::from_secs(30);
+/// Pause between attempts to read the saved state.
+const RESTORE_RETRY: Duration = Duration::from_millis(500);
 
 /// Running control service; abort it to stop serving.
 pub struct Service {
@@ -48,6 +47,11 @@ pub struct Service {
 }
 
 /// Start serving control requests and publishing state for `device`.
+///
+/// Before anything is published or served, the last saved state (tuning, VFOs, user lock) is
+/// restored from the KV bucket, waiting up to [`RESTORE_WAIT`] for the bus. If the bus stays
+/// away, the daemon starts with the device's own settings and does not overwrite the saved
+/// state until it is restarted.
 ///
 /// # Errors
 /// Fails if the device id cannot be used in subjects or KV keys, or the subscription is refused.
@@ -60,15 +64,12 @@ pub async fn start(
     let ctl_subject = subjects::ctl_all(&device)?;
     let state_subject = subjects::state(&device)?;
     let key = subjects::state_key(&device)?;
+    let restore_key = subjects::restore_key(&device)?;
 
     let (state_tx, state_rx) = watch::channel(None);
-    let ctx = Arc::new(Context {
-        device,
-        control,
-        vfos,
-        state: state_tx,
-    });
-    ctx.refresh_state(&ctx.control.state());
+    let controller = Arc::new(Controller::new(device, control, vfos, state_tx));
+    let persist = restore_saved_state(&client, &controller, &restore_key).await;
+    controller.refresh();
 
     let mut subscription = client.subscribe(ctl_subject).await?;
     let (job_tx, job_rx) = mpsc::channel(QUEUE_JOBS);
@@ -77,14 +78,19 @@ pub async fn start(
         client.clone(),
         state_subject,
         key.clone(),
+        persist.then_some(restore_key),
         state_rx,
     ));
-    let executor = tokio::spawn(execute_jobs(job_rx, client.clone(), Arc::clone(&ctx)));
+    let executor = tokio::spawn(execute_jobs(
+        job_rx,
+        client.clone(),
+        Arc::clone(&controller),
+    ));
     let server = {
         let client = client.clone();
         tokio::spawn(async move {
             while let Some(message) = subscription.next().await {
-                handle_message(&client, &ctx, &job_tx, message).await;
+                handle_message(&client, &controller, &job_tx, message).await;
             }
         })
     };
@@ -96,7 +102,8 @@ pub async fn start(
 }
 
 impl Service {
-    /// Stop serving and remove the (now stale) state entry; best effort.
+    /// Stop serving and remove the (now stale) state entry; best effort. The restore snapshot
+    /// stays, it is what the next start restores.
     pub async fn shutdown(self) {
         for task in &self.tasks {
             task.abort();
@@ -117,30 +124,53 @@ impl Service {
     }
 }
 
-/// Everything the handlers share.
-struct Context {
-    device: String,
-    control: Arc<dyn DeviceControl>,
-    vfos: Arc<VfoShared>,
-    state: StateTx,
-}
-
-impl Context {
-    /// Encode the state document for `device_state` plus the current VFOs and publish it if it
-    /// changed. Returns the JSON for replies.
-    fn refresh_state(&self, device_state: &DeviceState) -> Arc<str> {
-        let vfos = self.vfos.with(|r| r.list().to_vec());
-        let json: Arc<str> = state_json(&self.device, device_state, &vfos).into();
-        self.state.send_if_modified(|current| {
-            if current.as_deref() == Some(&*json) {
-                false
-            } else {
-                *current = Some(Arc::clone(&json));
-                true
+/// Read the restore snapshot and apply it. Returns whether the outcome is known (found,
+/// incompatible or nothing saved), i.e. whether it is safe to start overwriting the snapshot.
+async fn restore_saved_state(
+    client: &Client,
+    controller: &Arc<Controller>,
+    restore_key: &str,
+) -> bool {
+    let deadline = tokio::time::Instant::now() + RESTORE_WAIT;
+    let saved = loop {
+        if client.connection_state() == Connection::Connected {
+            let read = async {
+                let store = ensure_bucket(client).await?;
+                store.get(restore_key).await.map_err(|e| e.to_string())
+            };
+            match tokio::time::timeout(JS_TIMEOUT, read).await {
+                Ok(Ok(saved)) => break saved,
+                Ok(Err(e)) => tracing::debug!(error = %e, "reading the saved state failed"),
+                Err(_) => tracing::debug!("reading the saved state timed out"),
             }
-        });
-        json
+        }
+        if tokio::time::Instant::now() >= deadline {
+            tracing::warn!(
+                "bus not usable within {}s; starting without restoring the saved state \
+                 (it will not be overwritten until the next start)",
+                RESTORE_WAIT.as_secs()
+            );
+            return false;
+        }
+        tokio::time::sleep(RESTORE_RETRY).await;
+    };
+    let Some(saved) = saved else {
+        tracing::info!("no saved state to restore");
+        return true;
+    };
+    let controller = Arc::clone(controller);
+    let outcome = tokio::task::spawn_blocking(move || {
+        let doc: serde_json::Value =
+            serde_json::from_slice(&saved).map_err(|e| format!("unreadable: {e}"))?;
+        controller.restore(&doc)
+    })
+    .await;
+    match outcome {
+        Ok(Ok(())) => {}
+        Ok(Err(reason)) => tracing::warn!(%reason, "saved state not restored"),
+        Err(e) => tracing::error!(error = %e, "state restore panicked"),
     }
+    true
 }
 
 async fn respond(client: &Client, message: &Message, payload: Vec<u8>) {
@@ -151,9 +181,27 @@ async fn respond(client: &Client, message: &Message, payload: Vec<u8>) {
     }
 }
 
+/// Run a blocking controller operation and turn its result into a reply.
+async fn run_blocking<F>(f: F) -> Vec<u8>
+where
+    F: FnOnce() -> Result<Vec<u8>, CtlError> + Send + 'static,
+{
+    match tokio::task::spawn_blocking(f).await {
+        Ok(Ok(reply)) => reply,
+        Ok(Err(err)) => {
+            tracing::debug!(error = %err.message, "control request rejected");
+            error_reply(&err)
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "control task panicked");
+            Controller::internal_error()
+        }
+    }
+}
+
 async fn handle_message(
     client: &Client,
-    ctx: &Arc<Context>,
+    controller: &Arc<Controller>,
     jobs: &mpsc::Sender<TuneJob>,
     message: Message,
 ) {
@@ -170,141 +218,81 @@ async fn handle_message(
                     reply: message.reply.clone(),
                 };
                 if jobs.try_send(job).is_err() {
-                    let busy = CtlError {
-                        code: control::ErrorCode::Device,
-                        message: "control queue is full".into(),
-                    };
+                    let busy = CtlError::new(control::ErrorCode::Device, "control queue is full");
                     respond(client, &message, error_reply(&busy)).await;
                 }
             }
             Err(err) => respond(client, &message, error_reply(&err)).await,
         },
         "state" => {
-            let current = ctx.state.borrow().clone();
-            let reply = match current {
+            let reply = match controller.latest() {
                 Some(json) => ok_reply(&json),
-                None => error_reply(&CtlError {
-                    code: control::ErrorCode::Device,
-                    message: "state not available yet".into(),
-                }),
+                None => error_reply(&CtlError::new(
+                    control::ErrorCode::Device,
+                    "state not available yet",
+                )),
             };
             respond(client, &message, reply).await;
         }
         "vfo.create" | "vfo.update" | "vfo.delete" => {
-            let reply = match tokio::task::spawn_blocking({
-                let ctx = Arc::clone(ctx);
+            // Validating a VFO designs its filter chain, hence the blocking thread.
+            let reply = run_blocking({
+                let controller = Arc::clone(controller);
                 let command = command.to_owned();
                 let payload = message.payload.clone();
-                move || handle_vfo(&ctx, &command, &payload)
+                move || controller.vfo(&command, &payload)
             })
-            .await
-            {
-                Ok(reply) => reply,
-                Err(e) => {
-                    tracing::error!(error = %e, "vfo task panicked");
-                    error_reply(&CtlError {
-                        code: control::ErrorCode::Device,
-                        message: "internal error".into(),
-                    })
+            .await;
+            respond(client, &message, reply).await;
+        }
+        "lock.acquire" | "lock.release" => {
+            let acquire = command == "lock.acquire";
+            let reply = run_blocking({
+                let controller = Arc::clone(controller);
+                let payload = message.payload.clone();
+                move || {
+                    control::parse_empty(&payload)?;
+                    Ok(ok_reply(&controller.set_user_lock(acquire)))
                 }
-            };
+            })
+            .await;
+            respond(client, &message, reply).await;
+        }
+        "profile.load" => {
+            let reply = run_blocking({
+                let controller = Arc::clone(controller);
+                let payload = message.payload.clone();
+                move || {
+                    controller
+                        .load_profile(&payload)
+                        .map(|json| ok_reply(&json))
+                }
+            })
+            .await;
             respond(client, &message, reply).await;
         }
         other => {
-            tracing::debug!(device = %ctx.device, command = other, "unknown control command");
+            tracing::debug!(command = other, "unknown control command");
             let err = CtlError::invalid(format!("unknown command {other:?}"));
             respond(client, &message, error_reply(&err)).await;
         }
     }
 }
 
-/// Execute a VFO command and build the reply. Runs on a blocking thread because validating a
-/// VFO designs its filter chain.
-fn handle_vfo(ctx: &Context, command: &str, payload: &[u8]) -> Vec<u8> {
-    match run_vfo(ctx, command, payload) {
-        Ok(reply) => reply,
-        Err(err) => {
-            tracing::debug!(device = %ctx.device, command, error = %err.message, "vfo request rejected");
-            error_reply(&err)
-        }
-    }
-}
-
-fn run_vfo(ctx: &Context, command: &str, payload: &[u8]) -> Result<Vec<u8>, CtlError> {
-    let rate = ctx.control.state().sample_rate;
-    let affected = match command {
-        "vfo.create" => {
-            let request = vfo::parse_create(payload)?;
-            let vfo = ctx.vfos.with(|r| r.create(request, rate))?;
-            tracing::info!(id = vfo.id, freq_hz = vfo.freq_hz, mode = ?vfo.mode, "vfo created");
-            Some(vfo)
-        }
-        "vfo.update" => {
-            let patch = vfo::parse_update(payload)?;
-            let vfo = ctx.vfos.with(|r| r.update(&patch, rate))?;
-            tracing::info!(id = vfo.id, freq_hz = vfo.freq_hz, mode = ?vfo.mode, "vfo updated");
-            Some(vfo)
-        }
-        _ => {
-            let id = vfo::parse_delete(payload)?;
-            ctx.vfos.with(|r| r.delete(id))?;
-            tracing::info!(id, "vfo deleted");
-            None
-        }
-    };
-    // Read the tuning again so a concurrent retune is not overwritten with a stale state.
-    let device_state = ctx.control.state();
-    let tuning = Tuning {
-        center_hz: device_state.center_hz,
-        sample_rate: device_state.sample_rate,
-    };
-    let state = ctx.refresh_state(&device_state);
-    Ok(match affected {
-        Some(vfo) => vfo_reply(&vfo.wire(tuning), &state),
-        None => ok_reply(&state),
-    })
-}
-
-async fn execute_jobs(mut jobs: mpsc::Receiver<TuneJob>, client: Client, ctx: Arc<Context>) {
+async fn execute_jobs(
+    mut jobs: mpsc::Receiver<TuneJob>,
+    client: Client,
+    controller: Arc<Controller>,
+) {
     while let Some(first) = jobs.recv().await {
         let batch = collect_batch(first, &mut jobs, DEBOUNCE, MAX_BATCH_WAIT).await;
         let request = batch.request;
-        let device_control = Arc::clone(&ctx.control);
-        let outcome = tokio::task::spawn_blocking(move || {
-            let result = device_control.apply(&request);
-            // After a failure the device may be half-way applied; report what it really runs.
-            let state = result
-                .as_ref()
-                .map_or_else(|_| device_control.state(), Clone::clone);
-            (result, state)
+        let reply = run_blocking({
+            let controller = Arc::clone(&controller);
+            move || controller.tune(&request).map(|json| ok_reply(&json))
         })
         .await;
-        let (result, new_state) = match outcome {
-            Ok(outcome) => outcome,
-            Err(e) => {
-                tracing::error!(error = %e, "control task panicked");
-                continue;
-            }
-        };
-
-        // The state carries the VFOs, whose status follows the new tuning.
-        let json = ctx.refresh_state(&new_state);
-        let reply = match result {
-            Ok(_) => {
-                tracing::info!(
-                    merged = batch.merged,
-                    center_hz = new_state.center_hz,
-                    sample_rate = new_state.sample_rate,
-                    epoch = new_state.tuning_epoch,
-                    "tuned"
-                );
-                ok_reply(&json)
-            }
-            Err(err) => {
-                tracing::warn!(error = %err, "tune failed");
-                error_reply(&CtlError::from(err))
-            }
-        };
+        tracing::debug!(merged = batch.merged, "tune batch executed");
         for subject in batch.replies {
             if let Err(e) = client.publish(subject, reply.clone().into()).await {
                 tracing::warn!(error = %e, "control reply failed");
@@ -318,13 +306,26 @@ async fn publish_state(
     client: Client,
     subject: String,
     key: String,
+    restore_key: Option<String>,
     mut latest: watch::Receiver<Option<Arc<str>>>,
 ) {
     let mut store: Option<kv::Store> = None;
     loop {
         let current = latest.borrow_and_update().clone();
         let delay = match current {
-            Some(json) if deliver(&client, &subject, &key, &mut store, &json).await => REPUBLISH,
+            Some(json)
+                if deliver(
+                    &client,
+                    &subject,
+                    &key,
+                    restore_key.as_deref(),
+                    &mut store,
+                    &json,
+                )
+                .await =>
+            {
+                REPUBLISH
+            }
             Some(_) => RETRY,
             None => REPUBLISH,
         };
@@ -340,6 +341,7 @@ async fn deliver(
     client: &Client,
     subject: &str,
     key: &str,
+    restore_key: Option<&str>,
     store: &mut Option<kv::Store>,
     json: &Arc<str>,
 ) -> bool {
@@ -357,14 +359,16 @@ async fn deliver(
         if store.is_none() {
             *store = Some(ensure_bucket(client).await?);
         }
-        match store {
-            Some(store) => store
+        let Some(store) = store else {
+            return Ok::<(), String>(());
+        };
+        for key in std::iter::once(key).chain(restore_key) {
+            store
                 .put(key, json.as_bytes().to_vec().into())
                 .await
-                .map(|_| ())
-                .map_err(|e| e.to_string()),
-            None => Ok(()),
+                .map_err(|e| e.to_string())?;
         }
+        Ok(())
     };
     match tokio::time::timeout(JS_TIMEOUT, put).await {
         Ok(Ok(())) => true,

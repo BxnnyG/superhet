@@ -10,9 +10,11 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Deserializer, Serialize};
+use superhet_bus::profile;
 use superhet_dsp::{Channel, ChannelConfig, Deemphasis, Mode};
 
 use crate::control::{CtlError, ErrorCode, MAX_CENTER_HZ, VERSION};
+use crate::window;
 
 /// Most VFOs one device can run.
 pub const MAX_VFOS: usize = 8;
@@ -131,14 +133,14 @@ impl Vfo {
         (i128::from(self.freq_hz) - i128::from(center_hz)) as f64
     }
 
-    /// Paused if any part of the channel falls outside the passband.
+    /// Paused if any part of the channel falls outside the usable window (85 % of the sample
+    /// rate around the centre, see [`window`]).
     #[must_use]
     pub fn status(&self, tuning: Tuning) -> Status {
-        let reach = self.offset_hz(tuning.center_hz).abs() + f64::from(self.bandwidth()) / 2.0;
-        if reach > f64::from(tuning.sample_rate) / 2.0 {
-            Status::Paused
-        } else {
+        if window::fits(self, tuning) {
             Status::Active
+        } else {
+            Status::Paused
         }
     }
 
@@ -398,9 +400,66 @@ fn check_realisable(vfo: &Vfo, sample_rate: u32) -> Result<(), CtlError> {
 }
 
 fn not_found(id: u32) -> CtlError {
-    CtlError {
-        code: ErrorCode::NotFound,
-        message: format!("no VFO with id {id}"),
+    CtlError::new(ErrorCode::NotFound, format!("no VFO with id {id}"))
+}
+
+fn too_many() -> CtlError {
+    CtlError::new(
+        ErrorCode::Unsupported,
+        format!("at most {MAX_VFOS} VFOs per device"),
+    )
+}
+
+impl Vfo {
+    fn from_create(id: u32, request: VfoCreate) -> Self {
+        Self {
+            id,
+            freq_hz: request.freq_hz,
+            mode: request.mode,
+            bandwidth_hz: request.bandwidth_hz,
+            squelch_dbfs: request.squelch_dbfs,
+            deemphasis: request.deemphasis,
+        }
+    }
+}
+
+impl From<profile::Mode> for VfoMode {
+    fn from(mode: profile::Mode) -> Self {
+        match mode {
+            profile::Mode::Wfm => Self::Wfm,
+            profile::Mode::Nfm => Self::Nfm,
+            profile::Mode::Am => Self::Am,
+        }
+    }
+}
+
+impl From<VfoMode> for profile::Mode {
+    fn from(mode: VfoMode) -> Self {
+        match mode {
+            VfoMode::Wfm => Self::Wfm,
+            VfoMode::Nfm => Self::Nfm,
+            VfoMode::Am => Self::Am,
+        }
+    }
+}
+
+fn deemphasis_of(d: profile::Deemphasis) -> Deemphasis {
+    match d {
+        profile::Deemphasis::None => Deemphasis::None,
+        profile::Deemphasis::Us50 => Deemphasis::Us50,
+        profile::Deemphasis::Us75 => Deemphasis::Us75,
+    }
+}
+
+impl From<&profile::Vfo> for VfoCreate {
+    fn from(vfo: &profile::Vfo) -> Self {
+        Self {
+            freq_hz: vfo.freq_hz,
+            mode: vfo.mode.into(),
+            bandwidth_hz: vfo.bandwidth_hz,
+            squelch_dbfs: vfo.squelch_dbfs,
+            deemphasis: vfo.deemphasis.map(deemphasis_of),
+        }
     }
 }
 
@@ -424,19 +483,9 @@ impl VfoRegistry {
     /// channelizer cannot realise it at the device's sample rate.
     pub fn create(&mut self, request: VfoCreate, sample_rate: u32) -> Result<Vfo, CtlError> {
         if self.vfos.len() >= MAX_VFOS {
-            return Err(CtlError {
-                code: ErrorCode::Unsupported,
-                message: format!("at most {MAX_VFOS} VFOs per device"),
-            });
+            return Err(too_many());
         }
-        let vfo = Vfo {
-            id: self.last_id.saturating_add(1),
-            freq_hz: request.freq_hz,
-            mode: request.mode,
-            bandwidth_hz: request.bandwidth_hz,
-            squelch_dbfs: request.squelch_dbfs,
-            deemphasis: request.deemphasis,
-        };
+        let vfo = Vfo::from_create(self.last_id.saturating_add(1), request);
         check_realisable(&vfo, sample_rate)?;
         self.last_id = vfo.id;
         self.vfos.push(vfo.clone());
@@ -479,6 +528,69 @@ impl VfoRegistry {
         self.vfos[index] = vfo.clone();
         self.revision += 1;
         Ok(vfo)
+    }
+
+    /// Replace the whole set (profile load). Everything is validated first; on an error the
+    /// registry is untouched. Fresh ids are assigned.
+    ///
+    /// # Errors
+    /// [`ErrorCode::Unsupported`] for more than [`MAX_VFOS`], [`ErrorCode::Invalid`] when one of
+    /// them cannot be realised at `sample_rate`.
+    pub fn replace(
+        &mut self,
+        requests: Vec<VfoCreate>,
+        sample_rate: u32,
+    ) -> Result<Vec<Vfo>, CtlError> {
+        if requests.len() > MAX_VFOS {
+            return Err(too_many());
+        }
+        let mut next = self.last_id;
+        let mut vfos = Vec::with_capacity(requests.len());
+        for request in requests {
+            next = next.saturating_add(1);
+            let vfo = Vfo::from_create(next, request);
+            check_realisable(&vfo, sample_rate).map_err(|e| {
+                CtlError::invalid(format!("VFO at {} Hz: {}", vfo.freq_hz, e.message))
+            })?;
+            vfos.push(vfo);
+        }
+        self.last_id = next;
+        self.vfos.clone_from(&vfos);
+        self.revision += 1;
+        Ok(vfos)
+    }
+
+    /// Check that `requests` could replace the set at `sample_rate` without touching anything.
+    ///
+    /// # Errors
+    /// Same as [`VfoRegistry::replace`].
+    pub fn check_set(requests: &[VfoCreate], sample_rate: u32) -> Result<(), CtlError> {
+        Self::default()
+            .replace(requests.to_vec(), sample_rate)
+            .map(|_| ())
+    }
+
+    /// Replace the set with VFOs of a previous run, keeping their ids. Entries that are no
+    /// longer valid (duplicate id, unrealisable at `sample_rate`, over the limit) are dropped;
+    /// returns how many.
+    pub fn restore(&mut self, saved: Vec<(u32, VfoCreate)>, sample_rate: u32) -> usize {
+        let total = saved.len();
+        let mut vfos: Vec<Vfo> = Vec::new();
+        for (id, request) in saved {
+            let vfo = Vfo::from_create(id, request);
+            if vfos.len() < MAX_VFOS
+                && id > 0
+                && !vfos.iter().any(|v| v.id == id)
+                && check_realisable(&vfo, sample_rate).is_ok()
+            {
+                vfos.push(vfo);
+            }
+        }
+        self.last_id = vfos.iter().map(|v| v.id).max().unwrap_or(0);
+        let dropped = total - vfos.len();
+        self.vfos = vfos;
+        self.revision += 1;
+        dropped
     }
 
     /// Remove a VFO.
@@ -757,18 +869,19 @@ mod tests {
             squelch_dbfs: None,
             deemphasis: None,
         };
-        // Half span is 512 kHz; NFM default bandwidth 12.5 kHz → 505.75 kHz still fits.
-        assert_eq!(at(505_000, VfoMode::Nfm, None).status(T), Status::Active);
-        assert_eq!(at(-505_000, VfoMode::Nfm, None).status(T), Status::Active);
-        assert_eq!(at(506_000, VfoMode::Nfm, None).status(T), Status::Paused);
-        assert_eq!(at(-506_000, VfoMode::Nfm, None).status(T), Status::Paused);
+        // The usable half span is 435.2 kHz (85 % of 1.024 MS/s); NFM default 12.5 kHz leaves
+        // 428.95 kHz of offset.
+        assert_eq!(at(428_000, VfoMode::Nfm, None).status(T), Status::Active);
+        assert_eq!(at(-428_000, VfoMode::Nfm, None).status(T), Status::Active);
+        assert_eq!(at(430_000, VfoMode::Nfm, None).status(T), Status::Paused);
+        assert_eq!(at(-430_000, VfoMode::Nfm, None).status(T), Status::Paused);
         assert_eq!(at(0, VfoMode::Wfm, None).status(T), Status::Active);
-        // WFM default 180 kHz: 430 kHz + 90 kHz > 512 kHz.
-        assert_eq!(at(430_000, VfoMode::Wfm, None).status(T), Status::Paused);
-        assert_eq!(at(420_000, VfoMode::Wfm, None).status(T), Status::Active);
+        // WFM default 180 kHz: 345.2 kHz of offset at most.
+        assert_eq!(at(350_000, VfoMode::Wfm, None).status(T), Status::Paused);
+        assert_eq!(at(340_000, VfoMode::Wfm, None).status(T), Status::Active);
         // An explicit bandwidth overrides the default.
         assert_eq!(
-            at(430_000, VfoMode::Wfm, Some(50_000)).status(T),
+            at(350_000, VfoMode::Wfm, Some(50_000)).status(T),
             Status::Active
         );
         // Far away (e.g. after a retune) and a different rate.
@@ -778,7 +891,7 @@ mod tests {
             ..T
         };
         assert_eq!(
-            at(100_000, VfoMode::Nfm, None).status(narrow),
+            at(95_000, VfoMode::Nfm, None).status(narrow),
             Status::Active
         );
         assert_eq!(
