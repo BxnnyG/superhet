@@ -1,6 +1,7 @@
 //! PostgreSQL access layer shared by Superhet services.
 
 pub mod auth;
+pub mod profiles;
 
 use std::time::Duration;
 

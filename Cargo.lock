@@ -1998,6 +1998,7 @@ dependencies = [
 name = "superhet-db"
 version = "0.0.0"
 dependencies = [
+ "serde_json",
  "sqlx",
  "thiserror",
  "tokio",
