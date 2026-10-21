@@ -14,6 +14,7 @@ pub mod audio;
 pub mod config;
 #[cfg(feature = "opus")]
 pub mod opus;
+pub mod profile;
 pub mod spectrum;
 pub mod subjects;
 
