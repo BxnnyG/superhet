@@ -46,9 +46,9 @@ export function App({ device = "dev0" }: Props) {
       )}
       <div className="flex min-h-0 flex-1">
         <Sidebar r={r} open={drawerOpen} onClose={closeDrawer} />
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 p-3">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
           <h1 className="sr-only">Superhet spectrum and waterfall</h1>
-          <div className="min-h-48 flex-1 overflow-hidden rounded-xl border border-border-strong">
+          <div className="min-h-48 flex-1 shrink-0 overflow-hidden rounded-xl border border-border-strong">
             <SpectrumView
               device={device}
               controller={r.levelController}
