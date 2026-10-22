@@ -48,6 +48,10 @@ it("ReceiverFrequency: the centre readout is read-only while locked", () => {
   const onCenter = vi.fn();
   render(
     <ReceiverFrequency
+      vfo={null}
+      step="auto"
+      onStep={() => undefined}
+      onVfo={() => undefined}
       centerHz={100_000_000}
       onCenter={onCenter}
       centerLockedReason="Locked by you"

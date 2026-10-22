@@ -61,6 +61,8 @@ export function Sidebar({ r, open, onClose }: Props) {
           <VfoPanel
             vfos={r.vfoSnap}
             locked={r.locks.length > 0}
+            isListening={(id) => r.audioSnap.levels[id]?.listening ?? true}
+            onListen={(id, on) => r.audio.setListening(id, on)}
             onCreate={() => r.createVfoAt(r.tuningSnap.display?.centerHz ?? null)}
             onSelect={(id) => r.vfoCtl.select(id)}
             onRemove={(id) => r.vfoCtl.remove(id)}
