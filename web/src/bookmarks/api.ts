@@ -81,7 +81,7 @@ export function createBookmarkApi(fetchImpl: typeof fetch = apiFetch): BookmarkA
   const json = (method: string, body: Rec): RequestInit => ({
     method,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ v: 1, ...body }),
+    body: JSON.stringify(body),
   });
   const url = (id?: string) =>
     `/api/v1/bookmarks${id === undefined ? "" : `/${encodeURIComponent(id)}`}`;
