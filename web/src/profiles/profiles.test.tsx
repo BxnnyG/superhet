@@ -108,6 +108,8 @@ function fakeBackend(initial: ReturnType<typeof resource>[]) {
     calls,
     setLoad: (f: () => Response) => (loadReply = f),
     mutating: () => calls.filter((c) => c.method !== "GET"),
+    /** A profile created behind the panel's back (another tab, the API). */
+    addExternally: (p: ReturnType<typeof resource>) => (list = [...list, p]),
   };
 }
 
@@ -122,16 +124,24 @@ function setup(
   const backend = fakeBackend(initial);
   const onState = vi.fn();
   const onUnlock = opts.onUnlock ?? vi.fn(async () => true);
-  render(
+  const api = createProfileApi(backend.fetchImpl);
+  const panel = (extra: { connected?: boolean; refreshSignal?: unknown } = {}) => (
     <ProfilesPanel
-      api={createProfileApi(backend.fetchImpl)}
+      api={api}
       device="dev0"
       doc={opts.doc === undefined ? docOf() : opts.doc}
       onState={onState}
       onUnlock={onUnlock}
-    />,
+      {...extra}
+    />
   );
-  return { backend, onState, onUnlock };
+  const { rerender } = render(panel());
+  return {
+    backend,
+    onState,
+    onUnlock,
+    update: (extra: { connected?: boolean; refreshSignal?: unknown }) => rerender(panel(extra)),
+  };
 }
 
 beforeEach(() => toasts.clear());
@@ -182,6 +192,47 @@ describe("ProfilesPanel", () => {
   it("shows an empty state", async () => {
     setup([]);
     expect(await screen.findByText("No profiles yet")).toBeInTheDocument();
+  });
+
+  describe("refreshing the list", () => {
+    const external = () => resource("ext", "From elsewhere");
+    const listReads = (b: ReturnType<typeof fakeBackend>) =>
+      b.calls.filter((c) => c.method === "GET").length;
+
+    it("picks up a profile saved elsewhere when the panel is shown again", async () => {
+      const t = setup([]);
+      await screen.findByText("No profiles yet");
+      t.backend.addExternally(external());
+      t.update({ refreshSignal: "true:false" });
+      expect(await screen.findByText("From elsewhere")).toBeInTheDocument();
+    });
+
+    it("picks up a profile saved elsewhere when the window regains focus", async () => {
+      const t = setup([]);
+      await screen.findByText("No profiles yet");
+      t.backend.addExternally(external());
+      fireEvent(window, new Event("focus"));
+      expect(await screen.findByText("From elsewhere")).toBeInTheDocument();
+    });
+
+    it("re-reads when the tab becomes visible again", async () => {
+      const t = setup([]);
+      await screen.findByText("No profiles yet");
+      t.backend.addExternally(external());
+      const before = listReads(t.backend);
+      fireEvent(document, new Event("visibilitychange"));
+      expect(await screen.findByText("From elsewhere")).toBeInTheDocument();
+      expect(listReads(t.backend)).toBeGreaterThan(before);
+    });
+
+    it("re-reads after the state feed reconnects", async () => {
+      const t = setup([]);
+      await screen.findByText("No profiles yet");
+      t.update({ connected: false });
+      t.backend.addExternally(external());
+      t.update({ connected: true });
+      expect(await screen.findByText("From elsewhere")).toBeInTheDocument();
+    });
   });
 
   it("lists name, centre, VFO count and age", async () => {
