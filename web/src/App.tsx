@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { BookmarkEditorHost } from "./bookmarks/BookmarkEditor";
 import { Sidebar } from "./shell/Sidebar";
 import { StatusBar } from "./shell/StatusBar";
 import { TopBar } from "./shell/TopBar";
@@ -56,6 +57,9 @@ export function App({ device = "dev0" }: Props) {
               vfoCtl={r.vfoCtl}
               step={r.step}
               createVfoAt={r.createVfoAt}
+              overlaySettings={r.overlay}
+              bookmarks={r.bookmarks}
+              onAnnotationTune={r.tuneTo}
               metrics={r.metrics}
               registerView={r.registerView}
               onStatus={r.setStatus}
@@ -76,6 +80,7 @@ export function App({ device = "dev0" }: Props) {
         </main>
       </div>
       <StatusBar audio={r.audio} metrics={r.metrics} />
+      <BookmarkEditorHost store={r.bookmarks} />
       <Toaster />
     </div>
   );

@@ -1,6 +1,8 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { App } from "../App";
+import { DEFAULT_OVERLAY, OverlayStore } from "../bandplan/settings";
+import { BookmarkStore } from "../bookmarks/store";
 import { SpectrumMetrics } from "../shell/metrics";
 import type { Vfo } from "../vfo/api";
 import { VfoController } from "../vfo/controller";
@@ -103,6 +105,9 @@ function mountView(): { vfoCtl: VfoController; tuning: TuningController } {
       vfoCtl={vfoCtl}
       step="auto"
       createVfoAt={() => undefined}
+      overlaySettings={new OverlayStore(DEFAULT_OVERLAY, null)}
+      bookmarks={new BookmarkStore({} as never)}
+      onAnnotationTune={() => undefined}
       metrics={new SpectrumMetrics()}
       registerView={() => undefined}
       onStatus={() => undefined}

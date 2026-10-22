@@ -8,7 +8,15 @@ it("renders the SDR shell: top bar, sidebar sections, spectrum, receiver dock an
   expect(screen.getByText("Superhet")).toBeInTheDocument();
   expect(screen.getByRole("group", { name: "Centre frequency" })).toBeInTheDocument();
   expect(screen.getByRole("complementary", { name: "Controls" })).toBeInTheDocument();
-  for (const name of ["Source", "Profiles", "VFOs", "Display", "Audio device"]) {
+  for (const name of [
+    "Source",
+    "Profiles",
+    "VFOs",
+    "Bookmarks",
+    "Band plan",
+    "Display",
+    "Audio device",
+  ]) {
     expect(screen.getByRole("button", { name })).toBeInTheDocument();
   }
   expect(screen.getByRole("region", { name: "Receiver" })).toBeInTheDocument();

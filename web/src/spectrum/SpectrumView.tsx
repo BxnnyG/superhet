@@ -6,10 +6,13 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
+import { enabledCategories, type OverlayStore } from "../bandplan/settings";
+import type { BookmarkStore } from "../bookmarks/store";
 import type { SpectrumInfo, ViewActions } from "../shell/useReceiver";
 import type { SpectrumMetrics } from "../shell/metrics";
 import type { VfoController } from "../vfo/controller";
 import { snapFrequency, stepFor, toMarker, type StepChoice } from "../vfo/model";
+import { AnnotationLayer, type AnnotationTarget } from "./annotations";
 import type { SpectrumFrame } from "./frame";
 import type { LevelController } from "./levels";
 import { SpectrumInteraction } from "./interaction";
@@ -28,6 +31,11 @@ interface Props {
   vfoCtl: VfoController;
   step: StepChoice;
   createVfoAt: (hz: number | null) => void;
+  /** Band plan / bookmark overlay settings and the bookmarks drawn on the spectrum. */
+  overlaySettings: OverlayStore;
+  bookmarks: BookmarkStore;
+  /** A tunable channel or bookmark in the overlay strip was clicked. */
+  onAnnotationTune: (target: AnnotationTarget) => void;
   metrics: SpectrumMetrics;
   registerView: (actions: ViewActions) => void;
   onStatus: (status: SocketStatus) => void;
@@ -69,6 +77,9 @@ export function SpectrumView({
   vfoCtl,
   step,
   createVfoAt,
+  overlaySettings,
+  bookmarks,
+  onAnnotationTune,
   metrics,
   registerView,
   onStatus,
@@ -82,9 +93,9 @@ export function SpectrumView({
   const waterfallNoticeRef = useRef<HTMLDivElement>(null);
   const [plotHeight, setPlotHeight] = useState(loadPlotHeight);
   // Callbacks and values read by long-running listeners come from here, not from effect deps.
-  const live = useRef({ step, registerView, onStatus, onInfo, onError });
+  const live = useRef({ step, registerView, onStatus, onInfo, onError, onAnnotationTune });
   useEffect(() => {
-    live.current = { step, registerView, onStatus, onInfo, onError };
+    live.current = { step, registerView, onStatus, onInfo, onError, onAnnotationTune };
   });
 
   useEffect(() => {
@@ -146,6 +157,7 @@ export function SpectrumView({
       onError: (msg) => live.current.onError(msg),
     });
 
+    const annotations = new AnnotationLayer();
     const view = new ViewController({
       apply: (span) => socket.setView(span ? { startHz: span.startHz, endHz: span.endHz } : {}),
     });
@@ -165,7 +177,18 @@ export function SpectrumView({
         return snapClick(hz, v ? stepFor(live.current.step, v.mode) : null);
       },
       onVfoCreate: (hz) => createVfoAt(hz),
+      annotations,
+      onAnnotationTune: (target) => live.current.onAnnotationTune(target),
     });
+    const syncAnnotations = () => {
+      const settings = overlaySettings.getSnapshot();
+      annotations.setEnabled(enabledCategories(settings));
+      annotations.setBookmarks(bookmarks.getSnapshot().bookmarks, settings.bookmarks);
+      interaction?.refresh();
+    };
+    syncAnnotations();
+    const offOverlay = overlaySettings.subscribe(syncAnnotations);
+    const offBookmarks = bookmarks.subscribe(syncAnnotations);
     const pushVfos = () => {
       const snap = vfoCtl.getSnapshot();
       interaction?.setVfos(snap.vfos.map(toMarker), snap.selectedId);
@@ -218,6 +241,8 @@ export function SpectrumView({
       live.current.registerView({ reset: () => undefined, zoom: () => undefined });
       offTuning();
       offVfos();
+      offOverlay();
+      offBookmarks();
       tuning.stop();
       view.dispose();
       interaction?.destroy();
@@ -227,7 +252,7 @@ export function SpectrumView({
       plot.destroy();
       waterfall?.destroy();
     };
-  }, [device, controller, tuning, vfoCtl, createVfoAt, metrics]);
+  }, [device, controller, tuning, vfoCtl, createVfoAt, overlaySettings, bookmarks, metrics]);
 
   const clampPlot = useCallback((px: number) => {
     const h = containerRef.current?.clientHeight ?? 0;
