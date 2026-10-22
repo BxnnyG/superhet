@@ -48,6 +48,19 @@ dark values again under `prefers-color-scheme: dark` unless `data-theme="light"`
    arrows, Home resets; stored in `localStorage`), VFO overlays with passband shading and label
    chips (paused VFOs dashed, faded, "(paused)"), the parts of the span outside the usable window
    (85 % of the sample rate) shaded with dashed edge lines, frequency axis.
+   - Waterfall history: every row keeps the absolute span it was rendered with (`spectrum/history.ts`);
+     the shader maps each row onto the current view, so zoom, pan and centre retunes keep the history
+     (areas a row never covered show the background). Rows are resampled to a fixed 4096-texel width
+     and carry their own dB mapping; history is only lost with the WebGL context or the device.
+   - Click preview: hovering draws a cursor line at the frequency a click would tune to (snapped to the
+     step of the active VFO, whole Hz for a centre tune), a ghost passband of the active VFO and a
+     chip "145.500 000 MHz  → VFO 1" (or "→ centre", "→ new VFO" with Alt/Ctrl, "(outside window)").
+     A click glides the marker (150 ms ease-out) and pulses a fading line at the target, which keeps
+     its frequency when the click retunes the centre. `prefers-reduced-motion` turns glide and pulse
+     off. The overlay is a 2D canvas, so the preview also works without WebGL2.
+   - Usable window: outside parts are shaded (50 %), edges dashed, labelled "outside tuning window"
+     (or "outside" when narrow) at the top edge, with a tooltip explaining that VFOs there are paused
+     or make the daemon retune; the exact edge frequencies are flagged on the frequency axis.
 4. Status bar: buffer, drift, latency, underruns, dropped (audio samples replaced by silence),
    fps. The device-side `dropped_blocks` counter is not exposed to the browser yet.
 

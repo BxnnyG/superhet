@@ -10,7 +10,10 @@ import {
   CANVAS_TEXT,
   TRACE_FILL,
   TRACE_STROKE,
+  WINDOW_EDGE,
+  WINDOW_LABEL,
 } from "./palette";
+import type { Span } from "./view";
 
 const AXIS_HEIGHT = 18;
 /** Left margin (CSS px) reserved for the dB labels; the waterfall is offset by the same amount. */
@@ -32,6 +35,7 @@ export function formatMHz(hz: number, step: number): string {
 export class SpectrumPlot {
   private readonly ctx: CanvasRenderingContext2D;
   private frame: SpectrumFrame | null = null;
+  private window: Span | null = null;
   private raf = 0;
   private dpr = 1;
   private destroyed = false;
@@ -56,6 +60,12 @@ export class SpectrumPlot {
 
   /** Redraw the last frame with the current display range. */
   redraw(): void {
+    this.schedule();
+  }
+
+  /** Usable window of the device; its edges are flagged on the frequency axis. */
+  setWindow(window: Span | null): void {
+    this.window = window;
     this.schedule();
   }
 
@@ -129,6 +139,36 @@ export class SpectrumPlot {
       ctx.stroke();
       ctx.fillStyle = CANVAS_TEXT;
       ctx.fillText(formatMHz(f, fStep), x, plotH + 3 * dpr);
+    }
+
+    // Usable-window edges on the axis: a tick plus the exact frequency, on the inner side so the
+    // label stays clear of the shaded area drawn by the overlay.
+    const win = this.window;
+    if (win) {
+      const edges = [
+        { hz: win.startHz, align: "left" as const },
+        { hz: win.endHz, align: "right" as const },
+      ];
+      ctx.font = `${10 * dpr}px ${CANVAS_FONT}`;
+      ctx.textBaseline = "top";
+      for (const { hz, align } of edges) {
+        if (hz < startHz || hz > startHz + frame.sampleRate) continue;
+        const x = left + ((hz - startHz) / frame.sampleRate) * plotW;
+        const text = (hz / 1e6).toFixed(3);
+        const tw = ctx.measureText(text).width;
+        const pad = 3 * dpr;
+        ctx.fillStyle = CANVAS_AXIS_BG;
+        ctx.fillRect(align === "left" ? x : x - tw - pad * 2, plotH, tw + pad * 2, axisH);
+        ctx.strokeStyle = WINDOW_EDGE;
+        ctx.lineWidth = Math.max(1, dpr);
+        ctx.beginPath();
+        ctx.moveTo(x, plotH);
+        ctx.lineTo(x, h);
+        ctx.stroke();
+        ctx.fillStyle = WINDOW_LABEL;
+        ctx.textAlign = align;
+        ctx.fillText(text, align === "left" ? x + pad : x - pad, plotH + 3 * dpr);
+      }
     }
 
     // Trace.

@@ -14,5 +14,7 @@ export const CHIP_BORDER = "rgba(63, 63, 70, 0.9)";
 export const CANVAS_FONT = 'ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace';
 export const CANVAS_SANS = 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
 /** Shading outside the usable window (85 % of the sample rate) and its edge line. */
-export const WINDOW_SHADE = "rgba(0, 0, 0, 0.38)";
-export const WINDOW_EDGE = "rgba(161, 161, 170, 0.45)";
+export const WINDOW_SHADE = "rgba(0, 0, 0, 0.5)";
+export const WINDOW_EDGE = "rgba(161, 161, 170, 0.7)";
+/** Label for the shaded parts and the window edge flags on the frequency axis. */
+export const WINDOW_LABEL = "rgba(161, 161, 170, 0.85)";
