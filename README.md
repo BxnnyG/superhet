@@ -34,19 +34,26 @@ Services: `superhet-api` (web UI, port 8073), `superhet-sdrd` (device + DSP), `s
 
 Host preparation for the RTL-SDR (kernel module blacklist, udev rules, USB group) is described in [docs/setup-host.md](docs/setup-host.md).
 
-## Install from GHCR
+## Quick start
 
-No build needed. Every release (see [Releases](https://github.com/BxnnyG/superhet/releases)) ships a compose bundle with the stack pinned to the matching image `ghcr.io/bxnnyg/superhet:<version>`:
+Needs Docker with the compose plugin. No clone, no build; the image comes from GHCR (public). Releases are pre-releases for now, so use the explicit tag (currently `v0.1.0-alpha.2`):
 
-```bash
-tar xzf superhet-v0.1.0-compose.tar.gz && cd superhet-v0.1.0-compose
-scripts/gen-secrets.sh             # creates .env with random passwords
-# one-time host setup for the RTL-SDR: docs/setup-host.md
-docker compose up -d
-docker compose logs superhet-api   # one-time setup token for the first admin account
+```sh
+curl -fsSL https://github.com/BxnnyG/superhet/releases/download/v0.1.0-alpha.2/install.sh | sh
 ```
 
-Then open `http://<host>:8073`. The bundle's `INSTALL.md` has the details. The image is public on GHCR (pull without login); the development tag is `ghcr.io/bxnnyg/superhet:edge`.
+The installer creates `./superhet` with `compose.yaml` and a `.env` (random passwords, detected USB group of your RTL-SDR), pulls the images, starts the stack and prints the URL (`http://<host>:8073`) and the one-time setup token for the first admin account. Add `-s -- --no-start` after `sh` to only prepare the directory. It never overwrites an existing `.env`, never deletes volumes, and stops with a hint if a leftover database volume from an earlier install would clash with new passwords. Overrides: `SUPERHET_DIR`, `SUPERHET_VERSION`, `SUPERHET_PORT` (set via `env`, e.g. `curl ... | env SUPERHET_DIR=/opt/superhet sh`).
+
+Manual alternative (same result, two files):
+
+```sh
+mkdir superhet && cd superhet
+curl -fsSLO https://github.com/BxnnyG/superhet/releases/download/v0.1.0-alpha.2/compose.yaml
+sh -c 'umask 077; for v in POSTGRES_PASSWORD NATS_API_PASSWORD NATS_SDRD_PASSWORD NATS_PLUGINHOST_PASSWORD NATS_WORKER_PASSWORD; do echo "$v=$(openssl rand -hex 24)"; done > .env'
+docker compose up -d
+```
+
+Set `SUPERHET_USB_GID=<gid>` in `.env` if the group owning your dongle's `/dev/bus/usb` node is not `plugdev` (46); the installer does this for you. One-time host preparation for the RTL-SDR (kernel driver blacklist, udev rules): [docs/setup-host.md](docs/setup-host.md). Details and updating: [INSTALL.md](deploy/bundle/INSTALL.md). The development image is `ghcr.io/bxnnyg/superhet:edge`.
 
 From a git checkout, `docker compose up --build` builds the image locally; `SUPERHET_IMAGE=ghcr.io/bxnnyg/superhet:<version>` in `.env` followed by `docker compose pull && docker compose up -d --no-build` uses the published one instead.
 

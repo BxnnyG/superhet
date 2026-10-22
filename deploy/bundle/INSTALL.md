@@ -1,6 +1,6 @@
 # Superhet @TAG@ – compose bundle
 
-Runs the published image `@IMAGE@` (no local build). Needs Docker with the compose plugin and,
+Alternative to `install.sh` (see the README). Runs the published image `@IMAGE@` (no local build). Needs Docker with the compose plugin and,
 for a real receiver, an RTL-SDR dongle plugged into this host. Single user, self-hosted.
 
 1. Extract and enter the directory: `tar xzf superhet-@TAG@-compose.tar.gz && cd superhet-@TAG@-compose`
