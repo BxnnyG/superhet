@@ -15,6 +15,7 @@ import type { LevelController } from "./levels";
 import { SpectrumInteraction } from "./interaction";
 import { CANVAS_BG } from "./palette";
 import { PLOT_LEFT_PAD, SpectrumPlot } from "./plot";
+import { snapClick } from "./preview";
 import { SpectrumSocket, clampBins, type SocketStatus } from "./socket";
 import type { TuningController } from "./tuning";
 import { ViewController, deviceSpan } from "./view";
@@ -158,6 +159,11 @@ export function SpectrumView({
         const v = vfoCtl.getSnapshot().vfos.find((x) => x.id === id);
         if (v) vfoCtl.update(id, { freqHz: snapFrequency(hz, stepFor(live.current.step, v.mode)) });
       },
+      // The same rule the click applies, so the hover preview shows the real landing frequency.
+      snap: (hz, id) => {
+        const v = id === null ? undefined : vfoCtl.getSnapshot().vfos.find((x) => x.id === id);
+        return snapClick(hz, v ? stepFor(live.current.step, v.mode) : null);
+      },
       onVfoCreate: (hz) => createVfoAt(hz),
     });
     const pushVfos = () => {
@@ -179,6 +185,7 @@ export function SpectrumView({
       }
       view.setDevice(deviceSpan(state.centerHz, state.sampleRate));
       interaction?.setWindow(state.window);
+      plot.setWindow(state.window);
     };
     onTuning();
     const offTuning = tuning.subscribe(onTuning);
