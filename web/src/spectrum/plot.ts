@@ -15,7 +15,7 @@ import {
 } from "./palette";
 import type { Span } from "./view";
 
-const AXIS_HEIGHT = 18;
+export const AXIS_HEIGHT = 18;
 /** Left margin (CSS px) reserved for the dB labels; the waterfall is offset by the same amount. */
 export const PLOT_LEFT_PAD = 34;
 

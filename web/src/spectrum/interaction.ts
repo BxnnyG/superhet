@@ -1,7 +1,9 @@
 // Pointer interaction and hover cursor on an overlay canvas above the spectrum and waterfall.
-// Wheel zooms the view, shift/middle drag pans, double-click resets the zoom.
+// Wheel zooms the view (or tunes the selected VFO over its passband / in "wheel tunes" mode),
+// plain, shift or middle drag pans a zoomed view, double-click resets the zoom.
 // Plain click: moves the selected VFO there, or tunes the device centre when none is selected.
-// Click on a VFO selects it, dragging a VFO retunes it, Alt/Ctrl-click creates a VFO.
+// Click on a VFO selects it, dragging a VFO retunes it, dragging an edge of the selected VFO's
+// passband changes its bandwidth, Alt/Ctrl-click creates a VFO. The frequency axis is a pan handle.
 // VFO markers and bandwidth shading are drawn here (canvas, no React per frame).
 // Hovering previews the click: a cursor line at the snapped landing frequency, a ghost passband
 // of the selected VFO and a label; a click glides the marker (~150 ms) and pulses the target.
@@ -40,16 +42,24 @@ import {
   previewLabel,
   type PreviewTarget,
 } from "./preview";
-import { MODE_LABEL, hitTestVfo, vfoColor, type Marker } from "../vfo/model";
+import { MODE_LABEL, formatBandwidth, hitTestVfo, vfoColor, type Marker } from "../vfo/model";
+import {
+  CLICK_SLOP_PX,
+  VFO_GRAB_PX,
+  WheelSteps,
+  bandwidthFromEdge,
+  exceedsSlop,
+  hitPassbandEdge,
+  isOverPassband,
+  wheelAction,
+  type PassbandEdge,
+  type WheelMode,
+} from "./gestures";
 import { fracToHz, spanWidth, type Span, type ViewController } from "./view";
 
-/** Distance in CSS pixels below which a press counts as a click. */
-const CLICK_SLOP_PX = 4;
 /** A click waits this long for a possible second click (double-click resets the zoom). */
 const CLICK_DELAY_MS = 220;
 const WHEEL_ZOOM_PER_PIXEL = 0.0015;
-/** Grab tolerance around a VFO centre line (CSS px). */
-const VFO_GRAB_PX = 5;
 /** How long after a click a changed VFO frequency still counts as the click's result. */
 const CLICK_RESULT_MS = 600;
 
@@ -73,11 +83,35 @@ export interface InteractionOptions {
   annotations: AnnotationLayer;
   /** A tunable channel or bookmark in the strip was clicked. */
   onAnnotationTune: (target: AnnotationTarget) => void;
+  /** Wheel preference ("zoom" or "tune"), read on every wheel event. */
+  getWheelMode: () => WheelMode;
+  /** Wheel over the selected VFO: tune it by `steps` tuning steps (negative = down). */
+  onVfoStep: (id: number, steps: number) => void;
+  /** A passband edge of the selected VFO was dragged: the new bandwidth (already snapped). */
+  onBandwidth: (id: number, bandwidthHz: number) => void;
+  /** Vertical extent (CSS px from the canvas top) of the frequency axis, if known. */
+  axis?: () => { top: number; bottom: number } | null;
 }
 
 export function wheelDelta(e: Pick<WheelEvent, "deltaY" | "deltaMode">): number {
   // Lines and pages are converted to approximate pixels.
   return e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+}
+
+interface Drag {
+  id: number;
+  startX: number;
+  base: Span | null;
+  moved: boolean;
+  pan: boolean;
+  /** Set when the press started on a VFO: id and (centre - pointer) offset in Hz. */
+  vfo?: { id: number; offsetHz: number };
+  /** Alt/Ctrl press: creates a VFO on release. */
+  create?: boolean;
+  /** Set when the press started on a passband edge of the selected VFO. */
+  edge?: { id: number; side: PassbandEdge; last: number };
+  /** The press started on the frequency axis (a pan handle, never grabs a VFO). */
+  axis?: boolean;
 }
 
 export class SpectrumInteraction {
@@ -98,17 +132,8 @@ export class SpectrumInteraction {
   private clickMove: { id: number; until: number } | null = null;
   /** Fading line at the clicked frequency (absolute, so it follows a centre retune). */
   private pulse: { hz: number; t0: number } | null = null;
-  private drag: {
-    id: number;
-    startX: number;
-    base: Span | null;
-    moved: boolean;
-    pan: boolean;
-    /** Set when the press started on a VFO: id and (centre - pointer) offset in Hz. */
-    vfo?: { id: number; offsetHz: number };
-    /** Alt/Ctrl press: creates a VFO on release. */
-    create?: boolean;
-  } | null = null;
+  private drag: Drag | null = null;
+  private readonly wheelSteps = new WheelSteps();
   private readonly ctx: CanvasRenderingContext2D | null;
   private destroyed = false;
 
@@ -225,6 +250,24 @@ export class SpectrumInteraction {
     const frac = this.fracAt(e.clientX);
     if (frac === null) return;
     e.preventDefault();
+    const sel = this.markers.find((m) => m.id === this.selectedId);
+    const hz = this.hzAt(e.clientX);
+    const action = wheelAction({
+      ctrlKey: e.ctrlKey,
+      setting: this.o.getWheelMode(),
+      hasVfo: sel !== undefined,
+      overPassband:
+        sel !== undefined &&
+        hz !== null &&
+        !this.onAxis(e.clientY) &&
+        isOverPassband(sel, hz, this.slopHz()),
+    });
+    if (action === "tune" && sel) {
+      const steps = this.wheelSteps.add(wheelDelta(e));
+      if (steps !== 0) this.o.onVfoStep(sel.id, steps);
+      return;
+    }
+    this.wheelSteps.reset();
     this.o.view.zoom(frac, Math.exp(wheelDelta(e) * WHEEL_ZOOM_PER_PIXEL));
   };
 
@@ -236,15 +279,23 @@ export class SpectrumInteraction {
     this.drag = { id: e.pointerId, startX: e.clientX, base, moved: false, pan };
     if (!pan && e.button === 0) {
       const hz = this.hzAt(e.clientX);
-      if (hz !== null) {
+      if (this.onAxis(e.clientY)) {
+        this.drag.axis = true;
+      } else if (hz !== null) {
         if (e.altKey || e.ctrlKey) {
           this.drag.create = true;
         } else {
           const onStrip = hitTarget(this.annotationAt(e.clientX, e.clientY)) !== null;
-          const hit = onStrip ? null : hitTestVfo(this.markers, hz, this.slopHz());
-          if (hit) {
-            this.drag.vfo = { id: hit.id, offsetHz: hit.freqHz - hz };
-            if (hit.id !== this.selectedId) this.o.onVfoSelect(hit.id);
+          const sel = onStrip ? undefined : this.markers.find((m) => m.id === this.selectedId);
+          const side = sel ? hitPassbandEdge(sel, hz, this.slopHz()) : null;
+          if (sel && side) {
+            this.drag.edge = { id: sel.id, side, last: sel.bandwidthHz };
+          } else {
+            const hit = onStrip ? null : hitTestVfo(this.markers, hz, this.slopHz());
+            if (hit) {
+              this.drag.vfo = { id: hit.id, offsetHz: hit.freqHz - hz };
+              if (hit.id !== this.selectedId) this.o.onVfoSelect(hit.id);
+            }
           }
         }
       }
@@ -264,12 +315,26 @@ export class SpectrumInteraction {
       return;
     }
     if (d.id !== e.pointerId) return;
+    this.updateDragCursor(d);
     const dx = e.clientX - d.startX;
-    if (Math.abs(dx) > CLICK_SLOP_PX) d.moved = true;
+    if (exceedsSlop(dx, CLICK_SLOP_PX)) d.moved = true;
     if (d.vfo && d.moved) {
       const hz = this.hzAt(e.clientX, true);
       if (hz !== null) this.o.onVfoMove(d.vfo.id, Math.round(hz + d.vfo.offsetHz));
     }
+    if (d.edge && d.moved) {
+      const hz = this.hzAt(e.clientX, true);
+      const m = this.markers.find((v) => v.id === d.edge?.id);
+      if (hz !== null && m) {
+        const bw = bandwidthFromEdge(m.mode, hz, m.freqHz);
+        if (bw !== d.edge.last) {
+          d.edge.last = bw;
+          this.o.onBandwidth(m.id, bw);
+        }
+      }
+    }
+    // Plain drags on empty spectrum or the axis pan like shift/middle drags (no effect unzoomed).
+    if (d.moved && !d.pan && !d.vfo && !d.edge && !d.create) d.pan = true;
     if (d.pan && d.moved && d.base) {
       const base = d.base;
       const plotW = rect.width - this.o.leftPad;
@@ -282,7 +347,8 @@ export class SpectrumInteraction {
     if (!d || d.id !== e.pointerId) return;
     this.drag = null;
     this.o.canvas.releasePointerCapture?.(e.pointerId);
-    if (d.pan || d.moved || d.vfo) return;
+    this.updateCursor(e.clientX, e.clientY);
+    if (d.pan || d.moved || d.vfo || d.edge) return;
     const hz = this.hzAt(e.clientX);
     if (hz === null) return;
     const annotation = hitTarget(this.annotationAt(e.clientX, e.clientY));
@@ -359,12 +425,36 @@ export class SpectrumInteraction {
     return this.o.annotations.hit(x, clientY - rect.top);
   }
 
+  /** True when a client Y lies on the frequency axis. */
+  private onAxis(clientY: number): boolean {
+    const band = this.o.axis?.();
+    if (!band) return false;
+    const y = clientY - this.o.canvas.getBoundingClientRect().top;
+    return y >= band.top && y <= band.bottom;
+  }
+
   private updateCursor(clientX: number, clientY: number): void {
     const hz = this.hzAt(clientX);
     const tunable = hitTarget(this.annotationAt(clientX, clientY)) !== null;
-    const over = !tunable && hz !== null && hitTestVfo(this.markers, hz, this.slopHz()) !== null;
-    this.o.canvas.style.cursor = tunable ? "pointer" : over ? "ew-resize" : "";
+    const axis = this.onAxis(clientY);
+    const sel = this.markers.find((m) => m.id === this.selectedId);
+    const slop = this.slopHz();
+    const edge = !tunable && !axis && sel && hz !== null && hitPassbandEdge(sel, hz, slop) !== null;
+    const over = !tunable && !axis && hz !== null && hitTestVfo(this.markers, hz, slop) !== null;
+    this.o.canvas.style.cursor = tunable
+      ? "pointer"
+      : edge
+        ? "ew-resize"
+        : over || (axis && this.o.view.zoomed)
+          ? "grab"
+          : "";
     this.setTitle(hz !== null && isOutside(this.window, hz));
+  }
+
+  /** While a drag is running: grabbing for pans and VFO moves, resize for an edge. */
+  private updateDragCursor(d: Drag): void {
+    if (!d.moved) return;
+    this.o.canvas.style.cursor = d.edge ? "ew-resize" : d.pan || d.vfo ? "grabbing" : "";
   }
 
   /** Native tooltip explaining the shaded part of the span; only touched when it changes. */
@@ -385,7 +475,7 @@ export class SpectrumInteraction {
   /** What a click at the pointer would do and where; null target = plain cursor (dragging). */
   private previewAt(rawHz: number): { hz: number; target: PreviewTarget | null } {
     const d = this.drag;
-    if (d && (d.pan || d.moved || d.vfo)) return { hz: rawHz, target: null };
+    if (d && (d.pan || d.moved || d.vfo || d.edge)) return { hz: rawHz, target: null };
     const hit = hitTestVfo(this.markers, rawHz, this.slopHz());
     if (hit) return { hz: hit.freqHz, target: { kind: "grab", id: hit.id } };
     if (this.hoverMod) return { hz: Math.round(rawHz), target: { kind: "create" } };
@@ -489,9 +579,13 @@ export class SpectrumInteraction {
       this.o.annotations.drawTooltip(ctx, stripHit, left + stripHit.x, canvas.width, dpr);
       return;
     }
-    const label = target
-      ? previewLabel(hz, target, isOutside(this.window, hz))
-      : `${formatFrequency(hz)} MHz`;
+    const dragged = this.drag?.edge;
+    const edgeMarker = dragged ? this.markers.find((m) => m.id === dragged.id) : undefined;
+    const label = edgeMarker
+      ? `Bandwidth ${formatBandwidth(edgeMarker.bandwidthHz)}`
+      : target
+        ? previewLabel(hz, target, isOutside(this.window, hz))
+        : `${formatFrequency(hz)} MHz`;
     ctx.font = `${11 * dpr}px ${CANVAS_FONT}`;
     const padX = 4 * dpr;
     const w = ctx.measureText(label).width + padX * 2;

@@ -11,14 +11,15 @@ import type { BookmarkStore } from "../bookmarks/store";
 import type { SpectrumInfo, ViewActions } from "../shell/useReceiver";
 import type { SpectrumMetrics } from "../shell/metrics";
 import type { VfoController } from "../vfo/controller";
-import { snapFrequency, stepFor, toMarker, type StepChoice } from "../vfo/model";
+import { stepFor, stepFrequency, snapFrequency, toMarker, type StepChoice } from "../vfo/model";
 import { AnnotationLayer, type AnnotationTarget } from "./annotations";
 import type { SpectrumFrame } from "./frame";
 import type { LevelController } from "./levels";
 import { SpectrumInteraction } from "./interaction";
 import { CANVAS_BG } from "./palette";
-import { PLOT_LEFT_PAD, SpectrumPlot } from "./plot";
+import { AXIS_HEIGHT, PLOT_LEFT_PAD, SpectrumPlot } from "./plot";
 import { snapClick } from "./preview";
+import { getWheelMode } from "./wheelMode";
 import { SpectrumSocket, clampBins, type SocketStatus } from "./socket";
 import type { TuningController } from "./tuning";
 import { ViewController, deviceSpan } from "./view";
@@ -179,6 +180,20 @@ export function SpectrumView({
       onVfoCreate: (hz) => createVfoAt(hz),
       annotations,
       onAnnotationTune: (target) => live.current.onAnnotationTune(target),
+      getWheelMode,
+      onVfoStep: (id, steps) => {
+        const v = vfoCtl.getSnapshot().vfos.find((x) => x.id === id);
+        if (v) {
+          const stepHz = stepFor(live.current.step, v.mode);
+          vfoCtl.update(id, { freqHz: stepFrequency(v.freqHz, stepHz, steps) });
+        }
+      },
+      onBandwidth: (id, bandwidthHz) => vfoCtl.update(id, { bandwidthHz }),
+      // The axis strip sits at the bottom of the spectrum canvas.
+      axis: () => {
+        const bottom = plotCanvas.offsetTop + plotCanvas.clientHeight;
+        return { top: bottom - AXIS_HEIGHT, bottom };
+      },
     });
     const syncAnnotations = () => {
       const settings = overlaySettings.getSnapshot();
@@ -321,7 +336,7 @@ export function SpectrumView({
       <canvas
         ref={overlayRef}
         className="absolute inset-0 size-full cursor-crosshair touch-none"
-        aria-label="Spectrum: wheel zooms, shift-drag pans, click moves the selected VFO or tunes the centre, Alt/Ctrl-click creates a VFO, drag a VFO to retune it, double-click resets zoom"
+        aria-label="Spectrum: wheel zooms (or tunes over the selected VFO), drag pans, click moves the selected VFO or tunes the centre, Alt/Ctrl-click creates a VFO, drag a VFO to retune it, drag a passband edge to change its bandwidth, double-click resets zoom"
       />
     </div>
   );

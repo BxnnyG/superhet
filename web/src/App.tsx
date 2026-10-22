@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { BookmarkEditorHost } from "./bookmarks/BookmarkEditor";
+import { ShortcutsDialog } from "./shell/ShortcutsDialog";
 import { Sidebar } from "./shell/Sidebar";
 import { StatusBar } from "./shell/StatusBar";
 import { TopBar } from "./shell/TopBar";
 import { useReceiver } from "./shell/useReceiver";
+import { useShortcuts } from "./shell/useShortcuts";
 import { SpectrumView } from "./spectrum/SpectrumView";
 import { ReceiverDock } from "./vfo/ReceiverDock";
 import { Toaster } from "./ui";
@@ -18,6 +20,21 @@ export function App({ device = "dev0" }: Props) {
   const [theme, setTheme] = useTheme();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
+
+  useShortcuts({
+    vfoCtl: r.vfoCtl,
+    audio: r.audio,
+    autoSquelch: r.autoSquelch,
+    step: r.step,
+    zoom: (factor) => r.viewActions.current.zoom(factor),
+    resetZoom: () => r.viewActions.current.reset(),
+    createVfoAt: r.createVfoAt,
+    centerHz: r.tuningSnap.display?.centerHz ?? null,
+    startBookmark: r.startBookmark,
+    openHelp: openShortcuts,
+  });
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -34,6 +51,7 @@ export function App({ device = "dev0" }: Props) {
         r={r}
         theme={theme}
         onTheme={setTheme}
+        onShortcuts={openShortcuts}
         drawerOpen={drawerOpen}
         onMenu={() => setDrawerOpen((o) => !o)}
       />
@@ -72,6 +90,7 @@ export function App({ device = "dev0" }: Props) {
             audio={r.audio}
             audioSnap={r.audioSnap}
             locked={r.locks.length > 0}
+            autoSquelch={r.autoSquelch}
             onCreate={() => r.createVfoAt(r.tuningSnap.display?.centerHz ?? null)}
             onSelect={(id) => r.vfoCtl.select(id)}
             onUpdate={(id, patch) => r.vfoCtl.update(id, patch)}
@@ -81,6 +100,7 @@ export function App({ device = "dev0" }: Props) {
       </div>
       <StatusBar audio={r.audio} metrics={r.metrics} />
       <BookmarkEditorHost store={r.bookmarks} />
+      {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       <Toaster />
     </div>
   );

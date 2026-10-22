@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ChangePasswordDialog } from "../auth/ChangePasswordDialog";
 import { useAuth } from "../auth/context";
 import {
@@ -6,20 +6,25 @@ import {
   Field,
   IconButton,
   KeyIcon,
+  Kbd,
   LogOutIcon,
   SegmentedControl,
   SettingsIcon,
   UserIcon,
 } from "../ui";
 import { type ThemePreference } from "../ui/theme";
+import { getWheelMode, setWheelMode, subscribeWheelMode } from "../spectrum/wheelMode";
 
 interface Props {
   theme: ThemePreference;
   onTheme: (theme: ThemePreference) => void;
+  /** Open the keyboard shortcuts dialog. */
+  onShortcuts: () => void;
 }
 
 /** Settings popover (theme for now); the slot for future preferences. */
-export function SettingsMenu({ theme, onTheme }: Props) {
+export function SettingsMenu({ theme, onTheme, onShortcuts }: Props) {
+  const wheel = useSyncExternalStore(subscribeWheelMode, getWheelMode);
   const [open, setOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const auth = useAuth();
@@ -73,7 +78,33 @@ export function SettingsMenu({ theme, onTheme }: Props) {
               ]}
             />
           </Field>
-          <p className="text-xs text-fg-subtle">Saved in this browser.</p>
+          <Field label="Mouse wheel">
+            <SegmentedControl
+              aria-label="Mouse wheel"
+              value={wheel}
+              onChange={setWheelMode}
+              className="w-full"
+              options={[
+                { value: "zoom", label: "Zoom" },
+                { value: "tune", label: "Tune" },
+              ]}
+            />
+          </Field>
+          <p className="text-xs text-fg-subtle">
+            Zoom: the wheel zooms, except over the active VFO where it tunes. Tune: it always tunes
+            the active VFO; Ctrl+wheel zooms. Saved in this browser.
+          </p>
+          <Button
+            variant="ghost"
+            className="justify-between"
+            onClick={() => {
+              setOpen(false);
+              onShortcuts();
+            }}
+          >
+            Keyboard shortcuts
+            <Kbd>?</Kbd>
+          </Button>
           {auth && (
             <div className="flex flex-col gap-1 border-t border-border pt-3">
               <div className="flex min-w-0 items-center gap-2 px-1 pb-1 text-sm">

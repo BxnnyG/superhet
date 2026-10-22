@@ -18,11 +18,12 @@ interface Props {
   r: Receiver;
   theme: ThemePreference;
   onTheme: (t: ThemePreference) => void;
+  onShortcuts: () => void;
   drawerOpen: boolean;
   onMenu: () => void;
 }
 
-export function TopBar({ r, theme, onTheme, drawerOpen, onMenu }: Props) {
+export function TopBar({ r, theme, onTheme, onShortcuts, drawerOpen, onMenu }: Props) {
   const st = STATUS[r.status];
   const display = r.tuningSnap.display;
   return (
@@ -77,7 +78,7 @@ export function TopBar({ r, theme, onTheme, drawerOpen, onMenu }: Props) {
         />
       </div>
       <div className="ml-auto flex items-center gap-2 shell:ml-0">
-        <SettingsMenu theme={theme} onTheme={onTheme} />
+        <SettingsMenu theme={theme} onTheme={onTheme} onShortcuts={onShortcuts} />
       </div>
     </header>
   );

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { Button } from "./Button";
 import { cn } from "./cn";
 import { IconButton } from "./IconButton";
 import { AlertIcon, CheckIcon, CloseIcon, SignalIcon } from "./icons";
@@ -41,6 +42,19 @@ export function Toaster({ store = toasts }: { store?: ToastStore }) {
           <div className="min-w-0 flex-1 break-words">
             <p className="text-sm font-medium text-fg">{t.title}</p>
             {t.body && <p className="mt-0.5 text-xs text-fg-muted">{t.body}</p>}
+            {t.action && (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="mt-2"
+                onClick={() => {
+                  t.action?.onClick();
+                  store.dismiss(t.id);
+                }}
+              >
+                {t.action.label}
+              </Button>
+            )}
           </div>
           <IconButton label="Dismiss notification" size="sm" onClick={() => store.dismiss(t.id)}>
             <CloseIcon size={14} />

@@ -92,7 +92,7 @@ it("marks a paused active VFO", () => {
 it("shows the empty state hint and a + button when there are no VFOs", () => {
   const fns = setup([], null);
   expect(screen.queryByRole("radiogroup", { name: "Mode" })).toBeNull();
-  expect(screen.getByText("Click the spectrum or press + to add a VFO")).toBeInTheDocument();
+  expect(screen.getByText("Click the spectrum or press N to add a VFO")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Add VFO" }));
   expect(fns.onCreate).toHaveBeenCalled();
 });

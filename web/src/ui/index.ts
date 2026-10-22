@@ -20,7 +20,7 @@ export { Select, type SelectOption } from "./Select";
 export { Slider, markerLeft } from "./Slider";
 export { PasswordField, TextField } from "./TextField";
 export { Toaster } from "./Toast";
-export { ToastStore, toasts, type ToastInput, type ToastTone } from "./toast";
+export { ToastStore, toasts, type ToastAction, type ToastInput, type ToastTone } from "./toast";
 export { Toggle } from "./Toggle";
 export { Tooltip } from "./Tooltip";
 export { useTheme, type ThemePreference } from "./theme";
