@@ -1,6 +1,5 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import type { AudioController, AudioSnapshot } from "../audio/controller";
 import type { Vfo } from "./api";
 import type { VfoSnapshot } from "./controller";
 import { VfoPanel } from "./VfoPanel";
@@ -16,22 +15,11 @@ const vfo = (id: number, status: Vfo["status"]): Vfo => ({
   status,
 });
 
-function renderPanel(vfos: Vfo[], locked: boolean) {
-  const snap: VfoSnapshot = { vfos, selectedId: null, busy: false, error: null, loaded: true };
-  render(
-    <VfoPanel
-      vfos={snap}
-      audio={{} as AudioController}
-      audioSnap={{ levels: {} } as unknown as AudioSnapshot}
-      step="auto"
-      onStep={vi.fn()}
-      locked={locked}
-      onCreate={vi.fn()}
-      onSelect={vi.fn()}
-      onUpdate={vi.fn()}
-      onRemove={vi.fn()}
-    />,
-  );
+function renderPanel(vfos: Vfo[], locked: boolean, selectedId: number | null = null) {
+  const snap: VfoSnapshot = { vfos, selectedId, busy: false, error: null, loaded: true };
+  const fns = { onCreate: vi.fn(), onSelect: vi.fn(), onRemove: vi.fn() };
+  render(<VfoPanel vfos={snap} locked={locked} {...fns} />);
+  return fns;
 }
 
 it("marks a paused VFO in the list and explains the tuning lock", () => {
@@ -57,4 +45,14 @@ it("shows no paused hint when every VFO is active", () => {
   renderPanel([vfo(1, "active")], true);
   expect(screen.queryByText("paused")).toBeNull();
   expect(screen.queryByRole("status")).toBeNull();
+});
+
+it("selects and deletes from the compact list, with no editor in the sidebar", () => {
+  const fns = renderPanel([vfo(1, "active"), vfo(2, "active")], false, 1);
+  const rows = within(screen.getByRole("list", { name: "VFO list" })).getAllByRole("listitem");
+  fireEvent.click(within(rows[1]!).getAllByRole("button")[0]!);
+  expect(fns.onSelect).toHaveBeenCalledWith(2);
+  fireEvent.click(screen.getByRole("button", { name: "Delete VFO 1" }));
+  expect(fns.onRemove).toHaveBeenCalledWith(1);
+  expect(screen.queryByRole("radiogroup", { name: "Mode" })).toBeNull();
 });

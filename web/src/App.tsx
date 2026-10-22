@@ -4,6 +4,7 @@ import { StatusBar } from "./shell/StatusBar";
 import { TopBar } from "./shell/TopBar";
 import { useReceiver } from "./shell/useReceiver";
 import { SpectrumView } from "./spectrum/SpectrumView";
+import { ReceiverDock } from "./vfo/ReceiverDock";
 import { Toaster } from "./ui";
 import { useTheme } from "./ui/theme";
 
@@ -45,9 +46,9 @@ export function App({ device = "dev0" }: Props) {
       )}
       <div className="flex min-h-0 flex-1">
         <Sidebar r={r} open={drawerOpen} onClose={closeDrawer} />
-        <main className="min-w-0 flex-1 p-3">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 p-3">
           <h1 className="sr-only">Superhet spectrum and waterfall</h1>
-          <div className="size-full overflow-hidden rounded-xl border border-border-strong">
+          <div className="min-h-48 flex-1 overflow-hidden rounded-xl border border-border-strong">
             <SpectrumView
               device={device}
               controller={r.levelController}
@@ -62,6 +63,18 @@ export function App({ device = "dev0" }: Props) {
               onError={r.setSpectrumError}
             />
           </div>
+          <ReceiverDock
+            vfos={r.vfoSnap}
+            audio={r.audio}
+            audioSnap={r.audioSnap}
+            step={r.step}
+            onStep={r.setStep}
+            locked={r.locks.length > 0}
+            onCreate={() => r.createVfoAt(r.tuningSnap.display?.centerHz ?? null)}
+            onSelect={(id) => r.vfoCtl.select(id)}
+            onUpdate={(id, patch) => r.vfoCtl.update(id, patch)}
+            onRemove={(id) => r.vfoCtl.remove(id)}
+          />
         </main>
       </div>
       <StatusBar audio={r.audio} metrics={r.metrics} />

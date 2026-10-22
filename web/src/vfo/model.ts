@@ -120,3 +120,6 @@ export function hitTestVfo(markers: readonly Marker[], hz: number, slopHz: numbe
 
 /** Shown when a VFO sits outside the usable window while the tuning lock keeps the centre. */
 export const VFO_PAUSED_HINT = "Tuning locked — VFO paused outside the window";
+/** Hint for a paused VFO while free tuning is on (no lock). */
+export const VFO_PAUSED_FREE_HINT =
+  "VFO outside the usable window — paused until the device is retuned";

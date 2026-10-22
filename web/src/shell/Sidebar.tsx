@@ -57,17 +57,12 @@ export function Sidebar({ r, open, onClose }: Props) {
             refreshSignal={`${open}:${profilesOpen}`}
           />
         </Section>
-        <Section title="Radio">
+        <Section title="VFOs">
           <VfoPanel
             vfos={r.vfoSnap}
-            audio={r.audio}
-            audioSnap={r.audioSnap}
             locked={r.locks.length > 0}
-            step={r.step}
-            onStep={r.setStep}
             onCreate={() => r.createVfoAt(r.tuningSnap.display?.centerHz ?? null)}
             onSelect={(id) => r.vfoCtl.select(id)}
-            onUpdate={(id, patch) => r.vfoCtl.update(id, patch)}
             onRemove={(id) => r.vfoCtl.remove(id)}
           />
         </Section>
@@ -78,7 +73,7 @@ export function Sidebar({ r, open, onClose }: Props) {
             viewActions={r.viewActions}
           />
         </Section>
-        <Section title="Audio" defaultOpen={false}>
+        <Section title="Audio device">
           <AudioControls audio={r.audio} snapshot={r.audioSnap} />
         </Section>
       </aside>

@@ -3,15 +3,16 @@ import { expect, it, vi } from "vitest";
 import { App } from "./App";
 import { AuthContext } from "./auth/context";
 
-it("renders the SDR shell: top bar, sidebar sections, spectrum and status bar", () => {
+it("renders the SDR shell: top bar, sidebar sections, spectrum, receiver dock and status bar", () => {
   render(<App />);
   expect(screen.getByText("Superhet")).toBeInTheDocument();
   expect(screen.getByRole("group", { name: "Centre frequency" })).toBeInTheDocument();
   expect(screen.getByRole("complementary", { name: "Controls" })).toBeInTheDocument();
-  for (const name of ["Source", "Radio", "Display", "Audio"]) {
+  for (const name of ["Source", "Profiles", "VFOs", "Display", "Audio device"]) {
     expect(screen.getByRole("button", { name })).toBeInTheDocument();
   }
-  expect(screen.getByText("No VFOs yet")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "Receiver" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Add VFO" })).toBeInTheDocument();
   expect(screen.getByRole("contentinfo", { name: "Status" })).toBeInTheDocument();
 });
 

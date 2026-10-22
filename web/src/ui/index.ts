@@ -2,6 +2,7 @@
 export { Alert, type AlertTone } from "./Alert";
 export { Badge, type BadgeTone } from "./Badge";
 export { Button, type ButtonSize, type ButtonVariant } from "./Button";
+export { Chip } from "./Chip";
 export { cn } from "./cn";
 export { ConfirmDialog } from "./ConfirmDialog";
 export { Dialog } from "./Dialog";

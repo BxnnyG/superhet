@@ -17,7 +17,16 @@ const DBFS_TICKS: readonly MeterTick[] = [
 ];
 
 /** S-meter from the audio frames' channel power; updates its DOM directly, outside React. */
-export function SMeter({ audio, vfoId }: { audio: AudioController; vfoId: number }) {
+export function SMeter({
+  audio,
+  vfoId,
+  compact = false,
+}: {
+  audio: AudioController;
+  vfoId: number;
+  /** Without the dBFS scale (dock). */
+  compact?: boolean;
+}) {
   const barRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
   const dotRef = useRef<HTMLSpanElement>(null);
@@ -53,7 +62,11 @@ export function SMeter({ audio, vfoId }: { audio: AudioController; vfoId: number
           <span ref={textRef} className="font-mono text-xs text-fg num" />
         </span>
       </div>
-      <Meter barRef={barRef} aria-label="Signal strength" ticks={DBFS_TICKS} />
+      <Meter
+        barRef={barRef}
+        aria-label="Signal strength"
+        ticks={compact ? undefined : DBFS_TICKS}
+      />
     </div>
   );
 }
