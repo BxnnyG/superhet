@@ -40,7 +40,7 @@ dark values again under `prefers-color-scheme: dark` unless `data-theme="light"`
 1. Top bar: wordmark, connection pill with device id/tuner/rate, the digit-tunable frequency
    readout of the **active VFO** (nudge arrows, tuning step select, paused badge), next to it a compact
    "Centre" readout of the device centre (read-only while the tuning lock is held) with the padlock
-   (tuning lock, with a "Locked by ..." badge); settings menu (theme). With no VFO the big readout
+   (tuning lock, with a "Locked by ..." badge); settings menu (theme, mouse wheel zoom/tune, keyboard shortcuts list). With no VFO the big readout
    tunes the centre and carries a "Centre" badge (the secondary readout is hidden then).
 2. Sidebar (320 px, collapsible sections, all open by default): Source, Profiles, VFOs (compact list
    with select, listen toggle, delete and the paused hint), Bookmarks, Band plan, Display, Audio device. Below 900 px a slide-over drawer
@@ -56,10 +56,22 @@ dark values again under `prefers-color-scheme: dark` unless `data-theme="light"`
      and carry their own dB mapping; history is only lost with the WebGL context or the device.
    - Click preview: hovering draws a cursor line at the frequency a click would tune to (snapped to the
      step of the active VFO, whole Hz for a centre tune), a ghost passband of the active VFO and a
-     chip "145.500 000 MHz  → VFO 1" (or "→ centre", "→ new VFO" with Alt/Ctrl, "(outside window)").
+     chip "145.500 000 MHz → VFO 1" (or "→ centre", "→ new VFO" with Alt/Ctrl, "(outside window)").
      A click glides the marker (150 ms ease-out) and pulses a fading line at the target, which keeps
      its frequency when the click retunes the centre. `prefers-reduced-motion` turns glide and pulse
      off. The overlay is a 2D canvas, so the preview also works without WebGL2.
+   - Direct controls (`spectrum/gestures.ts`, `spectrum/interaction.ts`): the active VFO's passband
+     edges are drag handles (`ew-resize`; symmetric bandwidth snapped to 100 Hz, clamped to the ends of
+     the mode's bandwidth presets; a chip shows the new bandwidth while dragging; single-sideband
+     modes are prepared in the math). The wheel tunes by the current step over the active passband
+     (or everywhere with Settings, "Mouse wheel: Tune"), elsewhere it zooms; Ctrl+wheel always zooms.
+     A plain drag on empty spectrum/waterfall pans a zoomed view (4 px threshold, so clicks still
+     tune); the frequency axis is a pan handle that never grabs a VFO. Cursors: `ew-resize` on an
+     edge, `grab` on a VFO or the zoomed axis, `grabbing` while panning or dragging.
+   - Keyboard (`shell/shortcuts.ts`, `shell/useShortcuts.ts`): arrows step/select, 1-6 mode, M listen,
+     S squelch Auto, B bookmark, +/-/0 zoom, N new VFO, Delete remove (toast with Undo), `?` opens the
+     "Keyboard shortcuts" dialog. Keys are ignored while typing, on focused sliders/splitter/digit
+     readout and while a modal dialog is open; Ctrl/Alt/Meta combinations stay with the browser.
    - Usable window: outside parts are shaded (50 %), edges dashed, labelled "outside tuning window"
      (or "outside" when narrow) at the top edge, with a tooltip explaining that VFOs there are paused
      or make the daemon retune; the exact edge frequencies are flagged on the frequency axis.
