@@ -172,6 +172,11 @@ export function SpectrumView({
       const state = tuning.getSnapshot().state;
       if (!state || state === lastState) return;
       lastState = state;
+      // Until the first frame arrives (or if none ever does) the confirmed device span stands in
+      // for the frame span so VFOs and the usable window are drawn right away.
+      if (interaction && !interaction.hasFrameSpan()) {
+        interaction.setFrameSpan(state.centerHz, state.sampleRate);
+      }
       view.setDevice(deviceSpan(state.centerHz, state.sampleRate));
       interaction?.setWindow(state.window);
     };
