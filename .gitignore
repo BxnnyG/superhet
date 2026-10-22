@@ -5,3 +5,6 @@ web/dist/
 *.sigmf-data
 /data/
 /dist/
+
+# Agent worktrees
+/.claude/worktrees/
