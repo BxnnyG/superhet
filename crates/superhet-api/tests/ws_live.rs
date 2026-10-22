@@ -45,10 +45,7 @@ async fn nats_frames_reach_websocket_client_cropped() {
         return;
     };
     let device = format!("it{}", std::process::id());
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .expect("free port")
-        .port();
+    let port = common::free_port();
 
     let mut options = async_nats::ConnectOptions::new();
     let mut command = Command::new(env!("CARGO_BIN_EXE_superhet-api"));

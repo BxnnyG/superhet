@@ -90,11 +90,35 @@ impl Drop for Proc {
     }
 }
 
+/// A TCP port that no other test (in this or any concurrently running test binary) hands out.
+///
+/// Asking the OS for port 0 and releasing it again is racy: the service under test needs a while
+/// to start (migrations first) and binds late, so two tests can be given the same port and one
+/// would talk to the other's server. Every candidate is therefore claimed with an advisory lock
+/// file that is held until the test process exits.
 pub fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .expect("free port")
-        .port()
+    static CLAIMED: std::sync::Mutex<Vec<std::fs::File>> = std::sync::Mutex::new(Vec::new());
+    loop {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|l| l.local_addr())
+            .expect("free port")
+            .port();
+        let path = std::env::temp_dir().join(format!("superhet-test-port-{port}.lock"));
+        let Ok(file) = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(path)
+        else {
+            continue;
+        };
+        if file.try_lock().is_ok() {
+            if let Ok(mut claimed) = CLAIMED.lock() {
+                claimed.push(file);
+            }
+            return port;
+        }
+    }
 }
 
 /// A response from the raw HTTP client below.

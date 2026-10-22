@@ -106,10 +106,7 @@ async fn rest_state_and_tune_roundtrip_over_real_nats() {
         format!("silent{pid}"),
         format!("ghost{pid}"),
     );
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .expect("free port")
-        .port();
+    let port = common::free_port();
 
     let mut options = async_nats::ConnectOptions::new();
     let mut command = Command::new(env!("CARGO_BIN_EXE_superhet-api"));
