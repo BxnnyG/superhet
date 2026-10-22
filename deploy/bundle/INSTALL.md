@@ -1,6 +1,6 @@
 # Superhet @TAG@ – compose bundle
 
-Alternative to `install.sh` (see the README). Runs the published image `@IMAGE@` (no local build). Needs Docker with the compose plugin and,
+Alternative to `install.sh` (see the README). Runs the published image `@IMAGE@:${SUPERHET_TAG:-@CHANNEL@}` (no local build). Needs Docker with the compose plugin and,
 for a real receiver, an RTL-SDR dongle plugged into this host. Single user, self-hosted.
 
 1. Extract and enter the directory: `tar xzf superhet-@TAG@-compose.tar.gz && cd superhet-@TAG@-compose`
@@ -15,8 +15,10 @@ for a real receiver, an RTL-SDR dongle plugged into this host. Single user, self
 
 Check the receiver: `docker compose logs superhet-sdrd` shows `RTL-SDR opened`.
 
-Update: set the new version in `.env` (`SUPERHET_IMAGE=ghcr.io/bxnnyg/superhet:<version>`) or use the
-bundle of the new release, then `docker compose pull && docker compose up -d`. Data lives in the
+Update: `docker compose pull && docker compose up -d`. The stack follows the image channel `SUPERHET_TAG`
+(default `@CHANNEL@`; `next` = newest release incl. pre-releases, `latest` = newest stable, `edge` = main).
+To pin a version set e.g. `SUPERHET_TAG=0.1.0-alpha.3` in `.env`. New services or settings need the
+`compose.yaml` of the new release (re-run `install.sh` or use the new bundle). Data lives in the
 named volumes `postgres-data` and `nats-data`.
 
 Plain HTTP is meant for a trusted LAN. For access from the internet put a TLS reverse proxy in front,
