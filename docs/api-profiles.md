@@ -58,11 +58,16 @@ Profile resource: `{"id":"<uuid>","name":"...","data":{...},"created_at":"<RFC 3
 | `GET /api/v1/profiles/{id}` | - | `200 {"v":1,"profile":resource}` | `404 not_found` (also for a malformed id) |
 | `PUT /api/v1/profiles/{id}` | `{"name","data"}` (both required) | `200 {"v":1,"profile":resource}` | `400`, `404`, `409` |
 | `DELETE /api/v1/profiles/{id}` | - | `204` | `404` |
-| `POST /api/v1/devices/{dev}/profile/save` | `{"name"}` | `201 {"v":1,"profile":resource}` + `Location` | `400`, `409`, `502/503/504` (device) |
+| `POST /api/v1/devices/{dev}/profile/save` | `{"name","overwrite"?}` | `201 {"v":1,"profile":resource}` + `Location`; with `overwrite` replacing an existing profile `200` | `400`, `409`, `502/503/504` (device) |
 | `POST /api/v1/devices/{dev}/profile/load` | `{"id"}` | `200 {"v":1,"ok":true,"state":{...}}` (the new device state) | see below |
 
 - `save` asks the daemon for its current state (not the KV copy) and stores it, including
   `lock:true` if the user lock is held.
+- `save` answers `409 conflict` when the name is taken (case-insensitive). With
+  `"overwrite": true` (default `false`) it instead replaces the profile of that name with the
+  fresh snapshot: id and `created_at` are kept, `updated_at` advances, the name takes the
+  requested spelling, and the reply is `200`. If no profile has the name yet, `overwrite` creates
+  one (`201` + `Location`).
 - `load` errors are the daemon's, passed through (shape of `docs/api-devices.md`): `400`
   `invalid`/`unsupported`, `409` `locked` (with `holders`, when the profile would change centre or
   rate while locked), `404` `not_found` (unknown profile), `502`, `503`, `504`. On any error the

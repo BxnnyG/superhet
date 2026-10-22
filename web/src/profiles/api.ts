@@ -22,7 +22,7 @@ export interface Profile {
   sampleRate: number;
   vfoCount: number;
   lock: boolean;
-  /** The stored document, kept verbatim so a rename or overwrite does not lose fields. */
+  /** The stored document, kept verbatim so a rename does not lose fields. */
   data: Rec;
 }
 
@@ -31,8 +31,11 @@ export interface ProfileApi {
   create(name: string, data: Rec): Promise<Profile>;
   update(id: string, name: string, data: Rec): Promise<Profile>;
   remove(id: string): Promise<void>;
-  /** Snapshot the device (the server asks the daemon) into a new profile. */
-  saveCurrent(device: string, name: string): Promise<Profile>;
+  /**
+   * Snapshot the device (the server asks the daemon) into a profile. A name clash is a 409
+   * `conflict` unless `overwrite` is set, which replaces the profile of that name.
+   */
+  saveCurrent(device: string, name: string, overwrite?: boolean): Promise<Profile>;
   /** Apply a profile atomically; resolves with the device's new state. */
   load(device: string, id: string): Promise<StateDoc>;
 }
@@ -64,37 +67,6 @@ export function parseProfile(raw: unknown): Profile {
 
 function parseOne(body: unknown): Profile {
   return parseProfile(isRec(body) ? body.profile : undefined);
-}
-
-/**
- * Profile document for the device state we hold (used to overwrite a profile through PUT; the
- * normal "save" lets the server snapshot the daemon). Fields the state does not know
- * (`decoders`) are taken from `base`.
- */
-export function buildProfileData(doc: StateDoc, base?: Rec): Rec {
-  const { device, vfos } = doc;
-  const data: Rec = {
-    v: 1,
-    center_hz: device.centerHz,
-    sample_rate: device.sampleRate,
-    ppm: device.ppm,
-    bias_tee: device.biasTee,
-    vfos: vfos.map((v) => {
-      const out: Rec = { freq_hz: v.freqHz, mode: v.mode, bandwidth_hz: v.bandwidthHz };
-      if (v.squelchDbfs !== null) out.squelch_dbfs = v.squelchDbfs;
-      if (v.deemphasis !== null && v.mode !== "am") out.deemphasis = v.deemphasis;
-      return out;
-    }),
-    lock: device.locks.some((h) => h.kind === "user"),
-    decoders: Array.isArray(base?.decoders) ? base.decoders : [],
-  };
-  if (device.gain) {
-    data.gain =
-      device.gain.mode === "auto" || device.gain.db === null
-        ? { mode: "auto" }
-        : { mode: "manual", db: device.gain.db };
-  }
-  return data;
 }
 
 export function createProfileApi(fetchImpl: typeof fetch = apiFetch): ProfileApi {
@@ -133,8 +105,9 @@ export function createProfileApi(fetchImpl: typeof fetch = apiFetch): ProfileApi
     async remove(id) {
       await call(url(id), { method: "DELETE" });
     },
-    async saveCurrent(device, name) {
-      return parseOne(await call(`${deviceUrl(device)}/profile/save`, json("POST", { name })));
+    async saveCurrent(device, name, overwrite = false) {
+      const body: Rec = overwrite ? { name, overwrite: true } : { name };
+      return parseOne(await call(`${deviceUrl(device)}/profile/save`, json("POST", body)));
     },
     async load(device, id) {
       const body = await call(`${deviceUrl(device)}/profile/load`, json("POST", { id }));
