@@ -5,6 +5,7 @@ import {
   Badge,
   FrequencyReadout,
   IconButton,
+  BookmarkIcon,
   PauseIcon,
   Select,
 } from "../ui";
@@ -35,6 +36,8 @@ interface Props {
   locked?: boolean;
   /** Tuning lock control, shown next to the centre. */
   lock?: ReactNode;
+  /** Bookmark the active VFO (opens the add dialog); the star is hidden without it. */
+  onBookmark?: () => void;
 }
 
 /**
@@ -52,6 +55,7 @@ export function ReceiverFrequency({
   centerLockedReason = null,
   locked = false,
   lock,
+  onBookmark,
 }: Props) {
   const centre = (size: "sm" | "lg") => (
     <FrequencyReadout
@@ -110,6 +114,15 @@ export function ReceiverFrequency({
             ...STEPS_HZ.map((s) => ({ value: String(s), label: formatStep(s) })),
           ]}
         />
+        {onBookmark && (
+          <IconButton
+            label="Bookmark this frequency"
+            tip="Bookmark this frequency"
+            onClick={onBookmark}
+          >
+            <BookmarkIcon />
+          </IconButton>
+        )}
         {vfo.status === "paused" && (
           <Badge tone="warn" title={locked ? VFO_PAUSED_HINT : VFO_PAUSED_FREE_HINT}>
             <PauseIcon size={10} />

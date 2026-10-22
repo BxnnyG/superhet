@@ -5,9 +5,17 @@
 // VFO markers and bandwidth shading are drawn here (canvas, no React per frame).
 // Hovering previews the click: a cursor line at the snapped landing frequency, a ghost passband
 // of the selected VFO and a label; a click glides the marker (~150 ms) and pulses the target.
+// Band plan ranges, channel ticks and bookmark flags sit in a strip along the top (annotations.ts);
+// a click on a tunable channel or bookmark tunes the selected VFO instead of a plain click.
 // The overlay is plain 2D canvas, so all of this works without WebGL2.
 // Everything here is imperative; no React state changes per pointer event.
 
+import {
+  hitTarget,
+  type AnnotationHit,
+  type AnnotationLayer,
+  type AnnotationTarget,
+} from "./annotations";
 import { formatFrequency } from "./freq";
 import {
   CANVAS_FONT,
@@ -61,6 +69,10 @@ export interface InteractionOptions {
    */
   snap: (hz: number, vfoId: number | null) => number;
   onVfoCreate: (hz: number) => void;
+  /** Band plan strip and bookmarks; the owner feeds it data and calls `refresh()`. */
+  annotations: AnnotationLayer;
+  /** A tunable channel or bookmark in the strip was clicked. */
+  onAnnotationTune: (target: AnnotationTarget) => void;
 }
 
 export function wheelDelta(e: Pick<WheelEvent, "deltaY" | "deltaMode">): number {
@@ -71,6 +83,7 @@ export function wheelDelta(e: Pick<WheelEvent, "deltaY" | "deltaMode">): number 
 export class SpectrumInteraction {
   private frameSpan: Span | null = null;
   private hoverX: number | null = null;
+  private hoverY: number | null = null;
   private raf = 0;
   private dpr = 1;
   private clickTimer: ReturnType<typeof setTimeout> | undefined;
@@ -144,6 +157,11 @@ export class SpectrumInteraction {
     const start = centerHz - sampleRate / 2;
     if (s && s.startHz === start && spanWidth(s) === sampleRate) return;
     this.frameSpan = { startHz: start, endHz: start + sampleRate };
+    this.schedule();
+  }
+
+  /** Redraw after the annotation data or settings changed. */
+  refresh(): void {
     this.schedule();
   }
 
@@ -222,7 +240,8 @@ export class SpectrumInteraction {
         if (e.altKey || e.ctrlKey) {
           this.drag.create = true;
         } else {
-          const hit = hitTestVfo(this.markers, hz, this.slopHz());
+          const onStrip = hitTarget(this.annotationAt(e.clientX, e.clientY)) !== null;
+          const hit = onStrip ? null : hitTestVfo(this.markers, hz, this.slopHz());
           if (hit) {
             this.drag.vfo = { id: hit.id, offsetHz: hit.freqHz - hz };
             if (hit.id !== this.selectedId) this.o.onVfoSelect(hit.id);
@@ -236,11 +255,12 @@ export class SpectrumInteraction {
   private readonly onMove = (e: PointerEvent): void => {
     const rect = this.o.canvas.getBoundingClientRect();
     this.hoverX = e.clientX - rect.left;
+    this.hoverY = e.clientY - rect.top;
     this.hoverMod = e.altKey || e.ctrlKey;
     this.schedule();
     const d = this.drag;
     if (!d) {
-      this.updateCursor(e.clientX);
+      this.updateCursor(e.clientX, e.clientY);
       return;
     }
     if (d.id !== e.pointerId) return;
@@ -265,6 +285,12 @@ export class SpectrumInteraction {
     if (d.pan || d.moved || d.vfo) return;
     const hz = this.hzAt(e.clientX);
     if (hz === null) return;
+    const annotation = hitTarget(this.annotationAt(e.clientX, e.clientY));
+    if (annotation) {
+      clearTimeout(this.clickTimer);
+      this.o.onAnnotationTune(annotation);
+      return;
+    }
     if (d.create) {
       this.o.onVfoCreate(Math.round(hz));
       return;
@@ -292,6 +318,7 @@ export class SpectrumInteraction {
 
   private readonly onLeave = (): void => {
     this.hoverX = null;
+    this.hoverY = null;
     this.setTitle(false);
     this.schedule();
   };
@@ -324,10 +351,19 @@ export class SpectrumInteraction {
     return span && plotW > 0 ? (spanWidth(span) / plotW) * VFO_GRAB_PX : 0;
   }
 
-  private updateCursor(clientX: number): void {
+  /** The strip entry under a pointer position (client coordinates), if any. */
+  private annotationAt(clientX: number, clientY: number): AnnotationHit | null {
+    const rect = this.o.canvas.getBoundingClientRect();
+    const x = clientX - rect.left - this.o.leftPad;
+    if (x < 0 || x > rect.width - this.o.leftPad) return null;
+    return this.o.annotations.hit(x, clientY - rect.top);
+  }
+
+  private updateCursor(clientX: number, clientY: number): void {
     const hz = this.hzAt(clientX);
-    const over = hz !== null && hitTestVfo(this.markers, hz, this.slopHz()) !== null;
-    this.o.canvas.style.cursor = over ? "ew-resize" : "";
+    const tunable = hitTarget(this.annotationAt(clientX, clientY)) !== null;
+    const over = !tunable && hz !== null && hitTestVfo(this.markers, hz, this.slopHz()) !== null;
+    this.o.canvas.style.cursor = tunable ? "pointer" : over ? "ew-resize" : "";
     this.setTitle(hz !== null && isOutside(this.window, hz));
   }
 
@@ -374,7 +410,10 @@ export class SpectrumInteraction {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const span = this.frameSpan;
     if (!span) return;
+    const plotCssW = canvas.width / this.dpr - this.o.leftPad;
+    this.o.annotations.update(ctx, span, plotCssW, this.dpr);
     this.drawWindow(ctx, span);
+    this.o.annotations.draw(ctx, this.o.leftPad, this.dpr, canvas.height);
     this.drawVfos(ctx, span, now);
     this.drawPulse(ctx, span, now);
     this.drawHover(ctx, span);
@@ -444,6 +483,12 @@ export class SpectrumInteraction {
     ctx.stroke();
     ctx.restore();
 
+    const ay = this.hoverY;
+    const stripHit = ay !== null && !this.drag?.moved ? this.o.annotations.hit(x - left, ay) : null;
+    if (stripHit) {
+      this.o.annotations.drawTooltip(ctx, stripHit, left + stripHit.x, canvas.width, dpr);
+      return;
+    }
     const label = target
       ? previewLabel(hz, target, isOutside(this.window, hz))
       : `${formatFrequency(hz)} MHz`;
@@ -452,11 +497,12 @@ export class SpectrumInteraction {
     const w = ctx.measureText(label).width + padX * 2;
     const h = 16 * dpr;
     const boxX = Math.min(Math.max(plotLeft, px + 6 * dpr), canvas.width - w);
-    this.chip(ctx, boxX, 2 * dpr, w, h, CHIP_BG);
+    const labelY = (2 + this.o.annotations.inset) * dpr;
+    this.chip(ctx, boxX, labelY, w, h, CHIP_BG);
     ctx.fillStyle = CANVAS_TEXT_STRONG;
     ctx.textBaseline = "middle";
     ctx.textAlign = "left";
-    ctx.fillText(label, boxX + padX, 2 * dpr + h / 2);
+    ctx.fillText(label, boxX + padX, labelY + h / 2);
   }
 
   /** Brief fading line where the last click landed; it keeps its frequency across a retune. */
@@ -526,12 +572,12 @@ export class SpectrumInteraction {
     const leftText = x0 > left ? text(x0 - left) : undefined;
     if (leftText) {
       ctx.textAlign = "right";
-      ctx.fillText(leftText, x0 - gap, 4 * dpr);
+      ctx.fillText(leftText, x0 - gap, (4 + this.o.annotations.inset) * dpr);
     }
     const rightText = x1 < right ? text(right - x1) : undefined;
     if (rightText) {
       ctx.textAlign = "left";
-      ctx.fillText(rightText, x1 + gap, 4 * dpr);
+      ctx.fillText(rightText, x1 + gap, (4 + this.o.annotations.inset) * dpr);
     }
     ctx.restore();
   }
@@ -581,9 +627,10 @@ export class SpectrumInteraction {
       const h = 16 * dpr;
       const bx = Math.min(Math.max(left, xc + 3 * dpr), canvas.width - w);
       ctx.globalAlpha = 0.9;
-      this.chip(ctx, bx, 22 * dpr, w, h, CHIP_BG, color);
+      const chipY = (22 + this.o.annotations.inset) * dpr;
+      this.chip(ctx, bx, chipY, w, h, CHIP_BG, color);
       ctx.fillStyle = color;
-      ctx.fillText(label, bx + padX, 22 * dpr + h / 2);
+      ctx.fillText(label, bx + padX, chipY + h / 2);
     }
     ctx.restore();
   }

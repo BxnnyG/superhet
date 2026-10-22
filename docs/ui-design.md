@@ -43,7 +43,7 @@ dark values again under `prefers-color-scheme: dark` unless `data-theme="light"`
    (tuning lock, with a "Locked by ..." badge); settings menu (theme). With no VFO the big readout
    tunes the centre and carries a "Centre" badge (the secondary readout is hidden then).
 2. Sidebar (320 px, collapsible sections, all open by default): Source, Profiles, VFOs (compact list
-   with select, listen toggle, delete and the paused hint), Display, Audio device. Below 900 px a slide-over drawer
+   with select, listen toggle, delete and the paused hint), Bookmarks, Band plan, Display, Audio device. Below 900 px a slide-over drawer
    opened from the menu button (Esc or backdrop closes it).
 3. Main: a column of the spectrum card and the receiver dock (see "Receiver dock"). The spectrum card
    holds spectrum above waterfall filling the remaining height, draggable splitter (keyboard:
@@ -63,6 +63,10 @@ dark values again under `prefers-color-scheme: dark` unless `data-theme="light"`
    - Usable window: outside parts are shaded (50 %), edges dashed, labelled "outside tuning window"
      (or "outside" when narrow) at the top edge, with a tooltip explaining that VFOs there are paused
      or make the daemon retune; the exact edge frequencies are flagged on the frequency axis.
+   - Band plan and bookmark strip: thin category-coloured range bars, channel ticks with short labels
+     (only when zoomed in enough) and bookmark flags along the top edge, hover tooltip, click tunes
+     the active VFO; switchable per category in the sidebar (see `docs/bandplan.md`). The strip is
+     only as tall as needed; VFO chips and labels sit below it.
 4. Status bar: buffer, drift, latency, underruns, dropped (audio samples replaced by silence),
    fps. The device-side `dropped_blocks` counter is not exposed to the browser yet.
 

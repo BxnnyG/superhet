@@ -3,15 +3,21 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AudioController } from "../audio/controller";
+import { builtinBandPlan, matchBandPlan, suggestName } from "../bandplan/model";
+import { OverlayStore } from "../bandplan/settings";
+import { BookmarkStore } from "../bookmarks/store";
 import { createProfileApi } from "../profiles/api";
 import type { StateDoc } from "../state/doc";
 import { bindState, StateStore } from "../state/store";
+import type { AnnotationTarget } from "../spectrum/annotations";
+import { formatFrequency } from "../spectrum/freq";
 import { LevelController, loadLevelSettings } from "../spectrum/levels";
 import type { SocketStatus } from "../spectrum/socket";
 import { TuningController } from "../spectrum/tuning";
 import { VfoController } from "../vfo/controller";
 import { defaultModeFor, snapFrequency, stepFor, type StepChoice } from "../vfo/model";
 import { SpectrumMetrics } from "./metrics";
+import { createFor, patchFor } from "./annotationTuning";
 import { noticeLocked, noticeRetune } from "./notices";
 import { spectrumTuningView } from "./spectrumTuning";
 
@@ -58,6 +64,10 @@ export function useReceiver(device: string) {
     viewActions.current = actions;
   }, []);
 
+  const [overlay] = useState(() => new OverlayStore());
+  const bookmarks = useMemo(() => new BookmarkStore(), []);
+  const bookmarkSnap = useSyncExternalStore(bookmarks.subscribe, bookmarks.getSnapshot);
+
   const [status, setStatus] = useState<SocketStatus>("connecting");
   const [info, setInfo] = useState<SpectrumInfo | null>(null);
   const [spectrumError, setSpectrumError] = useState<string | null>(null);
@@ -72,6 +82,18 @@ export function useReceiver(device: string) {
       if (hz === null) return;
       const mode = defaultModeFor(hz);
       vfoCtl.create({ freqHz: snapFrequency(hz, stepFor(stepRef.current, mode)), mode });
+    },
+    [vfoCtl],
+  );
+
+  // A band plan channel or bookmark tunes the active VFO (mode and bandwidth when it has them);
+  // with no VFO yet it creates one.
+  const tuneTo = useCallback(
+    (t: AnnotationTarget) => {
+      const snap = vfoCtl.getSnapshot();
+      const vfo = snap.vfos.find((v) => v.id === snap.selectedId) ?? snap.vfos[0];
+      if (vfo) vfoCtl.update(vfo.id, patchFor(vfo, t));
+      else if (snap.loaded) vfoCtl.create(createFor(t));
     },
     [vfoCtl],
   );
@@ -97,6 +119,12 @@ export function useReceiver(device: string) {
       audio.stop();
     };
   }, [store, tuning, vfoCtl, audio]);
+
+  // Bookmarks live on the server: read them at start and again once the state feed is up.
+  const feedUp = feed.status === "connected";
+  useEffect(() => {
+    void bookmarks.refresh();
+  }, [bookmarks, feedUp]);
 
   // The audio controller subscribes to the listened VFOs plus the active one (its S-meter and
   // squelch Auto need frames even when it is not in the mix). Wait for the first VFO list so
@@ -135,6 +163,26 @@ export function useReceiver(device: string) {
   );
 
   const selected = vfoSnap.vfos.find((v) => v.id === vfoSnap.selectedId) ?? null;
+  const centerHz = tuningSnap.display?.centerHz ?? null;
+
+  // Open the bookmark dialog for the active VFO (or the centre), named after the band plan entry.
+  const startBookmark = useCallback(() => {
+    const freqHz = selected?.freqHz ?? centerHz;
+    if (freqHz === null) return;
+    const name = suggestName(matchBandPlan(builtinBandPlan(), freqHz));
+    bookmarks.openEditor({
+      kind: "create",
+      draft: {
+        name: name || `${formatFrequency(freqHz).slice(0, -4)} MHz`,
+        freqHz,
+        mode: selected?.mode ?? null,
+        bandwidthHz: selected?.bandwidthHz ?? null,
+        tags: [],
+        color: null,
+        notes: null,
+      },
+    });
+  }, [bookmarks, selected, centerHz]);
   const errors = [spectrumError, tuningSnap.error, vfoSnap.error, audioSnap.error].filter(
     (e): e is string => e !== null,
   );
@@ -169,6 +217,11 @@ export function useReceiver(device: string) {
     step,
     setStep,
     createVfoAt,
+    overlay,
+    bookmarks,
+    bookmarkSnap,
+    tuneTo,
+    startBookmark,
     errors,
   };
 }

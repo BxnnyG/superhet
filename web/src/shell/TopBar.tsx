@@ -66,6 +66,7 @@ export function TopBar({ r, theme, onTheme, drawerOpen, onMenu }: Props) {
             r.locks.length > 0 ? `${lockedBy(r.locks)}: tune the VFO instead, or unlock` : null
           }
           locked={r.locks.length > 0}
+          onBookmark={r.startBookmark}
           lock={
             <TuningLock
               holders={r.locks}

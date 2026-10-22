@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { AudioControls } from "../audio/AudioControls";
+import { BandPlanPanel } from "../bandplan/BandPlanPanel";
+import { BookmarksPanel } from "../bookmarks/BookmarksPanel";
 import { DisplayControls } from "../spectrum/DisplayControls";
 import { TuningControls } from "../spectrum/TuningControls";
 import { ProfilesPanel } from "../profiles/ProfilesPanel";
@@ -67,6 +69,18 @@ export function Sidebar({ r, open, onClose }: Props) {
             onSelect={(id) => r.vfoCtl.select(id)}
             onRemove={(id) => r.vfoCtl.remove(id)}
           />
+        </Section>
+        <Section title="Bookmarks">
+          <BookmarksPanel
+            store={r.bookmarks}
+            overlay={r.overlay}
+            activeFreqHz={r.selected?.freqHz ?? null}
+            onTune={r.tuneTo}
+            onAdd={r.startBookmark}
+          />
+        </Section>
+        <Section title="Band plan">
+          <BandPlanPanel store={r.overlay} />
         </Section>
         <Section title="Display">
           <DisplayControls
