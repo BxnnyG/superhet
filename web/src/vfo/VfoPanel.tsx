@@ -56,7 +56,7 @@ export function VfoPanel({
       </Button>
       {vfos.vfos.length === 0 ? (
         <EmptyState title="No VFOs yet">
-          {vfos.loaded ? "Click the spectrum or press + to add a VFO" : "Loading…"}
+          {vfos.loaded ? "Click the spectrum or press N to add a VFO" : "Loading…"}
         </EmptyState>
       ) : (
         <ul className="flex flex-col gap-1" aria-label="VFO list">

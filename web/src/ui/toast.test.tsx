@@ -39,3 +39,15 @@ it("keeps at most four toasts", () => {
   for (let i = 0; i < 6; i++) store.push({ title: `t${i}`, durationMs: 0 });
   expect(store.getSnapshot().map((t) => t.title)).toEqual(["t2", "t3", "t4", "t5"]);
 });
+
+it("runs an inline action once and closes the toast", () => {
+  const store = new ToastStore();
+  const undo = vi.fn();
+  render(<Toaster store={store} />);
+  act(() => {
+    store.push({ title: "VFO 2 removed", action: { label: "Undo", onClick: undo } });
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(undo).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText("VFO 2 removed")).toBeNull();
+});

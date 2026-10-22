@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_STEP_HZ,
+  bandwidthLimits,
+  stepFrequency,
   SQUELCH_OFF_POS,
   defaultModeFor,
   hitTestVfo,
@@ -94,5 +96,19 @@ describe("hitTestVfo", () => {
   it("returns null on empty spectrum", () => {
     expect(hitTestVfo(markers, 99e6, 100)).toBeNull();
     expect(hitTestVfo([], 99e6, 100)).toBeNull();
+  });
+});
+
+describe("keyboard and wheel stepping", () => {
+  it("moves by whole steps on the step grid and never below one step", () => {
+    expect(stepFrequency(145_500_000, 12_500, 1)).toBe(145_512_500);
+    expect(stepFrequency(145_500_000, 12_500, -10)).toBe(145_375_000);
+    expect(stepFrequency(100_003, 1_000, 1)).toBe(101_000);
+    expect(stepFrequency(1_000, 1_000, -1)).toBe(1_000);
+  });
+
+  it("limits bandwidth to the ends of the mode presets", () => {
+    expect(bandwidthLimits("nfm")).toEqual({ min: 6_250, max: 25_000 });
+    expect(bandwidthLimits("wfm")).toEqual({ min: 100_000, max: 200_000 });
   });
 });

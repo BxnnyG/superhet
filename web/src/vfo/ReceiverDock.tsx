@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { AudioButton } from "../audio/AudioControls";
 import type { AudioController, AudioSnapshot } from "../audio/controller";
 import { formatFrequency } from "../spectrum/freq";
@@ -15,21 +15,19 @@ import {
   SpeakerIcon,
   SpeakerMutedIcon,
   TrashIcon,
-  toasts,
   cn,
 } from "../ui";
 import { VFO_MODES, type Vfo, type VfoMode, type VfoPatch } from "./api";
 import type { VfoSnapshot } from "./controller";
+import { AutoSquelch } from "./autoSquelch";
 import { LiveMarker } from "./LiveMarker";
 import {
-  AUTO_SQUELCH_WINDOW_MS,
   BANDWIDTH_PRESETS,
   MODE_LABEL,
   SQUELCH_MIN_DBFS,
   SQUELCH_OFF_POS,
   VFO_PAUSED_FREE_HINT,
   VFO_PAUSED_HINT,
-  autoSquelchDbfs,
   formatBandwidth,
   formatSquelch,
   sliderToSquelch,
@@ -48,6 +46,8 @@ interface Props {
   maxVfos?: number;
   /** The tuning lock is held: a VFO outside the window stays paused instead of retuning. */
   locked?: boolean;
+  /** Squelch Auto state shared with the S shortcut; the dock keeps its own when omitted. */
+  autoSquelch?: AutoSquelch;
   onCreate: () => void;
   onSelect: (id: number) => void;
   onUpdate: (id: number, patch: VfoPatch) => void;
@@ -61,11 +61,14 @@ export function ReceiverDock({
   audioSnap,
   maxVfos = 8,
   locked = false,
+  autoSquelch: sharedAutoSquelch,
   onCreate,
   onSelect,
   onUpdate,
   onRemove,
 }: Props) {
+  const [ownAutoSquelch] = useState(() => new AutoSquelch());
+  const autoSquelch = sharedAutoSquelch ?? ownAutoSquelch;
   const active = vfos.vfos.find((v) => v.id === vfos.selectedId) ?? null;
   const full = vfos.vfos.length >= maxVfos;
   const pausedHint = locked ? VFO_PAUSED_HINT : VFO_PAUSED_FREE_HINT;
@@ -77,7 +80,7 @@ export function ReceiverDock({
         className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface-1 p-3"
       >
         <p className="text-sm text-fg-muted">
-          {vfos.loaded ? "Click the spectrum or press + to add a VFO" : "Loading…"}
+          {vfos.loaded ? "Click the spectrum or press N to add a VFO" : "Loading…"}
         </p>
         <IconButton
           label="Add VFO"
@@ -148,7 +151,12 @@ export function ReceiverDock({
             </Group>
             <Group divider label="Squelch and signal" className="basis-full @lg:basis-auto">
               <div className="flex w-full flex-col gap-1 @lg:w-52">
-                <SquelchControl vfo={active} audio={audio} onUpdate={onUpdate} />
+                <SquelchControl
+                  vfo={active}
+                  audio={audio}
+                  autoSquelch={autoSquelch}
+                  onUpdate={onUpdate}
+                />
                 <SMeter audio={audio} vfoId={active.id} compact />
               </div>
             </Group>
@@ -283,38 +291,17 @@ function ListenToggle({
 function SquelchControl({
   vfo,
   audio,
+  autoSquelch,
   onUpdate,
 }: {
   vfo: Vfo;
   audio: AudioController;
+  autoSquelch: AutoSquelch;
   onUpdate: (id: number, patch: VfoPatch) => void;
 }) {
-  // The value Auto applied per VFO; Auto is "on" while the VFO still has exactly that squelch.
-  const [applied, setApplied] = useState<Readonly<Record<number, number>>>({});
-  const auto = vfo.squelchDbfs !== null && applied[vfo.id] === vfo.squelchDbfs;
-  const forget = () =>
-    setApplied((a) =>
-      Object.fromEntries(Object.entries(a).filter(([id]) => Number(id) !== vfo.id)),
-    );
-  const onAuto = () => {
-    if (auto) {
-      forget();
-      onUpdate(vfo.id, { squelchDbfs: null });
-      return;
-    }
-    const value = autoSquelchDbfs(audio.getRecentLevels(vfo.id, AUTO_SQUELCH_WINDOW_MS));
-    if (value === null) {
-      toasts.push({
-        key: "auto-squelch",
-        tone: "info",
-        title: "Not enough signal data yet",
-        body: "Auto squelch needs a few seconds of channel level. Try again shortly.",
-      });
-      return;
-    }
-    setApplied((a) => ({ ...a, [vfo.id]: value }));
-    onUpdate(vfo.id, { squelchDbfs: value });
-  };
+  useSyncExternalStore(autoSquelch.subscribe, autoSquelch.getSnapshot);
+  const auto = autoSquelch.isAuto(vfo);
+  const onAuto = () => autoSquelch.toggle(vfo, audio, onUpdate);
   return (
     <div className="flex items-end gap-2">
       <Slider
@@ -328,7 +315,7 @@ function SquelchControl({
         }
         title={`off, ${SQUELCH_MIN_DBFS}..0 dBFS (channel power); the green tick is the live level`}
         onChange={(pos) => {
-          forget();
+          autoSquelch.forget(vfo.id);
           onUpdate(vfo.id, { squelchDbfs: sliderToSquelch(pos) });
         }}
         overlay={<LiveMarker audio={audio} vfoId={vfo.id} />}

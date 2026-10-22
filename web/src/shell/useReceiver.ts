@@ -14,6 +14,7 @@ import { formatFrequency } from "../spectrum/freq";
 import { LevelController, loadLevelSettings } from "../spectrum/levels";
 import type { SocketStatus } from "../spectrum/socket";
 import { TuningController } from "../spectrum/tuning";
+import { AutoSquelch } from "../vfo/autoSquelch";
 import { VfoController } from "../vfo/controller";
 import { defaultModeFor, snapFrequency, stepFor, type StepChoice } from "../vfo/model";
 import { SpectrumMetrics } from "./metrics";
@@ -57,6 +58,7 @@ export function useReceiver(device: string) {
   );
   const vfoSnap = useSyncExternalStore(vfoCtl.subscribe, vfoCtl.getSnapshot);
   const audio = useMemo(() => new AudioController({ device }), [device]);
+  const [autoSquelch] = useState(() => new AutoSquelch());
   const audioSnap = useSyncExternalStore(audio.subscribe, audio.getSnapshot);
   const metrics = useMemo(() => new SpectrumMetrics(), []);
   const viewActions = useRef<ViewActions>(NO_VIEW_ACTIONS);
@@ -206,6 +208,7 @@ export function useReceiver(device: string) {
     selected,
     audio,
     audioSnap,
+    autoSquelch,
     metrics,
     viewActions,
     registerView,

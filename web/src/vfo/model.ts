@@ -40,6 +40,17 @@ export const BANDWIDTH_PRESETS: Record<VfoMode, readonly number[]> = {
   am: [5_000, 6_000, 8_000, 10_000, 12_000],
 };
 
+/** Smallest and largest bandwidth offered for a mode (the ends of its presets). */
+export function bandwidthLimits(mode: VfoMode): { min: number; max: number } {
+  const presets = BANDWIDTH_PRESETS[mode];
+  return { min: presets[0] ?? 0, max: presets[presets.length - 1] ?? 0 };
+}
+
+/** The frequency `steps` tuning steps away (negative = down), on the step grid. */
+export function stepFrequency(hz: number, stepHz: number, steps: number): number {
+  return snapFrequency(hz + steps * stepHz, stepHz);
+}
+
 export function formatBandwidth(hz: number): string {
   return hz >= 1000 ? `${parseFloat((hz / 1000).toFixed(2))} kHz` : `${hz} Hz`;
 }

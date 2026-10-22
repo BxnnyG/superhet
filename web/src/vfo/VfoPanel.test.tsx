@@ -71,5 +71,5 @@ it("toggles listening per VFO from the list", () => {
 
 it("explains how to add the first VFO", () => {
   renderPanel([], false);
-  expect(screen.getByText("Click the spectrum or press + to add a VFO")).toBeInTheDocument();
+  expect(screen.getByText("Click the spectrum or press N to add a VFO")).toBeInTheDocument();
 });

@@ -12,6 +12,13 @@ export interface ToastInput {
   key?: string;
   /** Auto-dismiss delay; 0 keeps it until dismissed. Default 6 s (danger 10 s). */
   durationMs?: number;
+  /** One inline button (e.g. Undo); the toast is dismissed after it was clicked. */
+  action?: ToastAction;
+}
+
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
 }
 
 export interface ToastItem {
@@ -20,6 +27,7 @@ export interface ToastItem {
   tone: ToastTone;
   title: string;
   body: string | null;
+  action: ToastAction | null;
 }
 
 const MAX_VISIBLE = 4;
@@ -46,7 +54,14 @@ export class ToastStore {
       id = old.id;
       clearTimeout(this.timers.get(id));
     }
-    const item: ToastItem = { id, key, tone, title: input.title, body: input.body ?? null };
+    const item: ToastItem = {
+      id,
+      key,
+      tone,
+      title: input.title,
+      body: input.body ?? null,
+      action: input.action ?? null,
+    };
     let next = old ? this.items.map((t) => (t.id === id ? item : t)) : [...this.items, item];
     while (next.length > MAX_VISIBLE) {
       const dropped = next[0];
