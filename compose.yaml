@@ -1,5 +1,9 @@
 # Superhet stack. Only superhet-api publishes a port; everything else stays on the
 # internal "backend" network. Create .env first: scripts/gen-secrets.sh
+# Releases ship a standalone variant generated from this file by scripts/package-compose.sh.
+
+# Fixed project name: volumes become superhet_postgres-data etc. regardless of the directory name.
+name: superhet
 
 x-superhet: &superhet
   build:

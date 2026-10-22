@@ -99,7 +99,11 @@ jobs:
           TAG: ${{ github.ref_name }}
           DIGEST: ${{ needs.image.outputs.digest }}
         run: |
-          assets=("dist/superhet-${TAG}-compose.tar.gz" "dist/superhet-${TAG}-compose.tar.gz.sha256")
+          assets=(
+            dist/install.sh dist/install.sh.sha256
+            dist/compose.yaml dist/compose.yaml.sha256
+            "dist/superhet-${TAG}-compose.tar.gz" "dist/superhet-${TAG}-compose.tar.gz.sha256"
+          )
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists, refreshing assets"
             gh release upload "$TAG" "${assets[@]}" --clobber
@@ -107,5 +111,5 @@ jobs:
           fi
           flags=(--generate-notes --verify-tag)
           case "$TAG" in *-*) flags+=(--prerelease) ;; esac
-          notes="Container image: \`${IMAGE}:${TAG#v}\` (digest \`${DIGEST}\`)"$'\n\n'"Ready-to-run stack: download \`superhet-${TAG}-compose.tar.gz\`, follow \`INSTALL.md\` inside."
+          notes="Container image: \`${IMAGE}:${TAG#v}\` (digest \`${DIGEST}\`)"$'\n\n'"Install: \`curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/install.sh | sh\` (or download \`compose.yaml\`, see the README)."
           gh release create "$TAG" --title "$TAG" --notes "$notes" "${flags[@]}" "${assets[@]}"

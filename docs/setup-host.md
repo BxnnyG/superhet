@@ -12,7 +12,7 @@ extracted release bundle.
    group `plugdev` exists (`getent group plugdev || groupadd -r plugdev`), then
    `udevadm control --reload-rules && udevadm trigger` and replug the dongle. Check with
    `ls -l /dev/bus/usb/<bus>/<dev>` (see `lsusb -d 0bda:`): group `plugdev`, mode `0660`.
-3. **Tell compose which group owns the device node.** The services run as an unprivileged user and
+3. **Tell compose which group owns the device node.** (`install.sh` detects and sets this automatically.) The services run as an unprivileged user and
    get the group via `group_add`. The default is gid 46 (`plugdev` on Debian/Ubuntu). Elsewhere put
    the real numeric gid into `.env`: `echo "SUPERHET_USB_GID=$(getent group plugdev | cut -d: -f3)" >> .env`
    (use `stat -c %g /dev/bus/usb/<bus>/<dev>` if your distro's own rules already set another group).
