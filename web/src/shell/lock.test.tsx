@@ -4,7 +4,6 @@ import { ApiError, type DeviceState, type LockHolder } from "../spectrum/api";
 import { TuningControls } from "../spectrum/TuningControls";
 import type { TuningSnapshot } from "../spectrum/tuning";
 import { toasts } from "../ui";
-import type { Vfo } from "../vfo/api";
 import { noticeLocked, noticeRetune } from "./notices";
 import { ReceiverFrequency } from "./ReceiverFrequency";
 import { TuningLock } from "./TuningLock";
@@ -45,26 +44,12 @@ it("TuningLock: disabled while a request runs", () => {
   expect(screen.getByRole("button", { name: "Lock tuning" })).toBeDisabled();
 });
 
-const vfo: Vfo = {
-  id: 2,
-  freqHz: 145_500_000,
-  mode: "nfm",
-  bandwidthHz: 12_500,
-  squelchDbfs: null,
-  deemphasis: null,
-  offsetHz: 0,
-  status: "active",
-};
-
-it("ReceiverFrequency: the centre readout is read-only while locked, VFOs stay editable", () => {
+it("ReceiverFrequency: the centre readout is read-only while locked", () => {
   const onCenter = vi.fn();
-  const onVfo = vi.fn();
-  const { rerender } = render(
+  render(
     <ReceiverFrequency
       centerHz={100_000_000}
-      selected={null}
       onCenter={onCenter}
-      onVfo={onVfo}
       centerLockedReason="Locked by you"
     />,
   );
@@ -73,29 +58,6 @@ it("ReceiverFrequency: the centre readout is read-only while locked, VFOs stay e
   fireEvent.keyDown(digit, { key: "ArrowUp" });
   expect(onCenter).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Type a frequency" })).toBeDisabled();
-  rerender(
-    <ReceiverFrequency
-      centerHz={100_000_000}
-      selected={vfo}
-      onCenter={onCenter}
-      onVfo={onVfo}
-      centerLockedReason="Locked by you"
-    />,
-  );
-  fireEvent.keyDown(screen.getAllByRole("spinbutton")[6]!, { key: "ArrowUp" });
-  expect(onVfo).toHaveBeenCalled();
-});
-
-it("ReceiverFrequency: badge marks a paused VFO", () => {
-  render(
-    <ReceiverFrequency
-      centerHz={100e6}
-      selected={{ ...vfo, status: "paused" }}
-      onCenter={() => undefined}
-      onVfo={() => undefined}
-    />,
-  );
-  expect(screen.getByText(/VFO 2 · NFM/)).toHaveTextContent("paused");
 });
 
 const state: DeviceState = {

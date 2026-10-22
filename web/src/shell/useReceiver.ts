@@ -96,16 +96,12 @@ export function useReceiver(device: string) {
     audio.setVfos(vfoIds === "" ? [] : vfoIds.split(",").map(Number));
   }, [audio, vfoIds]);
 
-  // Escape deselects the VFO again (a plain click then tunes the device centre).
+  // The dock always edits one VFO: keep the first selected whenever VFOs exist.
+  const firstVfoId = vfoSnap.vfos[0]?.id ?? null;
+  const hasSelection = vfoSnap.selectedId !== null;
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target;
-      const typing = t instanceof HTMLElement && /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName);
-      if (e.key === "Escape" && !typing) vfoCtl.select(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [vfoCtl]);
+    if (firstVfoId !== null && !hasSelection) vfoCtl.select(firstVfoId);
+  }, [vfoCtl, firstVfoId, hasSelection]);
 
   const locks = tuningSnap.state?.locks ?? [];
   const profileApi = useMemo(() => createProfileApi(), []);

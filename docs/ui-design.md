@@ -38,12 +38,13 @@ dark values again under `prefers-color-scheme: dark` unless `data-theme="light"`
 ## Layout
 
 1. Top bar: wordmark, connection pill with device id/tuner/rate, the digit-tunable frequency
-   readout (VFO if one is selected, else device centre; a badge names the target; read-only for the
-   centre while the tuning lock is held), the padlock (tuning lock, with a "Locked by ..." badge),
-   volume of the selected VFO, audio on/off, settings menu (theme).
-2. Sidebar (320 px, collapsible sections): Source, Profiles, Radio, Display, Audio. Below 900 px a slide-over
-   drawer opened from the menu button (Esc or backdrop closes it).
-3. Main: spectrum above waterfall filling the remaining height, draggable splitter (keyboard:
+   readout of the device centre (read-only while the tuning lock is held), the padlock (tuning lock,
+   with a "Locked by ..." badge), audio on/off, settings menu (theme).
+2. Sidebar (320 px, collapsible sections, all open by default): Source, Profiles, VFOs (compact list
+   with select/delete and the paused hint), Display, Audio device. Below 900 px a slide-over drawer
+   opened from the menu button (Esc or backdrop closes it).
+3. Main: a column of the spectrum card and the receiver dock (see "Receiver dock"). The spectrum card
+   holds spectrum above waterfall filling the remaining height, draggable splitter (keyboard:
    arrows, Home resets; stored in `localStorage`), VFO overlays with passband shading and label
    chips (paused VFOs dashed, faded, "(paused)"), the parts of the span outside the usable window
    (85 % of the sample rate) shaded with dashed edge lines, frequency axis.
@@ -55,7 +56,7 @@ an icon, the page never scrolls horizontally.
 
 ## Components (`web/src/ui/`)
 
-Button (primary / secondary / ghost / danger, sm / md / lg), IconButton (label + tooltip, pressed),
+Button (primary / secondary / ghost / danger, sm / md / lg), Chip (selectable pill), IconButton (label + tooltip, pressed),
 Tooltip (CSS only, hover and focus), Select (styled native), Slider (label, value, overlay slot for
 live markers), Toggle (switch), SegmentedControl (radio group, arrow keys), NumberField (typed
 value, optional parse/format, arrow stepping), Section (collapsible) and Panel, Badge, Meter (bar,
@@ -110,3 +111,27 @@ WebSocket returns the user to the login page; sockets do not reconnect while log
 `spinbutton`: wheel and ArrowUp/ArrowDown step it with carry and clamping, ArrowLeft/Right/Home/End
 move focus, digit keys overwrite, Enter/F2/double-click/pencil switch to typed entry with unit
 parsing. Pure arithmetic is in `ui/digits.ts`.
+
+## Receiver dock
+
+`vfo/ReceiverDock.tsx` sits under the spectrum card (`shrink-0`, the card takes the remaining height)
+and holds every operating control of the active VFO, so nothing needs a sidebar visit:
+
+- VFO chips (selected = accent, paused = dimmed with a pause icon) plus an add button.
+- Digit-tunable readout of the active VFO flanked by down/up nudge buttons, and the tuning step select.
+- Mode `SegmentedControl` (all modes; a change resets the bandwidth to the mode default) and bandwidth.
+- Squelch slider with the live channel-power tick and a compact signal meter (both update their DOM
+  outside React), volume, mute, audio on/off and delete of the active VFO.
+
+The active VFO is always defined: `useReceiver` selects the first VFO whenever VFOs exist and none is
+selected (there is no deselect). The readout in the top bar therefore only tunes the device centre.
+A plain click on the spectrum retunes the active VFO (SDR#-style; drag, or the top bar readout and
+the Source section, move the centre); with no VFO it tunes the centre. The tuning lock behaves as
+before: the centre is read-only, VFOs stay tunable and are paused outside the window.
+
+Layout uses a container query on the dock, not the viewport: the groups wrap inside two bands (VFO and
+tuning, then demodulator and audio). From 88 rem (about 1400 px) of dock width the bands sit side by
+side in one row; narrower, they stack in two rows; groups get a subtle vertical divider from 56 rem and
+simply wrap below that. On phones (below the 900 px shell breakpoint, where the sidebar becomes a
+drawer) the dock stays visible, wraps further and scrolls vertically (max 45 % of the viewport)
+rather than the page scrolling horizontally. With no VFOs the dock shrinks to an "Add VFO" prompt.
