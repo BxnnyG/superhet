@@ -62,7 +62,7 @@ services:
     command: ["superhet-api"]
     networks: [backend, edge]
     ports:
-      - "8073:8073"
+      - "${SUPERHET_PORT:-8073}:8073"
     environment:
       SUPERHET_DATABASE_URL: postgres://superhet:${POSTGRES_PASSWORD}@postgres:5432/superhet
       SUPERHET_NATS_URL: nats://nats:4222
@@ -87,14 +87,23 @@ services:
       SUPERHET_NATS_URL: nats://nats:4222
       SUPERHET_NATS_USER: sdrd
       SUPERHET_NATS_PASSWORD: ${NATS_SDRD_PASSWORD}
+      # Device spec, see docs/api-devices.md. Set it to an empty value for health-only (no
+      # dongle); the daemon exits (and compose restarts it) when the device cannot be opened.
+      SUPERHET_DEVICE: ${SUPERHET_DEVICE-rtlsdr:0}
+      SUPERHET_DEVICE_ID: ${SUPERHET_DEVICE_ID:-dev0}
     depends_on:
       nats: { condition: service_healthy }
-    # RTL-SDR access: pass the USB bus through to the container. Requires the host
-    # setup from deploy/udev/ (device permissions) and deploy/modprobe/ (kernel DVB
-    # driver blacklist), otherwise the container cannot claim the dongle.
-    # Not needed yet; uncomment once device support lands.
-    # devices:
-    #   - /dev/bus/usb:/dev/bus/usb
+    # RTL-SDR access (docs/setup-host.md): the USB tree is bind-mounted and the USB character
+    # devices (major 189) are allowed via the device cgroup, so a replugged dongle works without
+    # recreating the container. The service runs as a non-root user; SUPERHET_USB_GID must be the
+    # group that owns the device nodes (default 46 = "plugdev" on Debian/Ubuntu, see
+    # deploy/udev/). Needs the host setup from deploy/udev/ and deploy/modprobe/.
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+    device_cgroup_rules:
+      - "c 189:* rwm"
+    group_add:
+      - "${SUPERHET_USB_GID:-46}"
     healthcheck:
       <<: *healthcheck-defaults
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8074 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
