@@ -102,13 +102,22 @@ export class SpectrumInteraction {
     this.schedule();
   }
 
-  /** Span covered by the frame on screen; used to map the pointer to a frequency. */
+  /**
+   * Span covered by the frame on screen; maps the pointer and the VFO/window overlays to
+   * frequencies. Every change redraws, so the overlays never depend on the waterfall or on the
+   * pointer hovering.
+   */
   setFrameSpan(centerHz: number, sampleRate: number): void {
     const s = this.frameSpan;
     const start = centerHz - sampleRate / 2;
     if (s && s.startHz === start && spanWidth(s) === sampleRate) return;
     this.frameSpan = { startHz: start, endHz: start + sampleRate };
-    if (this.hoverX !== null) this.schedule();
+    this.schedule();
+  }
+
+  /** True once a span is known (from a frame or the tuning state). */
+  hasFrameSpan(): boolean {
+    return this.frameSpan !== null;
   }
 
   /** VFO markers to draw and hit-test; `selectedId` is highlighted. */
