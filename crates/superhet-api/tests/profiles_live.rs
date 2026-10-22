@@ -425,6 +425,56 @@ async fn profile_save_load_round_trip_and_crud() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn profile_save_overwrite() {
+    let stack = stack_or_skip!("ow");
+    let save = |body: Value| stack.rest("POST", stack.dev("profile/save"), Some(body));
+
+    assert_eq!(stack.vfo(433_600_000).await.status, 201);
+    let first = save(json!({"name": "Spot"})).await;
+    assert_eq!(first.status, 201, "{:?}", first.body);
+    let profile = first.body["profile"].clone();
+    let id = profile["id"].as_str().expect("id").to_owned();
+    assert_eq!(profile["data"]["vfos"].as_array().map(Vec::len), Some(1));
+
+    // Without the flag (absent or false) a name clash stays a 409 and nothing changes.
+    for body in [
+        json!({"name": "spot"}),
+        json!({"name": "spot", "overwrite": false}),
+    ] {
+        let clash = save(body).await;
+        assert_eq!(
+            (clash.status, clash.body["code"].as_str()),
+            (409, Some("conflict"))
+        );
+    }
+
+    // Change the device, then overwrite: same id and created_at, fresh snapshot.
+    assert_eq!(stack.vfo(433_700_000).await.status, 201);
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let replaced = save(json!({"name": "SPOT", "overwrite": true})).await;
+    assert_eq!(replaced.status, 200, "{:?}", replaced.body);
+    let new = &replaced.body["profile"];
+    assert_eq!(new["id"], id.as_str());
+    assert_eq!(new["created_at"], profile["created_at"]);
+    assert!(new["updated_at"].as_str() > profile["updated_at"].as_str());
+    assert_eq!(new["data"]["vfos"].as_array().map(Vec::len), Some(2));
+    assert_eq!(header(&replaced, "location"), None);
+    let list = stack.rest("GET", "/api/v1/profiles".into(), None).await;
+    assert_eq!(list.body["profiles"].as_array().map(Vec::len), Some(1));
+
+    // With nothing to overwrite the flag simply creates.
+    let created = save(json!({"name": "Fresh", "overwrite": true})).await;
+    assert_eq!(created.status, 201, "{:?}", created.body);
+    assert!(header(&created, "location").is_some());
+
+    // Validation still applies.
+    let bad = save(json!({"name": "  ", "overwrite": true})).await;
+    assert_eq!(bad.status, 400);
+    let junk = save(json!({"name": "x", "overwrite": "yes"})).await;
+    assert_eq!(junk.status, 400);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn lock_and_free_tuning_over_rest() {
     let stack = stack_or_skip!("lk");
 

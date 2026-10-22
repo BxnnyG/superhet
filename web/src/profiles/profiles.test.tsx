@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../spectrum/api";
 import { parseStateDoc, type StateDoc } from "../state/doc";
 import { toasts } from "../ui";
-import { buildProfileData, createProfileApi, parseProfile } from "./api";
+import { createProfileApi, parseProfile } from "./api";
 import { plural, relativeTime } from "./format";
 import { ProfilesPanel } from "./ProfilesPanel";
 
@@ -81,9 +81,13 @@ function fakeBackend(initial: ReturnType<typeof resource>[]) {
     calls.push({ method, url, body });
     if (url === "/api/v1/profiles" && method === "GET") return json({ v: 1, profiles: list });
     if (url.endsWith("/profile/save")) {
-      if (list.some((p) => p.name.toLowerCase() === body.name.toLowerCase())) {
-        return json({ v: 1, ok: false, code: "conflict", error: "name taken" }, 409);
+      const clash = list.find((p) => p.name.toLowerCase() === body.name.toLowerCase());
+      if (clash && body.overwrite === true) {
+        const p = { ...clash, name: body.name, data: data(100e6) };
+        list = list.map((x) => (x.id === clash.id ? p : x));
+        return json({ v: 1, profile: p });
       }
+      if (clash) return json({ v: 1, ok: false, code: "conflict", error: "name taken" }, 409);
       const p = resource(`id-${list.length + 1}`, body.name, 100e6);
       list = [...list, p];
       return json({ v: 1, profile: p }, 201);
@@ -164,27 +168,6 @@ describe("helpers", () => {
     const p = parseProfile(resource("a", "Air", 118e6));
     expect(p).toMatchObject({ id: "a", name: "Air", centerHz: 118e6, vfoCount: 1, lock: false });
     expect(() => parseProfile({ id: "a" })).toThrow(ApiError);
-  });
-
-  it("builds a profile document from the device state, keeping stored decoders", () => {
-    const d = buildProfileData(docOf(100e6, userLock), { decoders: [{ keep: "me" }] });
-    expect(d).toMatchObject({
-      v: 1,
-      center_hz: 100e6,
-      sample_rate: 2_048_000,
-      gain: { mode: "manual", db: 28 },
-      lock: true,
-      decoders: [{ keep: "me" }],
-    });
-    const vfos = d.vfos as Record<string, unknown>[];
-    expect(vfos[0]).toEqual({
-      freq_hz: 100_005_000,
-      mode: "wfm",
-      bandwidth_hz: 180000,
-      squelch_dbfs: -40,
-      deemphasis: "50us",
-    });
-    expect(vfos[1]).toEqual({ freq_hz: 100_009_000, mode: "am", bandwidth_hz: 10000 });
   });
 });
 
@@ -368,7 +351,7 @@ describe("ProfilesPanel", () => {
   });
 
   it("asks before overwriting a profile with the same name", async () => {
-    const { backend } = setup([resource("a", "Home", 433e6, { decoders: [{ keep: "me" }] })]);
+    const { backend } = setup([resource("a", "Home", 433e6)]);
     await screen.findByText("Home");
     fireEvent.click(screen.getByRole("button", { name: /Save current as/ }));
     fireEvent.change(screen.getByLabelText("Profile name"), { target: { value: "home" } });
@@ -377,12 +360,15 @@ describe("ProfilesPanel", () => {
     expect(confirm).toHaveTextContent("“Home” already exists");
     fireEvent.click(within(confirm).getByRole("button", { name: "Overwrite" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    const put = backend.mutating().find((c) => c.method === "PUT");
-    expect(put?.url).toBe("/api/v1/profiles/a");
-    expect(put?.body).toMatchObject({
-      name: "Home",
-      data: { center_hz: 100e6, decoders: [{ keep: "me" }] },
+    // The server snapshots the device; the web builds no document and does not PUT.
+    const saves = backend.mutating().filter((c) => c.url.endsWith("/profile/save"));
+    expect(saves).toHaveLength(2);
+    expect(saves[1]).toMatchObject({
+      url: "/api/v1/devices/dev0/profile/save",
+      body: { name: "Home", overwrite: true },
     });
+    expect(backend.mutating().filter((c) => c.method === "PUT")).toHaveLength(0);
+    expect(toasts.getSnapshot()[0]).toMatchObject({ tone: "success", title: "Saved “Home”" });
   });
 
   it("cancelling the overwrite goes back to the name dialog", async () => {

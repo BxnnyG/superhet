@@ -254,9 +254,13 @@ async fn delete_profile(
 #[serde(deny_unknown_fields)]
 struct SaveBody {
     name: String,
+    /// Replace the profile that already has this name instead of failing with 409.
+    #[serde(default)]
+    overwrite: bool,
 }
 
-/// Snapshot the device's current state (asked from the daemon, not from KV) as a new profile.
+/// Snapshot the device's current state (asked from the daemon, not from KV) as a new profile, or
+/// with `overwrite` over the existing profile of that name (200, id and `created_at` kept).
 async fn save_profile(
     State(state): State<ProfilesState>,
     Path(device): Path<String>,
@@ -279,6 +283,17 @@ async fn save_profile(
             ))
         })?;
         let data = serde_json::to_value(&data).map_err(|e| internal(&e))?;
+        if parsed.overwrite {
+            let (stored, created) = profiles::upsert_by_name(pool, &name, &data)
+                .await
+                .map_err(|e| internal(&e))?;
+            let status = if created {
+                StatusCode::CREATED
+            } else {
+                StatusCode::OK
+            };
+            return Ok::<_, Box<Response>>(profile_response(status, &stored));
+        }
         let created = profiles::create(pool, &name, &data)
             .await
             .map_err(write_failure)?;

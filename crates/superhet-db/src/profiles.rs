@@ -119,6 +119,30 @@ pub async fn create(
     Ok(profile(&row)?)
 }
 
+/// Insert a profile, or replace the one that already has this name (case-insensitive) while
+/// keeping its id and `created_at`. Returns the profile and whether it was newly created.
+///
+/// # Errors
+/// Fails if the query fails.
+pub async fn upsert_by_name(
+    pool: &PgPool,
+    name: &str,
+    data: &serde_json::Value,
+) -> Result<(Profile, bool), Error> {
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "INSERT INTO superhet.profiles (name, data) VALUES ($1, $2::text::jsonb) \
+         ON CONFLICT (lower(name)) DO UPDATE \
+         SET name = EXCLUDED.name, data = EXCLUDED.data, updated_at = now() \
+         RETURNING {COLUMNS}, (xmax = 0) AS created"
+    )))
+    .bind(name)
+    .bind(data.to_string())
+    .fetch_one(pool)
+    .await?;
+    let created: bool = row.try_get("created")?;
+    Ok((profile(&row)?, created))
+}
+
 /// Replace name and data of a profile; `None` if it does not exist.
 ///
 /// # Errors

@@ -118,5 +118,22 @@ async fn profiles_crud_and_unique_names() {
             .expect("delete again")
     );
     assert_eq!(profiles::list(pool).await.expect("list").len(), 1);
+
+    // Upsert by name: creates, then replaces in place (case-insensitive), keeping id and created_at.
+    let (fresh, created) = profiles::upsert_by_name(pool, "Gamma", &data)
+        .await
+        .expect("upsert new");
+    assert!(created);
+    let (again, created) = profiles::upsert_by_name(pool, "gAMMA", &new_data)
+        .await
+        .expect("upsert existing");
+    assert!(!created);
+    assert_eq!(
+        (again.id.as_str(), again.name.as_str(), &again.data),
+        (fresh.id.as_str(), "gAMMA", &new_data)
+    );
+    assert_eq!(again.created_at, fresh.created_at);
+    assert!(again.updated_at >= fresh.updated_at);
+    assert_eq!(profiles::list(pool).await.expect("list").len(), 2);
     db.drop().await;
 }

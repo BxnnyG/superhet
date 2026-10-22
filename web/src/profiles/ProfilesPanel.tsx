@@ -19,7 +19,7 @@ import {
   toasts,
   type ToastInput,
 } from "../ui";
-import { buildProfileData, type Profile, type ProfileApi } from "./api";
+import type { Profile, ProfileApi } from "./api";
 import { plural, relativeTime } from "./format";
 
 interface Props {
@@ -181,12 +181,11 @@ export function ProfilesPanel({
     await refresh();
   };
 
-  const overwrite = async (name: string, existing: Profile) => {
-    if (!doc) return;
+  const overwrite = async (existing: Profile) => {
     setBusy(true);
     try {
-      await api.update(existing.id, existing.name, buildProfileData(doc, existing.data));
-      push({ tone: "success", title: `Saved “${name}”`, key: "profile" });
+      await api.saveCurrent(device, existing.name, true);
+      push({ tone: "success", title: `Saved “${existing.name}”`, key: "profile" });
       setDialog(null);
     } catch (e) {
       push({ tone: "danger", title: "Could not overwrite the profile", body: errorText(e) });
@@ -308,7 +307,7 @@ export function ProfilesPanel({
           confirmVariant="danger"
           busy={busy}
           onCancel={() => setDialog({ kind: "save", name: dialog.name })}
-          onConfirm={() => void overwrite(dialog.name, dialog.existing)}
+          onConfirm={() => void overwrite(dialog.existing)}
         >
           A profile named “{dialog.existing.name}” already exists. Replace it with the current
           receiver settings?
