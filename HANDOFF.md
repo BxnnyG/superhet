@@ -32,7 +32,11 @@ Phase 0 (foundation) done and pushed → next: P1 core receiver (docs/ROADMAP.md
 - Done: receiver dock under the spectrum (all active-VFO controls one click away; sidebar = setup only; first VFO auto-selected; single audio button in the dock).
 - Done: compose passes the RTL-SDR to sdrd (`SUPERHET_USB_GID` = gid of the USB node, here 944/rtlsdr; `SUPERHET_DEVICE`, `SUPERHET_PORT`), nats.conf grants sdrd KV restore; real-stick smoke test via compose image passed. Releases attach `superhet-<tag>-compose.tar.gz` (scripts/package-compose.sh). Tagged v0.1.0-alpha.1.
 - Open: user must set GHCR package public; top-bar lock button wraps on phones; arm64 image; USB gid auto-detect in gen-secrets.
-- Next: /metrics + dropped_blocks to UI, then WFM stereo + SSB/CW demods (crit. 4), perf doc (crit. 7).
+- Done (alpha.2): api serves the web UI (`SUPERHET_WEB_DIR`, CSP etc.), one-command installer + standalone release compose.yaml (USB gid auto-detect, stale-volume guard, project name `superhet`).
+- Done (alpha.3): waterfall history kept on zoom/pan/retune, click preview + glide, clearer usable window; top readout tunes active VFO (centre secondary), per-VFO listen, squelch Auto, default VFO on fresh install; bookmarks API (migration 0004, docs/api-bookmarks.md) + UI with gqrx/SDR++ import; built-in band plan overlay (docs/bandplan.md); main area scrolls on short viewports. QoL backlog in docs/qol-backlog.md.
+- Test tip: the user's own stack often holds the stick – test with a file device via a compose override (`SUPERHET_DEVICE=file:/iq/x.cu8?format=cu8&rate=2048000&freq=…`, scripts/gen-test-iq.py).
+- Open: "50 VFOs after loading a profile" not reproducible (server replaces, UI shows 1) – ask user if it recurs; band plan JSON import hook has no UI; SDR# XML import; WebGL waterfall remapping unverified in a WebGL browser.
+- Next: /metrics + dropped_blocks to UI, then WFM stereo + RDS, SSB/CW demods (crit. 4), perf doc (crit. 7), QoL "next" items.
 - P1 start order: file device backend + IQ bus + FFT in sdrd → spectrum via NATS → api WS gateway → WebGL waterfall; then librtlsdr backend, tuning model, demods, Opus audio, local auth.
 - Spike before P3: confirm no usable open-source TETRA DMO decoder; collect own TMO/DMO reference recordings (review for private data before committing, SECURITY.md).
 - Tooling: TypeScript pinned 6.0.3 (typescript-eslint), gitleaks installed locally, cargo-nextest not; gitleaks-action needs license if repo moves to an org.
