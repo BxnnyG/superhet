@@ -168,12 +168,15 @@ export function SpectrumView({
     const offVfos = vfoCtl.subscribe(pushVfos);
     // Keep the zoom limits in step with the confirmed device tuning.
     let lastState: unknown = null;
-    const offTuning = tuning.subscribe(() => {
+    const onTuning = () => {
       const state = tuning.getSnapshot().state;
       if (!state || state === lastState) return;
       lastState = state;
       view.setDevice(deviceSpan(state.centerHz, state.sampleRate));
-    });
+      interaction?.setWindow(state.window);
+    };
+    onTuning();
+    const offTuning = tuning.subscribe(onTuning);
     live.current.registerView({
       reset: () => view.reset(),
       zoom: (factor) => view.zoom(0.5, factor),

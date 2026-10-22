@@ -3,12 +3,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AudioController } from "../audio/controller";
+import { createProfileApi } from "../profiles/api";
+import type { StateDoc } from "../state/doc";
+import { bindState, StateStore } from "../state/store";
 import { LevelController, loadLevelSettings } from "../spectrum/levels";
 import type { SocketStatus } from "../spectrum/socket";
 import { TuningController } from "../spectrum/tuning";
 import { VfoController } from "../vfo/controller";
 import { defaultModeFor, snapFrequency, stepFor, type StepChoice } from "../vfo/model";
 import { SpectrumMetrics } from "./metrics";
+import { noticeLocked, noticeRetune } from "./notices";
 
 export interface SpectrumInfo {
   centerHz: number;
@@ -28,9 +32,22 @@ const NO_VIEW_ACTIONS: ViewActions = { reset: () => undefined, zoom: () => undef
 
 export function useReceiver(device: string) {
   const [levelController] = useState(() => new LevelController(loadLevelSettings()));
-  const tuning = useMemo(() => new TuningController({ device }), [device]);
+  const store = useMemo(() => new StateStore({ device }), [device]);
+  const feed = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const tuning = useMemo(
+    () => new TuningController({ device, onLocked: (holders) => noticeLocked(holders) }),
+    [device],
+  );
   const tuningSnap = useSyncExternalStore(tuning.subscribe, tuning.getSnapshot);
-  const vfoCtl = useMemo(() => new VfoController({ device }), [device]);
+  const vfoCtl = useMemo(
+    () =>
+      new VfoController({
+        device,
+        onRetune: noticeRetune,
+        onState: (state) => tuning.ingest(state),
+      }),
+    [device, tuning],
+  );
   const vfoSnap = useSyncExternalStore(vfoCtl.subscribe, vfoCtl.getSnapshot);
   const audio = useMemo(() => new AudioController({ device }), [device]);
   const audioSnap = useSyncExternalStore(audio.subscribe, audio.getSnapshot);
@@ -58,15 +75,20 @@ export function useReceiver(device: string) {
     [vfoCtl],
   );
 
-  // VFO list polling and the audio socket live as long as the receiver.
+  // The state socket feeds the tuning and VFO controllers; the initial REST reads they make at
+  // start are the fallback if it is not up yet. The audio socket lives as long as the receiver.
   useEffect(() => {
+    const unbind = bindState(store, { tuning, vfos: vfoCtl });
+    store.start();
     vfoCtl.start();
     audio.start();
     return () => {
+      unbind();
+      store.stop();
       vfoCtl.stop();
       audio.stop();
     };
-  }, [vfoCtl, audio]);
+  }, [store, tuning, vfoCtl, audio]);
 
   // Subscribe to the audio of every VFO (frames also drive the S-meter while audio is off).
   const vfoIds = vfoSnap.vfos.map((v) => v.id).join(",");
@@ -85,6 +107,22 @@ export function useReceiver(device: string) {
     return () => window.removeEventListener("keydown", onKey);
   }, [vfoCtl]);
 
+  const locks = tuningSnap.state?.locks ?? [];
+  const profileApi = useMemo(() => createProfileApi(), []);
+  const currentDoc = useMemo<StateDoc | null>(
+    () =>
+      tuningSnap.state && vfoSnap.loaded ? { device: tuningSnap.state, vfos: vfoSnap.vfos } : null,
+    [tuningSnap.state, vfoSnap.loaded, vfoSnap.vfos],
+  );
+  const applyDoc = useCallback((doc: StateDoc) => store.ingest(doc), [store]);
+  const unlock = useCallback(() => tuning.setLock(false), [tuning]);
+  const toggleLock = useCallback(
+    (on: boolean) => {
+      void tuning.setLock(on);
+    },
+    [tuning],
+  );
+
   const selected = vfoSnap.vfos.find((v) => v.id === vfoSnap.selectedId) ?? null;
   const errors = [spectrumError, tuningSnap.error, vfoSnap.error, audioSnap.error].filter(
     (e): e is string => e !== null,
@@ -92,6 +130,14 @@ export function useReceiver(device: string) {
 
   return {
     device,
+    store,
+    feed,
+    locks,
+    toggleLock,
+    profileApi,
+    currentDoc,
+    applyDoc,
+    unlock,
     levelController,
     tuning,
     tuningSnap,

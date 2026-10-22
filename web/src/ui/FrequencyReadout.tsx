@@ -28,6 +28,10 @@ interface Props {
   minHz?: number;
   maxHz?: number;
   className?: string;
+  /** Read-only (e.g. the tuning lock is on): shows the value, refuses changes. */
+  locked?: boolean;
+  /** Why it is locked; shown as tooltip of the readout. */
+  lockedReason?: string;
 }
 
 const DEFAULT_FOCUS = 6;
@@ -44,6 +48,8 @@ export function FrequencyReadout({
   minHz = DEFAULT_MIN_HZ,
   maxHz = DEFAULT_MAX_HZ,
   className,
+  locked = false,
+  lockedReason,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [focusIdx, setFocusIdx] = useState(DEFAULT_FOCUS);
@@ -53,7 +59,8 @@ export function FrequencyReadout({
   // Latest value including our own not-yet-confirmed changes (fast wheel spins outrun re-renders).
   const latest = useRef(valueHz);
   const wheelAcc = useRef(0);
-  const disabled = valueHz === null;
+  const empty = valueHz === null;
+  const disabled = empty || locked;
 
   useEffect(() => {
     latest.current = valueHz;
@@ -66,7 +73,7 @@ export function FrequencyReadout({
 
   const step = (index: number, dir: 1 | -1) => {
     const cur = latest.current;
-    if (cur === null) return;
+    if (cur === null || locked) return;
     emit(stepDigit(cur, index, dir, minHz, maxHz));
   };
 
@@ -101,7 +108,7 @@ export function FrequencyReadout({
   };
 
   const startEdit = () => {
-    if (valueHz === null) return;
+    if (valueHz === null || locked) return;
     setDraft(formatFrequency(valueHz));
     setInvalid(false);
     setEditing(true);
@@ -146,7 +153,7 @@ export function FrequencyReadout({
         startEdit();
         return;
     }
-    if (/^[0-9]$/.test(e.key) && latest.current !== null) {
+    if (/^[0-9]$/.test(e.key) && latest.current !== null && !locked) {
       e.preventDefault();
       emit(setDigit(latest.current, index, Number(e.key), minHz, maxHz));
       focusDigit(index + 1);
@@ -203,6 +210,7 @@ export function FrequencyReadout({
         ref={rootRef}
         role="group"
         aria-label={label}
+        title={locked ? lockedReason : undefined}
         onDoubleClick={startEdit}
         className="flex items-baseline font-mono text-2xl leading-none font-medium text-fg num select-none shell:text-3xl"
       >
@@ -234,7 +242,7 @@ export function FrequencyReadout({
                 disabled && "cursor-default text-fg-subtle",
               )}
             >
-              {disabled ? "–" : d}
+              {empty ? "–" : d}
             </span>
           </span>
         ))}

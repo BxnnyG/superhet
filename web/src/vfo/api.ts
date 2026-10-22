@@ -1,7 +1,17 @@
 // Typed wrappers for the VFO REST routes (docs/api-devices.md) with runtime validation.
 
 import { apiFetch } from "../auth/session";
-import { ApiError, deviceUrl, httpError, isRec, readJson, type Rec } from "../spectrum/api";
+import {
+  ApiError,
+  deviceUrl,
+  httpError,
+  isRec,
+  parseDeviceState,
+  parseHolders,
+  readJson,
+  type DeviceState,
+  type Rec,
+} from "../spectrum/api";
 
 export type VfoMode = "wfm" | "nfm" | "am";
 export const VFO_MODES: readonly VfoMode[] = ["wfm", "nfm", "am"];
@@ -34,10 +44,20 @@ export interface VfoPatch {
   squelchDbfs?: number | null;
 }
 
+/**
+ * What the daemon did about a VFO that ended up outside the usable window (free tuning):
+ * `none` inside the window, `applied` the centre followed, `locked` the tuning lock kept the
+ * centre (VFO paused), `failed` the device refused the retune.
+ */
+export type Retune = "none" | "applied" | "locked" | "failed";
+
 export interface VfoReply {
   vfo: Vfo;
   /** All VFOs of the device after the change (from the reply's state document), if present. */
   vfos: Vfo[] | null;
+  /** The device state of the reply (centre may have moved), if present. */
+  state: DeviceState | null;
+  retune: Retune;
 }
 
 export interface VfoApi {
@@ -89,18 +109,35 @@ export function parseListReply(raw: unknown): Vfo[] {
   return parseVfoList(raw.vfos ?? []);
 }
 
+function tryParseState(raw: unknown): DeviceState | null {
+  if (!isRec(raw)) return null;
+  try {
+    return parseDeviceState(raw);
+  } catch {
+    return null;
+  }
+}
+
 /** `{ "ok":true, "vfo":{...}, "state":{...} }` as returned by POST/PATCH. */
 export function parseVfoReply(raw: unknown, status?: number): VfoReply {
   if (!isRec(raw)) throw new ApiError("invalid reply", status);
   if (raw.ok === false) {
     const msg = typeof raw.error === "string" ? raw.error : "request rejected";
-    throw new ApiError(msg, status, typeof raw.code === "string" ? raw.code : undefined);
+    throw new ApiError(
+      msg,
+      status,
+      typeof raw.code === "string" ? raw.code : undefined,
+      parseHolders(raw.holders),
+    );
   }
   if (raw.ok !== true) throw new ApiError("invalid reply", status);
   const vfo = parseVfo(raw.vfo);
-  const state = raw.state;
-  const vfos = isRec(state) && Array.isArray(state.vfos) ? parseVfoList(state.vfos) : null;
-  return { vfo, vfos };
+  const rawState = raw.state;
+  const vfos = isRec(rawState) && Array.isArray(rawState.vfos) ? parseVfoList(rawState.vfos) : null;
+  const state = tryParseState(rawState);
+  const r = raw.retune;
+  const retune: Retune = r === "applied" || r === "locked" || r === "failed" ? r : "none";
+  return { vfo, vfos, state, retune };
 }
 
 export function createBody(req: VfoCreate): Rec {

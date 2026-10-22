@@ -6,7 +6,15 @@
 // Everything here is imperative; no React state changes per pointer event.
 
 import { formatFrequency } from "./freq";
-import { CANVAS_FONT, CHIP_BG, CHIP_BORDER, CURSOR_COLOR, CANVAS_TEXT_STRONG } from "./palette";
+import {
+  CANVAS_FONT,
+  CANVAS_TEXT_STRONG,
+  CHIP_BG,
+  CHIP_BORDER,
+  CURSOR_COLOR,
+  WINDOW_EDGE,
+  WINDOW_SHADE,
+} from "./palette";
 import { MODE_LABEL, hitTestVfo, vfoColor, type Marker } from "../vfo/model";
 import { fracToHz, spanWidth, type Span, type ViewController } from "./view";
 
@@ -44,6 +52,7 @@ export class SpectrumInteraction {
   private clickTimer: ReturnType<typeof setTimeout> | undefined;
   private markers: readonly Marker[] = [];
   private selectedId: number | null = null;
+  private window: Span | null = null;
   private drag: {
     id: number;
     startX: number;
@@ -106,6 +115,16 @@ export class SpectrumInteraction {
   setVfos(markers: readonly Marker[], selectedId: number | null): void {
     this.markers = markers;
     this.selectedId = selectedId;
+    this.schedule();
+  }
+
+  /** Usable window of the device; the parts of the span outside it are shaded. */
+  setWindow(window: Span | null): void {
+    const w = this.window;
+    if (w === window || (w && window && w.startHz === window.startHz && w.endHz === window.endHz)) {
+      return;
+    }
+    this.window = window;
     this.schedule();
   }
 
@@ -250,6 +269,7 @@ export class SpectrumInteraction {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const span = this.frameSpan;
     if (!span) return;
+    this.drawWindow(ctx, span);
     this.drawVfos(ctx, span);
     const x = this.hoverX;
     if (x === null) return;
@@ -278,6 +298,40 @@ export class SpectrumInteraction {
     ctx.textBaseline = "middle";
     ctx.textAlign = "left";
     ctx.fillText(label, boxX + padX, 2 * dpr + h / 2);
+  }
+
+  /** Shade what lies outside the usable window and mark its edges with a dashed line. */
+  private drawWindow(ctx: CanvasRenderingContext2D, span: Span): void {
+    const win = this.window;
+    if (!win) return;
+    const canvas = this.o.canvas;
+    const dpr = this.dpr;
+    const left = this.o.leftPad * dpr;
+    const plotW = canvas.width - left;
+    const width = spanWidth(span);
+    if (plotW <= 0 || width <= 0) return;
+    const xOf = (hz: number) => left + ((hz - span.startHz) / width) * plotW;
+    const right = left + plotW;
+    const x0 = Math.min(right, Math.max(left, xOf(win.startHz)));
+    const x1 = Math.min(right, Math.max(left, xOf(win.endHz)));
+    ctx.save();
+    ctx.fillStyle = WINDOW_SHADE;
+    if (x0 > left) ctx.fillRect(left, 0, x0 - left, canvas.height);
+    if (x1 < right) ctx.fillRect(x1, 0, right - x1, canvas.height);
+    ctx.strokeStyle = WINDOW_EDGE;
+    ctx.lineWidth = Math.max(1, dpr);
+    ctx.setLineDash([3 * dpr, 4 * dpr]);
+    for (const [hz, x] of [
+      [win.startHz, x0],
+      [win.endHz, x1],
+    ] as const) {
+      if (hz < span.startHz || hz > span.endHz) continue;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, canvas.height);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   private drawVfos(ctx: CanvasRenderingContext2D, span: Span): void {

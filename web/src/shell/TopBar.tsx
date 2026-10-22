@@ -3,8 +3,10 @@ import type { SocketStatus } from "../spectrum/socket";
 import { formatRate } from "../spectrum/TuningControls";
 import { Badge, IconButton, Logo, MenuIcon, Slider, type BadgeTone } from "../ui";
 import type { ThemePreference } from "../ui/theme";
+import { lockedBy } from "../state/locks";
 import { ReceiverFrequency } from "./ReceiverFrequency";
 import { SettingsMenu } from "./SettingsMenu";
+import { TuningLock } from "./TuningLock";
 import type { Receiver } from "./useReceiver";
 
 const STATUS: Record<SocketStatus, { label: string; tone: BadgeTone; pulse: boolean }> = {
@@ -55,12 +57,20 @@ export function TopBar({ r, theme, onTheme, drawerOpen, onMenu }: Props) {
           )}
         </span>
       </div>
-      <div className="order-last flex basis-full justify-center shell:order-none shell:basis-auto shell:flex-1">
+      <div className="order-last flex basis-full flex-wrap items-center justify-center gap-x-3 gap-y-1 shell:order-none shell:basis-auto shell:flex-1">
         <ReceiverFrequency
           centerHz={display?.centerHz ?? null}
           selected={r.selected}
           onCenter={(hz) => r.tuning.request({ centerHz: hz })}
           onVfo={(id, hz) => r.vfoCtl.update(id, { freqHz: hz })}
+          centerLockedReason={
+            r.locks.length > 0 ? `${lockedBy(r.locks)}: select a VFO to tune it, or unlock` : null
+          }
+        />
+        <TuningLock
+          holders={r.locks}
+          disabled={!r.tuningSnap.state || r.tuningSnap.lockBusy}
+          onToggle={r.toggleLock}
         />
       </div>
       <div className="ml-auto flex items-center gap-2 shell:ml-0">

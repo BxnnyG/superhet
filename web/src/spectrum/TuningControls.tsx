@@ -1,4 +1,5 @@
-import { NumberField, Select, Slider, Toggle } from "../ui";
+import { lockedBy } from "../state/locks";
+import { LockIcon, NumberField, Select, Slider, Toggle } from "../ui";
 import type { TunePatch } from "./api";
 import { formatFrequency, parseFrequency } from "./freq";
 import type { TuningSnapshot } from "./tuning";
@@ -30,6 +31,8 @@ interface Props {
 /** Source section content: centre frequency, sample rate, gain, PPM. */
 export function TuningControls({ tuning, onTune }: Props) {
   const { display, busy } = tuning;
+  const holders = tuning.state?.locks ?? [];
+  const locked = holders.length > 0;
   const rates =
     display && !SAMPLE_RATES.includes(display.sampleRate)
       ? [...SAMPLE_RATES, display.sampleRate].sort((a, b) => a - b)
@@ -49,12 +52,12 @@ export function TuningControls({ tuning, onTune }: Props) {
         value={display?.centerHz ?? 0}
         format={formatFrequency}
         parse={parseFrequency}
-        disabled={!display}
+        disabled={!display || locked}
         onCommit={(hz) => onTune({ centerHz: hz })}
       />
       <Select
         label="Sample rate"
-        disabled={!display || busy}
+        disabled={!display || busy || locked}
         value={display ? String(display.sampleRate) : ""}
         onChange={(v) => onTune({ sampleRate: Number(v) })}
         options={[
@@ -62,6 +65,12 @@ export function TuningControls({ tuning, onTune }: Props) {
           ...rates.map((r) => ({ value: String(r), label: formatRate(r) })),
         ]}
       />
+      {locked && (
+        <p role="status" className="flex items-start gap-1.5 text-xs text-warn">
+          <LockIcon size={14} className="mt-px shrink-0" />
+          <span>{lockedBy(holders)}. Unlock to change the centre frequency or sample rate.</span>
+        </p>
+      )}
       {gain === null ? (
         display ? (
           <p className="text-xs text-fg-subtle">This device has no gain control.</p>

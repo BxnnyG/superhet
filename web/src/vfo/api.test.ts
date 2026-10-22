@@ -131,3 +131,29 @@ describe("createVfoApi", () => {
     await expect(api.remove("dev0", 1)).rejects.toThrow("offline");
   });
 });
+
+describe("free tuning reply", () => {
+  const vfo = {
+    id: 1,
+    freq_hz: 1e6,
+    mode: "am",
+    bandwidth_hz: 10000,
+    squelch_dbfs: null,
+    deemphasis: null,
+    offset_hz: 0,
+    status: "paused",
+  };
+  it.each(["none", "applied", "locked", "failed"] as const)("reads retune=%s", (r) => {
+    expect(parseVfoReply({ ok: true, vfo, retune: r }).retune).toBe(r);
+  });
+  it("defaults to none and parses the state of the reply", () => {
+    const reply = parseVfoReply({
+      ok: true,
+      vfo,
+      state: { driver: "file", center_hz: 5, sample_rate: 100, vfos: [vfo] },
+    });
+    expect(reply.retune).toBe("none");
+    expect(reply.state?.centerHz).toBe(5);
+    expect(reply.vfos).toHaveLength(1);
+  });
+});

@@ -9,6 +9,7 @@ import {
   Field,
   IconButton,
   Kbd,
+  PauseIcon,
   PlusIcon,
   RowButton,
   SegmentedControl,
@@ -26,6 +27,7 @@ import {
   BANDWIDTH_PRESETS,
   MODE_LABEL,
   STEPS_HZ,
+  VFO_PAUSED_HINT,
   SQUELCH_MIN_DBFS,
   SQUELCH_OFF_POS,
   formatBandwidth,
@@ -41,6 +43,7 @@ import {
 import { SMeter } from "./SMeter";
 
 const DEFAULT_BW = "default";
+const PAUSED_FREE_HINT = "VFO outside the usable window — paused until the device is retuned";
 
 interface Props {
   vfos: VfoSnapshot;
@@ -50,6 +53,8 @@ interface Props {
   onStep: (step: StepChoice) => void;
   /** Maximum number of VFOs per device (daemon limit). */
   maxVfos?: number;
+  /** The tuning lock is held: a VFO outside the window stays paused instead of retuning. */
+  locked?: boolean;
   onCreate: () => void;
   onSelect: (id: number | null) => void;
   onUpdate: (id: number, patch: VfoPatch) => void;
@@ -64,6 +69,7 @@ export function VfoPanel({
   step,
   onStep,
   maxVfos = 8,
+  locked = false,
   onCreate,
   onSelect,
   onUpdate,
@@ -71,6 +77,8 @@ export function VfoPanel({
 }: Props) {
   const selected = vfos.vfos.find((v) => v.id === vfos.selectedId) ?? null;
   const full = vfos.vfos.length >= maxVfos;
+  const pausedHint = locked ? VFO_PAUSED_HINT : PAUSED_FREE_HINT;
+  const anyPaused = vfos.vfos.some((v) => v.status === "paused");
   return (
     <div className="flex flex-col gap-3" role="group" aria-label="VFOs">
       <div className="flex items-end gap-2">
@@ -113,7 +121,7 @@ export function VfoPanel({
                 <RowButton
                   selected={isSel}
                   onClick={() => onSelect(isSel ? null : v.id)}
-                  className={cn("flex-1", v.status === "paused" && "opacity-60")}
+                  className={cn("flex-1", v.status === "paused" && "italic opacity-70")}
                 >
                   <span
                     aria-hidden="true"
@@ -126,10 +134,8 @@ export function VfoPanel({
                     {formatFrequency(v.freqHz).slice(0, -4)}
                   </span>
                   {v.status === "paused" && (
-                    <Badge
-                      tone="warn"
-                      title="Outside the device passband: no audio until the device is retuned"
-                    >
+                    <Badge tone="warn" title={pausedHint}>
+                      <PauseIcon size={10} />
                       paused
                     </Badge>
                   )}
@@ -141,6 +147,12 @@ export function VfoPanel({
             );
           })}
         </ul>
+      )}
+      {anyPaused && (
+        <p role="status" className="flex items-start gap-1.5 text-xs text-warn">
+          <PauseIcon size={14} className="mt-px shrink-0" />
+          <span>{pausedHint}</span>
+        </p>
       )}
       {selected ? (
         <SelectedVfo
