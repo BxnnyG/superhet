@@ -72,8 +72,15 @@ Profile resource: `{"id":"<uuid>","name":"...","data":{...},"created_at":"<RFC 3
   `invalid`/`unsupported`, `409` `locked` (with `holders`, when the profile would change centre or
   rate while locked), `404` `not_found` (unknown profile), `502`, `503`, `504`. On any error the
   device is unchanged.
-- Loading replaces the device's VFO set; VFO ids are new. Other clients see the change through
-  the state feed (`docs/protocol-ws.md`).
+- Loading *replaces* the device state, it never appends: every existing VFO is deleted, the
+  profile's VFOs are created (a profile without VFOs leaves none), and centre, rate, gain, ppm
+  and bias tee are applied, all in one daemon operation under the tuning gate. Clients see a
+  single consistent state push (`/api/v1/ws/state`, `docs/protocol-ws.md`), never a half-loaded
+  state. VFO ids are not preserved: the profile's VFOs get fresh ids (continuing after the
+  highest id ever used), so clients must re-read ids from the reply or the state feed. Loading
+  the same profile twice yields the same state (apart from the ids and `tuning_epoch`).
+- The daemon's default VFO (`docs/api-devices.md`, "Default VFO") is not part of this: a profile
+  decides the VFO set completely.
 
 ## Bus
 

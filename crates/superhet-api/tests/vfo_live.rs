@@ -248,8 +248,23 @@ async fn vfo_rest_crud_against_a_real_sdrd() {
     };
     let list = stack.vfos_path();
 
+    // A fresh daemon starts with one VFO at the centre; remove it to start from an empty set.
     let reply = stack.rest("GET", list.clone(), vec![], "").await;
-    assert_eq!((reply.status, reply.body), (200, json!({"v":1,"vfos":[]})));
+    assert_eq!(reply.status, 200);
+    assert_eq!(reply.body["vfos"].as_array().map(Vec::len), Some(1));
+    assert_eq!(reply.body["vfos"][0]["id"], 1);
+    assert_eq!(reply.body["vfos"][0]["mode"], "nfm");
+    let reply = stack.rest("DELETE", format!("{list}/1"), vec![], "").await;
+    assert_eq!(reply.status, 204);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let reply = stack.rest("GET", list.clone(), vec![], "").await;
+        if reply.body == json!({"v":1,"vfos":[]}) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "default VFO still listed");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 
     // Create: 201 with the VFO and a Location header.
     let reply = stack
@@ -260,14 +275,14 @@ async fn vfo_rest_crud_against_a_real_sdrd() {
         )
         .await;
     assert_eq!(reply.status, 201, "{}", reply.body);
-    assert_eq!(reply.body["vfo"]["id"], 1);
+    assert_eq!(reply.body["vfo"]["id"], 2);
     assert_eq!(reply.body["vfo"]["status"], "active");
     assert_eq!(reply.body["vfo"]["squelch_dbfs"], -40.0);
     assert!(
         reply
             .headers
             .to_lowercase()
-            .contains(&format!("location: {list}/1")),
+            .contains(&format!("location: {list}/2")),
         "{}",
         reply.headers
     );
@@ -276,7 +291,7 @@ async fn vfo_rest_crud_against_a_real_sdrd() {
         .await;
     assert_eq!(
         (reply.status, reply.body["vfo"]["id"].clone()),
-        (201, 2.into())
+        (201, 3.into())
     );
 
     // The list comes from the state (KV is updated asynchronously).
@@ -295,7 +310,7 @@ async fn vfo_rest_crud_against_a_real_sdrd() {
     }
 
     // Partial update; null resets.
-    let one = format!("{list}/1");
+    let one = format!("{list}/2");
     let reply = stack
         .json_rest("PATCH", one.clone(), r#"{"freq_hz":433960000}"#)
         .await;
@@ -303,7 +318,7 @@ async fn vfo_rest_crud_against_a_real_sdrd() {
     assert_eq!(reply.body["vfo"]["freq_hz"], 433_960_000);
     assert_eq!(reply.body["vfo"]["squelch_dbfs"], -40.0);
     let reply = stack
-        .json_rest("PATCH", one.clone(), r#"{"squelch_dbfs":null,"id":1}"#)
+        .json_rest("PATCH", one.clone(), r#"{"squelch_dbfs":null,"id":2}"#)
         .await;
     assert_eq!(reply.status, 200, "{}", reply.body);
     assert_eq!(reply.body["vfo"]["squelch_dbfs"], Value::Null);
@@ -312,7 +327,7 @@ async fn vfo_rest_crud_against_a_real_sdrd() {
     for (method, path, body) in [
         ("PATCH", one.clone(), r#"{"mode":"ssb"}"#),
         ("PATCH", one.clone(), "{}"),
-        ("PATCH", one.clone(), r#"{"id":2,"freq_hz":5}"#),
+        ("PATCH", one.clone(), r#"{"id":3,"freq_hz":5}"#),
         ("PATCH", format!("{list}/x"), r#"{"freq_hz":5}"#),
         ("POST", list.clone(), r#"{"freq_hz":1,"mode":"ssb"}"#),
         ("POST", list.clone(), "nope"),
@@ -355,19 +370,19 @@ async fn vfo_rest_crud_against_a_real_sdrd() {
     assert_eq!(reply.status, 415);
 
     // Delete: 204 without body, then the id is gone.
-    let reply = stack.rest("DELETE", format!("{list}/2"), vec![], "").await;
+    let reply = stack.rest("DELETE", format!("{list}/3"), vec![], "").await;
     assert_eq!((reply.status, reply.body), (204, Value::Null));
-    let reply = stack.rest("DELETE", format!("{list}/2"), vec![], "").await;
+    let reply = stack.rest("DELETE", format!("{list}/3"), vec![], "").await;
     assert_eq!(reply.status, 404);
     let reply = stack
-        .json_rest("PATCH", format!("{list}/2"), r#"{"freq_hz":5}"#)
+        .json_rest("PATCH", format!("{list}/3"), r#"{"freq_hz":5}"#)
         .await;
     assert_eq!(reply.status, 404);
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let reply = stack.rest("GET", list.clone(), vec![], "").await;
         if reply.body["vfos"].as_array().is_some_and(|v| v.len() == 1) {
-            assert_eq!(reply.body["vfos"][0]["id"], 1);
+            assert_eq!(reply.body["vfos"][0]["id"], 2);
             break;
         }
         assert!(Instant::now() < deadline, "deleted VFO still listed");
@@ -392,13 +407,12 @@ async fn audio_ws_forwards_subscribed_vfos_only() {
         return;
     };
     let list = stack.vfos_path();
-    for body in [
-        r#"{"freq_hz":433970000,"mode":"nfm"}"#,
-        r#"{"freq_hz":433970000,"mode":"am"}"#,
-    ] {
-        let reply = stack.json_rest("POST", list.clone(), body).await;
-        assert_eq!(reply.status, 201, "{}", reply.body);
-    }
+    // VFO 1 is the default one a fresh daemon creates; add VFO 2.
+    let reply = stack
+        .json_rest("POST", list.clone(), r#"{"freq_hz":433970000,"mode":"am"}"#)
+        .await;
+    assert_eq!(reply.status, 201, "{}", reply.body);
+    assert_eq!(reply.body["vfo"]["id"], 2);
 
     // Control: VFO 2 really produces audio on the bus during the test.
     let mut bus_two = stack

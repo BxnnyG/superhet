@@ -15,7 +15,7 @@ use tokio::sync::watch;
 
 use crate::control::{CtlError, Retune, VERSION, error_reply, ok_reply, state_json, vfo_reply};
 use crate::lock::{Holder, HolderKind, LockSet};
-use crate::vfo::{self, Tuning, Vfo, VfoCreate, VfoRegistry, VfoShared};
+use crate::vfo::{self, Tuning, Vfo, VfoCreate, VfoMode, VfoRegistry, VfoShared};
 use crate::window;
 
 /// Latest encoded state, `None` until the first one is known.
@@ -42,6 +42,15 @@ fn device_gain(gain: profile::Gain) -> Option<Gain> {
         (profile::GainMode::Auto, _) => Some(Gain::Auto),
         (profile::GainMode::Manual, Some(db)) => Some(Gain::Db(db)),
         (profile::GainMode::Manual, None) => None,
+    }
+}
+
+/// Mode of the default VFO: WFM in the FM broadcast band (87.5-108 MHz), NFM elsewhere.
+fn default_mode(center_hz: u64) -> VfoMode {
+    if (87_500_000..=108_000_000).contains(&center_hz) {
+        VfoMode::Wfm
+    } else {
+        VfoMode::Nfm
     }
 }
 
@@ -412,6 +421,37 @@ impl Controller {
         Ok(())
     }
 
+    /// Give a device that starts without saved state one VFO at the centre frequency (WFM inside
+    /// the FM broadcast band, NFM elsewhere), so the first listener has something to tune.
+    ///
+    /// Only meant for the very first start: once the user has deleted every VFO the snapshot
+    /// restores an empty set and this is not called.
+    pub fn seed_default_vfo(&self) {
+        let locks = self.gate();
+        let state = self.control.state();
+        let request = VfoCreate {
+            freq_hz: state.center_hz,
+            mode: default_mode(state.center_hz),
+            bandwidth_hz: None,
+            squelch_dbfs: None,
+            deemphasis: None,
+        };
+        match self.vfos.with(|r| {
+            if r.list().is_empty() {
+                r.create(request, state.sample_rate).map(Some)
+            } else {
+                Ok(None)
+            }
+        }) {
+            Ok(Some(vfo)) => {
+                tracing::info!(id = vfo.id, freq_hz = vfo.freq_hz, mode = ?vfo.mode, "default vfo created");
+                self.publish(&locks, &state);
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!(error = %e.message, "could not create the default vfo"),
+        }
+    }
+
     /// Error reply used when the blocking task of a command panicked.
     #[must_use]
     pub fn internal_error() -> Vec<u8> {
@@ -729,6 +769,67 @@ mod tests {
         // Loading again is idempotent.
         load(&c, &data).expect("load again");
         assert_eq!(essence(&c), saved);
+    }
+
+    #[test]
+    fn loading_replaces_the_vfos_instead_of_adding_to_them() {
+        let c = controller(Mock::new());
+        dressed(&c);
+        let data = ProfileData::from_state(&state(&c)).expect("snapshot");
+        // Extra VFOs the profile does not know about.
+        for hz in [434_100_000, 434_200_000, 434_300_000] {
+            create(&c, hz);
+        }
+        assert_eq!(state(&c)["vfos"].as_array().map(Vec::len), Some(6));
+        let mut counts = Vec::new();
+        for _ in 0..4 {
+            load(&c, &data).expect("load");
+            counts.push(state(&c)["vfos"].as_array().map(Vec::len));
+        }
+        assert_eq!(counts, [Some(3); 4]);
+
+        // A profile without VFOs empties the set, one VFO is not smuggled back in.
+        let mut empty = data;
+        empty.vfos.clear();
+        load(&c, &empty).expect("load empty");
+        assert_eq!(state(&c)["vfos"], json!([]));
+    }
+
+    #[test]
+    fn default_vfo_follows_the_band_and_only_fills_an_empty_set() {
+        for (center_hz, mode) in [
+            (100_000_000u64, "wfm"),
+            (87_500_000, "wfm"),
+            (108_000_000, "wfm"),
+            (433_920_000, "nfm"),
+            (87_000_000, "nfm"),
+        ] {
+            let c = controller(Mock::new());
+            tune(&c, &center(center_hz)).expect("tune");
+            c.seed_default_vfo();
+            let s = state(&c);
+            let vfos = s["vfos"].as_array().expect("vfos");
+            assert_eq!(vfos.len(), 1, "{center_hz}");
+            assert_eq!(vfos[0]["freq_hz"], center_hz);
+            assert_eq!(vfos[0]["mode"], mode, "{center_hz}");
+            assert_eq!(vfos[0]["status"], "active");
+            // Not a second one.
+            c.seed_default_vfo();
+            assert_eq!(state(&c)["vfos"].as_array().map(Vec::len), Some(1));
+        }
+    }
+
+    #[test]
+    fn a_restored_state_without_vfos_stays_empty() {
+        let c = controller(Mock::new());
+        c.seed_default_vfo();
+        vfo_call(&c, "vfo.delete", json!({"v": 1, "id": 1})).expect("delete");
+        let saved = state(&c);
+        assert_eq!(saved["vfos"], json!([]));
+        // The daemon only seeds when no snapshot was applied; applying this one keeps it empty.
+        let fresh = controller(Mock::new());
+        fresh.restore(&saved).expect("restore");
+        assert_eq!(state(&fresh)["vfos"], json!([]));
     }
 
     #[test]

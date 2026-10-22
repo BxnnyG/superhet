@@ -170,6 +170,14 @@ impl Stack {
         .await
     }
 
+    /// Delete every VFO (the daemon creates one on a fresh start).
+    async fn clear_vfos(&self) {
+        for vfo in self.state().await["vfos"].as_array().expect("vfos") {
+            let path = self.dev(&format!("vfos/{}", vfo["id"]));
+            assert_eq!(self.rest("DELETE", path, None).await.status, 204);
+        }
+    }
+
     /// Poll the live state until `check` holds (the KV copy lags the reply by a moment).
     async fn wait_state(&self, what: &str, check: impl Fn(&Value) -> bool) -> Value {
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -218,7 +226,8 @@ fn essence(state: &Value) -> Value {
     })
 }
 
-macro_rules! stack_or_skip {
+/// A stack exactly as the daemon starts it, including its default VFO.
+macro_rules! fresh_stack_or_skip {
     ($tag:expr) => {{
         let Ok(url) = std::env::var("SUPERHET_TEST_NATS_URL") else {
             eprintln!("SUPERHET_TEST_NATS_URL not set; skipping");
@@ -228,6 +237,15 @@ macro_rules! stack_or_skip {
             eprintln!("DATABASE_URL not set; skipping");
             return;
         };
+        stack
+    }};
+}
+
+/// A stack whose default VFO is deleted, so a test starts from an empty VFO set.
+macro_rules! stack_or_skip {
+    ($tag:expr) => {{
+        let stack = fresh_stack_or_skip!($tag);
+        stack.clear_vfos().await;
         stack
     }};
 }
@@ -714,7 +732,7 @@ async fn state_feed_pushes_every_change() {
 async fn sdrd_restores_its_state_after_a_restart() {
     let mut stack = stack_or_skip!("rs");
 
-    // Build a state worth keeping: tuning, two VFOs (ids 1 and 3), the user lock.
+    // Build a state worth keeping: tuning, two VFOs (ids 3 and 4), the user lock.
     assert_eq!(
         stack
             .tune(json!({"center_hz": 433_700_000u64}))
@@ -779,10 +797,103 @@ async fn sdrd_restores_its_state_after_a_restart() {
         .iter()
         .map(|v| v["id"].as_u64().expect("id"))
         .collect();
-    assert_eq!(ids, [1, 3]);
+    assert_eq!(ids, [3, 4]);
     // Locked after the restart, too, and new VFOs continue after the highest id.
     let refused = stack.tune(json!({"center_hz": 100_000_000u64})).await;
     assert_eq!(refused.status, 409);
     let created = stack.vfo(433_720_000).await;
-    assert_eq!(created.body["vfo"]["id"], 4);
+    assert_eq!(created.body["vfo"]["id"], 5);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn loading_a_profile_twice_does_not_stack_vfos() {
+    let stack = stack_or_skip!("lt");
+    assert_eq!(stack.vfo(433_950_000).await.status, 201);
+    assert_eq!(stack.vfo(433_980_000).await.status, 201);
+    let saved = stack
+        .rest(
+            "POST",
+            stack.dev("profile/save"),
+            Some(json!({"name": "twice"})),
+        )
+        .await;
+    assert_eq!(saved.status, 201, "{:?}", saved.body);
+    let id = saved.body["profile"]["id"].clone();
+    let saved_state = stack.state().await;
+
+    // Strays the profile does not know about.
+    assert_eq!(stack.vfo(433_900_000).await.status, 201);
+    assert_eq!(stack.vfo(433_910_000).await.status, 201);
+    assert_eq!(stack.vfo(433_920_000).await.status, 201);
+
+    for round in 0..3 {
+        let loaded = stack
+            .rest("POST", stack.dev("profile/load"), Some(json!({"id": id})))
+            .await;
+        assert_eq!(loaded.status, 200, "{:?}", loaded.body);
+        assert_eq!(
+            loaded.body["state"]["vfos"].as_array().map(Vec::len),
+            Some(2),
+            "round {round}"
+        );
+        assert_eq!(
+            essence(&loaded.body["state"]),
+            essence(&saved_state),
+            "round {round}"
+        );
+    }
+    let after = stack
+        .wait_state("replaced VFO set", |s| essence(s) == essence(&saved_state))
+        .await;
+    assert_eq!(after["vfos"].as_array().map(Vec::len), Some(2));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fresh_device_has_one_default_vfo_that_stays_deleted() {
+    let mut stack = fresh_stack_or_skip!("dv");
+
+    // The file device sits at 433.92 MHz: NFM at the centre, nothing was created by anyone.
+    let state = stack
+        .wait_state("default vfo", |s| {
+            s["vfos"].as_array().is_some_and(|v| v.len() == 1)
+        })
+        .await;
+    let vfo = &state["vfos"][0];
+    assert_eq!(vfo["id"], 1);
+    assert_eq!(vfo["freq_hz"], CENTER);
+    assert_eq!(vfo["mode"], "nfm");
+    assert_eq!(vfo["status"], "active");
+
+    // Delete it, and let the snapshot catch up before the daemon is killed.
+    assert_eq!(
+        stack.rest("DELETE", stack.dev("vfos/1"), None).await.status,
+        204
+    );
+    let store = async_nats::jetstream::new(stack.nats.clone())
+        .get_key_value("STATE")
+        .await
+        .expect("bucket");
+    let key = format!("restore.{}", stack.device);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(saved) = store.get(&key).await.expect("kv get") {
+            let saved: Value = serde_json::from_slice(&saved).expect("json");
+            if saved["vfos"] == json!([]) {
+                break;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "restore snapshot never caught up"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    drop(stack.sdrd.take());
+
+    // After a restart the user's empty set is respected: no new default VFO.
+    let (sdrd, port) = spawn_sdrd(&stack.nats_url, &stack.device, &stack.tone);
+    stack.sdrd = Some(sdrd);
+    wait_ready(port, "restarted sdrd").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(stack.state().await["vfos"], json!([]));
 }

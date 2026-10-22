@@ -336,9 +336,14 @@ async fn vfo_audio_flows_through_real_nats_and_follows_retunes() {
     let _daemon = start_daemon(&url, &device_id, &path).await;
     let ctl = |cmd: &str| format!("sh.v1.dev.{device_id}.ctl.{cmd}");
 
-    // No VFO, no audio; the state document lists none.
+    // A fresh daemon starts with one VFO at the centre; delete it: no VFO, no audio.
     let reply = request_json(&client, ctl("state"), "").await;
-    assert_eq!(reply["state"]["vfos"], serde_json::json!([]));
+    assert_eq!(reply["state"]["vfos"][0]["id"], 1, "{reply}");
+    assert_eq!(reply["state"]["vfos"][0]["freq_hz"], 433_920_000);
+    assert_eq!(reply["state"]["vfos"][0]["mode"], "nfm");
+    let reply = request_json(&client, ctl("vfo.delete"), r#"{"v":1,"id":1}"#).await;
+    assert_eq!(reply["state"]["vfos"], serde_json::json!([]), "{reply}");
+    drain_audio(&mut audio, Duration::from_millis(400)).await;
     assert!(
         recv_audio(&mut audio, 1, Duration::from_millis(500))
             .await
@@ -353,11 +358,11 @@ async fn vfo_audio_flows_through_real_nats_and_follows_retunes() {
     )
     .await;
     assert_eq!(reply["ok"], true, "{reply}");
-    assert_eq!(reply["vfo"]["id"], 1);
+    assert_eq!(reply["vfo"]["id"], 2);
     assert_eq!(reply["vfo"]["status"], "active");
     assert_eq!(reply["vfo"]["offset_hz"], 50_000.0);
     assert_eq!(reply["vfo"]["bandwidth_hz"], 12_500);
-    assert_eq!(reply["state"]["vfos"][0]["id"], 1);
+    assert_eq!(reply["state"]["vfos"][0]["id"], 2);
 
     let frames = recv_audio(&mut audio, 30, Duration::from_secs(10)).await;
     assert!(frames.len() >= 25, "got {} frames", frames.len());
@@ -374,7 +379,7 @@ async fn vfo_audio_flows_through_real_nats_and_follows_retunes() {
         .expect("clock")
         .as_nanos() as u64;
     for frame in &frames {
-        assert_eq!(frame.vfo_id, 1);
+        assert_eq!(frame.vfo_id, 2);
         assert_eq!(frame.sample_rate, 48_000);
         assert_eq!(frame.channels, 1);
         assert!(frame.capture_unix_ns <= now_ns);
@@ -401,7 +406,7 @@ async fn vfo_audio_flows_through_real_nats_and_follows_retunes() {
         ),
         ("vfo.create", "nope", "invalid"),
         ("vfo.update", r#"{"v":1,"id":99,"freq_hz":5}"#, "not_found"),
-        ("vfo.update", r#"{"v":1,"id":1}"#, "invalid"),
+        ("vfo.update", r#"{"v":1,"id":2}"#, "invalid"),
         ("vfo.delete", r#"{"v":1,"id":99}"#, "not_found"),
         ("vfo.bogus", "{}", "invalid"),
     ] {
@@ -417,7 +422,7 @@ async fn vfo_audio_flows_through_real_nats_and_follows_retunes() {
     let reply = request_json(
         &client,
         ctl("vfo.update"),
-        r#"{"v":1,"id":1,"squelch_dbfs":null,"bandwidth_hz":8000}"#,
+        r#"{"v":1,"id":2,"squelch_dbfs":null,"bandwidth_hz":8000}"#,
     )
     .await;
     assert_eq!(reply["ok"], true, "{reply}");
@@ -442,7 +447,7 @@ async fn vfo_audio_flows_through_real_nats_and_follows_retunes() {
     assert!(resumed.len() >= 10, "audio did not resume");
 
     // Limit of eight VFOs.
-    for n in 2..=8 {
+    for n in 3..=9 {
         let reply = request_json(
             &client,
             ctl("vfo.create"),
@@ -461,7 +466,7 @@ async fn vfo_audio_flows_through_real_nats_and_follows_retunes() {
         (reply["ok"].clone(), reply["code"].clone()),
         (false.into(), "unsupported".into())
     );
-    for n in 2..=8 {
+    for n in 3..=9 {
         let reply = request_json(
             &client,
             ctl("vfo.delete"),
@@ -472,7 +477,7 @@ async fn vfo_audio_flows_through_real_nats_and_follows_retunes() {
     }
 
     // Delete the last VFO: audio ends and the state is empty again.
-    let reply = request_json(&client, ctl("vfo.delete"), r#"{"v":1,"id":1}"#).await;
+    let reply = request_json(&client, ctl("vfo.delete"), r#"{"v":1,"id":2}"#).await;
     assert_eq!(reply["ok"], true, "{reply}");
     assert_eq!(reply["state"]["vfos"], serde_json::json!([]));
     drain_audio(&mut audio, Duration::from_millis(400)).await;
