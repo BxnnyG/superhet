@@ -9,12 +9,13 @@ mod origin;
 mod profiles;
 mod state_ws;
 mod view;
+mod web;
 mod ws;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::{Router, extract::State, http::StatusCode, routing::get};
+use axum::{Router, extract::State, http::StatusCode, middleware, routing::get};
 use tracing_subscriber::EnvFilter;
 
 /// Default listen address; override with `SUPERHET_LISTEN`.
@@ -27,9 +28,11 @@ struct Deps {
     nats: Option<async_nats::Client>,
 }
 
-/// Everything except the health probes and `/api/v1/auth/*` requires a valid session; routes
-/// added to `protected` are covered automatically.
+/// Everything below `/api/v1` except `/api/v1/auth/*` requires a valid session (and so do
+/// unknown API paths); routes added to `protected` are covered automatically. The health probes
+/// and the static web UI (all other GET/HEAD paths) are public.
 fn app(
+    web: web::Web,
     deps: Deps,
     auth: auth::AuthState,
     ws: ws::WsState,
@@ -53,6 +56,7 @@ fn app(
         .with_state(deps)
         .merge(auth::router(auth.clone()))
         .merge(auth::protect(protected, auth))
+        .layer(middleware::from_fn_with_state(web, web::layer))
 }
 
 async fn healthz() -> &'static str {
@@ -114,7 +118,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = listen.parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "superhet-api listening");
-    let app = app(Deps { db, nats }, auth, ws, audio, devices);
+    let web = web::Web::from_env();
+    let app = app(web, Deps { db, nats }, auth, ws, audio, devices);
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
@@ -137,6 +142,7 @@ mod tests {
     use super::*;
     use axum::{body::Body, http::Request};
     use http_body_util::BodyExt;
+    use std::path::Path;
     use tower::ServiceExt;
 
     async fn get_path(path: &str) -> (StatusCode, Vec<u8>) {
@@ -155,15 +161,22 @@ mod tests {
             auth::AuthConfig::default(),
         )
         .expect("auth state");
-        let response = app(Deps::default(), auth, ws, audio, devices)
-            .oneshot(
-                Request::builder()
-                    .uri(path)
-                    .body(Body::empty())
-                    .expect("valid request"),
-            )
-            .await
-            .expect("infallible");
+        let response = app(
+            web::Web::new(Path::new("/nonexistent")),
+            Deps::default(),
+            auth,
+            ws,
+            audio,
+            devices,
+        )
+        .oneshot(
+            Request::builder()
+                .uri(path)
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("infallible");
         let status = response.status();
         let body = response
             .into_body()
@@ -198,11 +211,19 @@ mod tests {
             "/api/v1/profiles",
             "/api/v1/devices/rtl0/lock",
             "/api/v1/does/not/exist",
-            "/",
         ] {
             let (status, body) = get_path(path).await;
             assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
             assert_eq!(&body[..], br#"{"error":"unauthenticated"}"#, "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_web_dir_answers_a_plain_404_hint_for_ui_paths() {
+        for path in ["/", "/some/route"] {
+            let (status, body) = get_path(path).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+            assert!(String::from_utf8_lossy(&body).contains("SUPERHET_WEB_DIR"));
         }
     }
 

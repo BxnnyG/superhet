@@ -4,8 +4,11 @@ Local admin authentication, see ADR-0008 for the design. All bodies are JSON
 (`Content-Type: application/json`, at most 8 KiB); all responses carry `Cache-Control: no-store`.
 Errors are `{"error": "<code>"}`, optionally with `"message"` (human readable).
 
-Public routes: `/healthz`, `/readyz` and `/api/v1/auth/*`. **Every other route**, including unknown
-paths and WebSocket upgrades, answers `401 {"error":"unauthenticated"}` without a valid session
+Public routes: `/healthz`, `/readyz`, `/api/v1/auth/*` and the static web UI (every other `GET`/`HEAD`
+path outside `/api`, served from `SUPERHET_WEB_DIR`, default `/usr/share/superhet/web`; unknown
+paths get `index.html` for client-side routing, missing `/assets/*` and `*.ext` files a plain 404;
+without an `index.html` there it is a plain-text 404 hint and a one-time startup warning). **Every
+other route**, including unknown `/api/*` paths and WebSocket upgrades, answers `401 {"error":"unauthenticated"}` without a valid session
 cookie. WebSocket upgrades are refused with `401` before the upgrade.
 
 POST routes also run the `Origin` check (`403 {"error":"forbidden"}`, see `SUPERHET_ALLOWED_ORIGINS`)
