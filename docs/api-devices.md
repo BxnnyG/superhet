@@ -88,6 +88,10 @@ fields and limits: section "VFOs" below. Bodies are at most 4 KiB, `Content-Type
   bias tee (each on its own; what the device refuses is skipped with a warning), the VFOs with
   their ids and the user lock. If the bus is not usable within 30 s the daemon starts with the
   device's own settings and leaves the snapshot alone until the next start.
+- Default VFO: when no snapshot is applied at start (first run, a snapshot of another device or
+  driver, or an unusable bus) the daemon creates one VFO (id 1) at the centre frequency, WFM if
+  the centre is within 87.5-108 MHz, NFM otherwise. An applied snapshot is never topped up: if the
+  user deleted every VFO, the set stays empty across restarts.
 
 ## State object
 

@@ -68,7 +68,15 @@ pub async fn start(
 
     let (state_tx, state_rx) = watch::channel(None);
     let controller = Arc::new(Controller::new(device, control, vfos, state_tx));
-    let persist = restore_saved_state(&client, &controller, &restore_key).await;
+    let restored = restore_saved_state(&client, &controller, &restore_key).await;
+    let persist = restored.persist;
+    if !restored.applied {
+        // First start (or nothing usable saved): offer one VFO to listen with.
+        let seeding = Arc::clone(&controller);
+        if let Err(e) = tokio::task::spawn_blocking(move || seeding.seed_default_vfo()).await {
+            tracing::error!(error = %e, "default vfo creation panicked");
+        }
+    }
     controller.refresh();
 
     let mut subscription = client.subscribe(ctl_subject).await?;
@@ -124,13 +132,21 @@ impl Service {
     }
 }
 
-/// Read the restore snapshot and apply it. Returns whether the outcome is known (found,
-/// incompatible or nothing saved), i.e. whether it is safe to start overwriting the snapshot.
+/// Outcome of reading the restore snapshot.
+struct Restored {
+    /// The outcome is known (found, incompatible or nothing saved), i.e. it is safe to start
+    /// overwriting the snapshot.
+    persist: bool,
+    /// A snapshot was applied; its VFO set (even an empty one) is the user's.
+    applied: bool,
+}
+
+/// Read the restore snapshot and apply it.
 async fn restore_saved_state(
     client: &Client,
     controller: &Arc<Controller>,
     restore_key: &str,
-) -> bool {
+) -> Restored {
     let deadline = tokio::time::Instant::now() + RESTORE_WAIT;
     let saved = loop {
         if client.connection_state() == Connection::Connected {
@@ -150,13 +166,19 @@ async fn restore_saved_state(
                  (it will not be overwritten until the next start)",
                 RESTORE_WAIT.as_secs()
             );
-            return false;
+            return Restored {
+                persist: false,
+                applied: false,
+            };
         }
         tokio::time::sleep(RESTORE_RETRY).await;
     };
     let Some(saved) = saved else {
         tracing::info!("no saved state to restore");
-        return true;
+        return Restored {
+            persist: true,
+            applied: false,
+        };
     };
     let controller = Arc::clone(controller);
     let outcome = tokio::task::spawn_blocking(move || {
@@ -165,12 +187,21 @@ async fn restore_saved_state(
         controller.restore(&doc)
     })
     .await;
-    match outcome {
-        Ok(Ok(())) => {}
-        Ok(Err(reason)) => tracing::warn!(%reason, "saved state not restored"),
-        Err(e) => tracing::error!(error = %e, "state restore panicked"),
+    let applied = match outcome {
+        Ok(Ok(())) => true,
+        Ok(Err(reason)) => {
+            tracing::warn!(%reason, "saved state not restored");
+            false
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "state restore panicked");
+            false
+        }
+    };
+    Restored {
+        persist: true,
+        applied,
     }
-    true
 }
 
 async fn respond(client: &Client, message: &Message, payload: Vec<u8>) {
