@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { AudioControls } from "../audio/AudioControls";
 import { DisplayControls } from "../spectrum/DisplayControls";
 import { TuningControls } from "../spectrum/TuningControls";
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export function Sidebar({ r, open, onClose }: Props) {
+  const [profilesOpen, setProfilesOpen] = useState(true);
   return (
     <>
       <div
@@ -44,13 +46,15 @@ export function Sidebar({ r, open, onClose }: Props) {
         <Section title="Source">
           <TuningControls tuning={r.tuningSnap} onTune={(patch) => r.tuning.request(patch)} />
         </Section>
-        <Section title="Profiles">
+        <Section title="Profiles" onOpenChange={setProfilesOpen}>
           <ProfilesPanel
             api={r.profileApi}
             device={r.device}
             doc={r.currentDoc}
             onState={r.applyDoc}
             onUnlock={r.unlock}
+            connected={r.feed.status === "connected"}
+            refreshSignal={`${open}:${profilesOpen}`}
           />
         </Section>
         <Section title="Radio">

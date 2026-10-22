@@ -31,6 +31,10 @@ interface Props {
   onState: (doc: StateDoc) => void;
   /** Drop the user lock (used by "Unlock and load"); resolves true on success. */
   onUnlock: () => Promise<boolean>;
+  /** The state feed is up; each (re)connect re-reads the list. */
+  connected?: boolean;
+  /** Changes whenever the panel becomes visible (section or drawer opened): re-reads the list. */
+  refreshSignal?: unknown;
   notify?: (toast: ToastInput) => void;
 }
 
@@ -50,7 +54,16 @@ function errorText(e: unknown): string {
 const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /** Profiles section: list, load, save current, rename, delete. */
-export function ProfilesPanel({ api, device, doc, onState, onUnlock, notify }: Props) {
+export function ProfilesPanel({
+  api,
+  device,
+  doc,
+  onState,
+  onUnlock,
+  connected,
+  refreshSignal,
+  notify,
+}: Props) {
   const push = notify ?? ((t: ToastInput) => void toasts.push(t));
   const [profiles, setProfiles] = useState<Profile[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -64,35 +77,46 @@ export function ProfilesPanel({ api, device, doc, onState, onUnlock, notify }: P
     };
   }, []);
 
+  // Only the newest read may update the list, so a slow older answer cannot undo a newer one.
+  const readSeq = useRef(0);
   const refresh = useCallback(async (): Promise<Profile[] | null> => {
+    const seq = ++readSeq.current;
     try {
       const list = await api.list();
-      if (!alive.current) return null;
+      if (!alive.current || seq !== readSeq.current) return null;
       setProfiles(list);
       setLoadError(null);
       return list;
     } catch (e) {
-      if (alive.current) setLoadError(errorText(e));
+      if (alive.current && seq === readSeq.current) setLoadError(errorText(e));
       return null;
     }
   }, [api]);
 
+  // Profiles can change elsewhere (another tab, the API): re-read on mount, when the panel is
+  // shown, after the state feed (re)connects and when the window regains focus.
+  const reload = useRef(refresh);
   useEffect(() => {
-    let cancelled = false;
-    api
-      .list()
-      .then((list) => {
-        if (cancelled) return;
-        setProfiles(list);
-        setLoadError(null);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setLoadError(errorText(e));
-      });
-    return () => {
-      cancelled = true;
+    reload.current = refresh;
+  }, [refresh]);
+  useEffect(() => {
+    void reload.current();
+  }, [api, refreshSignal]);
+  useEffect(() => {
+    if (connected) void reload.current();
+  }, [connected]);
+  useEffect(() => {
+    const onFocus = () => void reload.current();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void reload.current();
     };
-  }, [api]);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
 
   const locks = doc?.device.locks ?? [];
 
