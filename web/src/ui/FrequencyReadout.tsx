@@ -32,6 +32,8 @@ interface Props {
   locked?: boolean;
   /** Why it is locked; shown as tooltip of the readout. */
   lockedReason?: string;
+  /** `lg` is the primary readout; `sm` a compact secondary one. */
+  size?: "sm" | "lg";
 }
 
 const DEFAULT_FOCUS = 6;
@@ -50,6 +52,7 @@ export function FrequencyReadout({
   className,
   locked = false,
   lockedReason,
+  size = "lg",
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [focusIdx, setFocusIdx] = useState(DEFAULT_FOCUS);
@@ -191,7 +194,8 @@ export function FrequencyReadout({
             }
           }}
           className={cn(
-            "h-10 w-48 rounded-md border bg-surface-1 px-2 text-right font-mono text-2xl text-fg num",
+            "rounded-md border bg-surface-1 px-2 text-right font-mono text-fg num",
+            size === "sm" ? "h-8 w-36 text-base" : "h-10 w-48 text-2xl",
             "outline-none focus:ring-2 focus:ring-accent/30",
             invalid ? "border-danger" : "border-accent",
           )}
@@ -212,7 +216,10 @@ export function FrequencyReadout({
         aria-label={label}
         title={locked ? lockedReason : undefined}
         onDoubleClick={startEdit}
-        className="flex items-baseline font-mono text-2xl leading-none font-medium text-fg num select-none shell:text-3xl"
+        className={cn(
+          "flex items-baseline font-mono leading-none font-medium text-fg num select-none",
+          size === "sm" ? "text-base" : "text-2xl shell:text-3xl",
+        )}
       >
         {digits.map((d, i) => (
           <span key={i} className="flex items-baseline">

@@ -38,10 +38,12 @@ dark values again under `prefers-color-scheme: dark` unless `data-theme="light"`
 ## Layout
 
 1. Top bar: wordmark, connection pill with device id/tuner/rate, the digit-tunable frequency
-   readout of the device centre (read-only while the tuning lock is held), the padlock (tuning lock,
-   with a "Locked by ..." badge), audio on/off, settings menu (theme).
+   readout of the **active VFO** (nudge arrows, tuning step select, paused badge), next to it a compact
+   "Centre" readout of the device centre (read-only while the tuning lock is held) with the padlock
+   (tuning lock, with a "Locked by ..." badge); settings menu (theme). With no VFO the big readout
+   tunes the centre and carries a "Centre" badge (the secondary readout is hidden then).
 2. Sidebar (320 px, collapsible sections, all open by default): Source, Profiles, VFOs (compact list
-   with select/delete and the paused hint), Display, Audio device. Below 900 px a slide-over drawer
+   with select, listen toggle, delete and the paused hint), Display, Audio device. Below 900 px a slide-over drawer
    opened from the menu button (Esc or backdrop closes it).
 3. Main: a column of the spectrum card and the receiver dock (see "Receiver dock"). The spectrum card
    holds spectrum above waterfall filling the remaining height, draggable splitter (keyboard:
@@ -117,21 +119,31 @@ parsing. Pure arithmetic is in `ui/digits.ts`.
 `vfo/ReceiverDock.tsx` sits under the spectrum card (`shrink-0`, the card takes the remaining height)
 and holds every operating control of the active VFO, so nothing needs a sidebar visit:
 
-- VFO chips (selected = accent, paused = dimmed with a pause icon) plus an add button.
-- Digit-tunable readout of the active VFO flanked by down/up nudge buttons, and the tuning step select.
+- VFO chips (selected = accent, paused = dimmed with a pause icon), each with a speaker toggle
+  (listen on/off), plus an add button. The frequency readout, nudges and step select live in the top
+  bar, not here.
 - Mode `SegmentedControl` (all modes; a change resets the bandwidth to the mode default) and bandwidth.
 - Squelch slider with the live channel-power tick and a compact signal meter (both update their DOM
-  outside React), volume, mute, audio on/off and delete of the active VFO.
+  outside React), an **Auto** button, volume, mute, audio on/off and delete of the active VFO.
+  Auto sets the squelch to the 20th percentile of the VFO's channel power over the last ~3 s plus
+  4 dB (clamped to the slider range; `vfo/model.autoSquelchDbfs`). It reads "auto" until the slider
+  moves; a second click clears the squelch. With too little data a toast says so.
 
 The active VFO is always defined: `useReceiver` selects the first VFO whenever VFOs exist and none is
-selected (there is no deselect). The readout in the top bar therefore only tunes the device centre.
-A plain click on the spectrum retunes the active VFO (SDR#-style; drag, or the top bar readout and
-the Source section, move the centre); with no VFO it tunes the centre. The tuning lock behaves as
-before: the centre is read-only, VFOs stay tunable and are paused outside the window.
+selected (there is no deselect). The big top bar readout therefore tunes the active VFO; the centre
+is tuned with the compact "Centre" readout or the Source section. A plain click on the spectrum
+retunes the active VFO (SDR#-style); with no VFO it creates one at the click
+(`shell/spectrumTuning`, a view of the tuning controller handed to the spectrum). The tuning lock
+behaves as before: the centre is read-only, VFOs stay tunable and are paused outside the window.
+
+Listening is independent of the active VFO: several VFOs can play mixed. The audio socket subscribes
+to the listened VFOs plus the active one (so its meter and Auto squelch keep working), but only
+listened VFOs are decoded and played. New VFOs listen by default; the set of VFOs that do not is
+stored per device in `localStorage` (`superhet.listen.v1:<device>`) and pruned when a VFO is deleted.
 
 Layout uses a container query on the dock, not the viewport: the groups wrap inside two bands (VFO and
 tuning, then demodulator and audio). From 88 rem (about 1400 px) of dock width the bands sit side by
 side in one row; narrower, they stack in two rows; groups get a subtle vertical divider from 56 rem and
 simply wrap below that. On phones (below the 900 px shell breakpoint, where the sidebar becomes a
 drawer) the dock stays visible, wraps further and scrolls vertically (max 45 % of the viewport)
-rather than the page scrolling horizontally. With no VFOs the dock shrinks to an "Add VFO" prompt.
+rather than the page scrolling horizontally. With no VFOs the dock shrinks to the hint "Click the spectrum or press + to add a VFO" and a + button.

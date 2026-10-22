@@ -52,7 +52,7 @@ export function App({ device = "dev0" }: Props) {
             <SpectrumView
               device={device}
               controller={r.levelController}
-              tuning={r.tuning}
+              tuning={r.spectrumTuning}
               vfoCtl={r.vfoCtl}
               step={r.step}
               createVfoAt={r.createVfoAt}
@@ -67,8 +67,6 @@ export function App({ device = "dev0" }: Props) {
             vfos={r.vfoSnap}
             audio={r.audio}
             audioSnap={r.audioSnap}
-            step={r.step}
-            onStep={r.setStep}
             locked={r.locks.length > 0}
             onCreate={() => r.createVfoAt(r.tuningSnap.display?.centerHz ?? null)}
             onSelect={(id) => r.vfoCtl.select(id)}

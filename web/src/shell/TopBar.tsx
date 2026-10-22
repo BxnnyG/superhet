@@ -56,16 +56,23 @@ export function TopBar({ r, theme, onTheme, drawerOpen, onMenu }: Props) {
       </div>
       <div className="order-last flex basis-full flex-wrap items-center justify-center gap-x-3 gap-y-1 shell:order-none shell:basis-auto shell:flex-1">
         <ReceiverFrequency
+          vfo={r.selected}
+          step={r.step}
+          onStep={r.setStep}
+          onVfo={(id, patch) => r.vfoCtl.update(id, patch)}
           centerHz={display?.centerHz ?? null}
           onCenter={(hz) => r.tuning.request({ centerHz: hz })}
           centerLockedReason={
             r.locks.length > 0 ? `${lockedBy(r.locks)}: tune the VFO instead, or unlock` : null
           }
-        />
-        <TuningLock
-          holders={r.locks}
-          disabled={!r.tuningSnap.state || r.tuningSnap.lockBusy}
-          onToggle={r.toggleLock}
+          locked={r.locks.length > 0}
+          lock={
+            <TuningLock
+              holders={r.locks}
+              disabled={!r.tuningSnap.state || r.tuningSnap.lockBusy}
+              onToggle={r.toggleLock}
+            />
+          }
         />
       </div>
       <div className="ml-auto flex items-center gap-2 shell:ml-0">

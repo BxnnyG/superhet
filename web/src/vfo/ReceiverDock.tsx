@@ -1,14 +1,11 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { AudioButton } from "../audio/AudioControls";
 import type { AudioController, AudioSnapshot } from "../audio/controller";
 import { formatFrequency } from "../spectrum/freq";
 import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
   Badge,
   Button,
   Chip,
-  FrequencyReadout,
   IconButton,
   PauseIcon,
   PlusIcon,
@@ -18,28 +15,26 @@ import {
   SpeakerIcon,
   SpeakerMutedIcon,
   TrashIcon,
+  toasts,
   cn,
 } from "../ui";
 import { VFO_MODES, type Vfo, type VfoMode, type VfoPatch } from "./api";
 import type { VfoSnapshot } from "./controller";
 import { LiveMarker } from "./LiveMarker";
 import {
+  AUTO_SQUELCH_WINDOW_MS,
   BANDWIDTH_PRESETS,
   MODE_LABEL,
   SQUELCH_MIN_DBFS,
   SQUELCH_OFF_POS,
-  STEPS_HZ,
   VFO_PAUSED_FREE_HINT,
   VFO_PAUSED_HINT,
+  autoSquelchDbfs,
   formatBandwidth,
   formatSquelch,
-  formatStep,
   sliderToSquelch,
-  snapFrequency,
   squelchToSlider,
-  stepFor,
   vfoColor,
-  type StepChoice,
 } from "./model";
 import { SMeter } from "./SMeter";
 
@@ -49,8 +44,6 @@ interface Props {
   vfos: VfoSnapshot;
   audio: AudioController;
   audioSnap: AudioSnapshot;
-  step: StepChoice;
-  onStep: (step: StepChoice) => void;
   /** Maximum number of VFOs per device (daemon limit). */
   maxVfos?: number;
   /** The tuning lock is held: a VFO outside the window stays paused instead of retuning. */
@@ -66,8 +59,6 @@ export function ReceiverDock({
   vfos,
   audio,
   audioSnap,
-  step,
-  onStep,
   maxVfos = 8,
   locked = false,
   onCreate,
@@ -86,13 +77,17 @@ export function ReceiverDock({
         className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface-1 p-3"
       >
         <p className="text-sm text-fg-muted">
-          {vfos.loaded
-            ? "No VFO yet. Add one to start listening, or Ctrl+click the spectrum."
-            : "Loading…"}
+          {vfos.loaded ? "Click the spectrum or press + to add a VFO" : "Loading…"}
         </p>
-        <Button variant="primary" icon={<PlusIcon />} disabled={!vfos.loaded} onClick={onCreate}>
-          Add VFO
-        </Button>
+        <IconButton
+          label="Add VFO"
+          tip="New VFO at the display centre"
+          variant="secondary"
+          disabled={!vfos.loaded}
+          onClick={onCreate}
+        >
+          <PlusIcon />
+        </IconButton>
       </section>
     );
   }
@@ -107,8 +102,13 @@ export function ReceiverDock({
           <Group label="VFO selection">
             <ul className="flex flex-wrap items-center gap-1.5">
               {vfos.vfos.map((v) => (
-                <li key={v.id}>
+                <li key={v.id} className="flex items-center gap-0.5">
                   <VfoChip vfo={v} selected={v.id === vfos.selectedId} onSelect={onSelect} />
+                  <ListenToggle
+                    id={v.id}
+                    listening={audioSnap.levels[v.id]?.listening ?? true}
+                    onListen={(id, on) => audio.setListening(id, on)}
+                  />
                 </li>
               ))}
             </ul>
@@ -124,7 +124,6 @@ export function ReceiverDock({
           </Group>
           {active && (
             <Group divider>
-              <Tuner vfo={active} step={step} onStep={onStep} onUpdate={onUpdate} />
               {active.status === "paused" && (
                 <Badge tone="warn" title={pausedHint}>
                   <PauseIcon size={10} />
@@ -148,17 +147,8 @@ export function ReceiverDock({
               <Bandwidth vfo={active} onUpdate={onUpdate} />
             </Group>
             <Group divider label="Squelch and signal" className="basis-full @lg:basis-auto">
-              <div className="flex w-full flex-col gap-1 @lg:w-44">
-                <Slider
-                  label="Squelch"
-                  min={SQUELCH_OFF_POS}
-                  max={0}
-                  value={squelchToSlider(active.squelchDbfs)}
-                  valueLabel={formatSquelch(active.squelchDbfs)}
-                  title={`off, ${SQUELCH_MIN_DBFS}..0 dBFS (channel power); the green tick is the live level`}
-                  onChange={(pos) => onUpdate(active.id, { squelchDbfs: sliderToSquelch(pos) })}
-                  overlay={<LiveMarker audio={audio} vfoId={active.id} />}
-                />
+              <div className="flex w-full flex-col gap-1 @lg:w-52">
+                <SquelchControl vfo={active} audio={audio} onUpdate={onUpdate} />
                 <SMeter audio={audio} vfoId={active.id} compact />
               </div>
             </Group>
@@ -260,48 +250,103 @@ function VfoChip({
   );
 }
 
-function Tuner({
+/** Speaker toggle of a VFO chip: whether the VFO is part of the audio mix. */
+function ListenToggle({
+  id,
+  listening,
+  onListen,
+}: {
+  id: number;
+  listening: boolean;
+  onListen: (id: number, on: boolean) => void;
+}) {
+  return (
+    <IconButton
+      label={`Listen to VFO ${id}`}
+      tip={
+        listening ? `Listening to VFO ${id}. Click to leave it out` : `Not listening to VFO ${id}`
+      }
+      size="sm"
+      pressed={listening}
+      onClick={() => onListen(id, !listening)}
+    >
+      {listening ? <SpeakerIcon size={14} /> : <SpeakerMutedIcon size={14} />}
+    </IconButton>
+  );
+}
+
+/**
+ * Squelch slider with an Auto button: Auto sets the threshold just above the noise floor seen in
+ * the last few seconds. It stays marked "auto" until the slider moves; clicking it again (or
+ * moving the slider to off) clears the squelch.
+ */
+function SquelchControl({
   vfo,
-  step,
-  onStep,
+  audio,
   onUpdate,
 }: {
   vfo: Vfo;
-  step: StepChoice;
-  onStep: (step: StepChoice) => void;
+  audio: AudioController;
   onUpdate: (id: number, patch: VfoPatch) => void;
 }) {
-  const stepHz = stepFor(step, vfo.mode);
-  const nudge = (dir: 1 | -1) =>
-    onUpdate(vfo.id, { freqHz: snapFrequency(vfo.freqHz + dir * stepHz, stepHz) });
+  // The value Auto applied per VFO; Auto is "on" while the VFO still has exactly that squelch.
+  const [applied, setApplied] = useState<Readonly<Record<number, number>>>({});
+  const auto = vfo.squelchDbfs !== null && applied[vfo.id] === vfo.squelchDbfs;
+  const forget = () =>
+    setApplied((a) =>
+      Object.fromEntries(Object.entries(a).filter(([id]) => Number(id) !== vfo.id)),
+    );
+  const onAuto = () => {
+    if (auto) {
+      forget();
+      onUpdate(vfo.id, { squelchDbfs: null });
+      return;
+    }
+    const value = autoSquelchDbfs(audio.getRecentLevels(vfo.id, AUTO_SQUELCH_WINDOW_MS));
+    if (value === null) {
+      toasts.push({
+        key: "auto-squelch",
+        tone: "info",
+        title: "Not enough signal data yet",
+        body: "Auto squelch needs a few seconds of channel level. Try again shortly.",
+      });
+      return;
+    }
+    setApplied((a) => ({ ...a, [vfo.id]: value }));
+    onUpdate(vfo.id, { squelchDbfs: value });
+  };
   return (
-    <>
-      <span className="flex shrink-0 items-center gap-1.5">
-        <IconButton label="Down one step" variant="secondary" onClick={() => nudge(-1)}>
-          <ArrowLeftIcon />
-        </IconButton>
-        <FrequencyReadout
-          key={vfo.id}
-          label="VFO frequency"
-          valueHz={vfo.freqHz}
-          onChange={(hz) => onUpdate(vfo.id, { freqHz: hz })}
-        />
-        <IconButton label="Up one step" variant="secondary" onClick={() => nudge(1)}>
-          <ArrowRightIcon />
-        </IconButton>
-      </span>
-      <Select
-        aria-label="Tuning step"
-        size="sm"
-        className="w-32"
-        value={String(step)}
-        onChange={(v) => onStep(v === "auto" ? "auto" : Number(v))}
-        options={[
-          { value: "auto", label: `Auto (${formatStep(stepFor("auto", vfo.mode))})` },
-          ...STEPS_HZ.map((s) => ({ value: String(s), label: formatStep(s) })),
-        ]}
+    <div className="flex items-end gap-2">
+      <Slider
+        className="min-w-0 flex-1"
+        label="Squelch"
+        min={SQUELCH_OFF_POS}
+        max={0}
+        value={squelchToSlider(vfo.squelchDbfs)}
+        valueLabel={
+          auto ? `auto ${formatSquelch(vfo.squelchDbfs)}` : formatSquelch(vfo.squelchDbfs)
+        }
+        title={`off, ${SQUELCH_MIN_DBFS}..0 dBFS (channel power); the green tick is the live level`}
+        onChange={(pos) => {
+          forget();
+          onUpdate(vfo.id, { squelchDbfs: sliderToSquelch(pos) });
+        }}
+        overlay={<LiveMarker audio={audio} vfoId={vfo.id} />}
       />
-    </>
+      <Button
+        size="sm"
+        variant={auto ? "primary" : "secondary"}
+        aria-pressed={auto}
+        title={
+          auto
+            ? "Auto squelch is on. Click to switch the squelch off"
+            : "Set the squelch just above the noise floor of the last few seconds"
+        }
+        onClick={onAuto}
+      >
+        Auto
+      </Button>
+    </div>
   );
 }
 

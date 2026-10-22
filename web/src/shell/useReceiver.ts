@@ -13,6 +13,7 @@ import { VfoController } from "../vfo/controller";
 import { defaultModeFor, snapFrequency, stepFor, type StepChoice } from "../vfo/model";
 import { SpectrumMetrics } from "./metrics";
 import { noticeLocked, noticeRetune } from "./notices";
+import { spectrumTuningView } from "./spectrumTuning";
 
 export interface SpectrumInfo {
   centerHz: number;
@@ -75,6 +76,13 @@ export function useReceiver(device: string) {
     [vfoCtl],
   );
 
+  // A plain click on the spectrum creates the first VFO instead of moving the device centre.
+  const spectrumTuning = useMemo(
+    // eslint-disable-next-line react-hooks/refs -- createVfoAt only reads its ref when called
+    () => spectrumTuningView(tuning, vfoCtl, createVfoAt),
+    [tuning, vfoCtl, createVfoAt],
+  );
+
   // The state socket feeds the tuning and VFO controllers; the initial REST reads they make at
   // start are the fallback if it is not up yet. The audio socket lives as long as the receiver.
   useEffect(() => {
@@ -90,11 +98,18 @@ export function useReceiver(device: string) {
     };
   }, [store, tuning, vfoCtl, audio]);
 
-  // Subscribe to the audio of every VFO (frames also drive the S-meter while audio is off).
+  // The audio controller subscribes to the listened VFOs plus the active one (its S-meter and
+  // squelch Auto need frames even when it is not in the mix). Wait for the first VFO list so
+  // saved listen settings are not pruned against an empty one.
   const vfoIds = vfoSnap.vfos.map((v) => v.id).join(",");
+  const vfosLoaded = vfoSnap.loaded;
   useEffect(() => {
+    if (!vfosLoaded) return;
     audio.setVfos(vfoIds === "" ? [] : vfoIds.split(",").map(Number));
-  }, [audio, vfoIds]);
+  }, [audio, vfoIds, vfosLoaded]);
+  useEffect(() => {
+    audio.setActive(vfoSnap.selectedId);
+  }, [audio, vfoSnap.selectedId]);
 
   // The dock always edits one VFO: keep the first selected whenever VFOs exist.
   const firstVfoId = vfoSnap.vfos[0]?.id ?? null;
@@ -136,6 +151,7 @@ export function useReceiver(device: string) {
     unlock,
     levelController,
     tuning,
+    spectrumTuning,
     tuningSnap,
     vfoCtl,
     vfoSnap,

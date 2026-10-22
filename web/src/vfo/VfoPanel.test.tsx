@@ -17,8 +17,8 @@ const vfo = (id: number, status: Vfo["status"]): Vfo => ({
 
 function renderPanel(vfos: Vfo[], locked: boolean, selectedId: number | null = null) {
   const snap: VfoSnapshot = { vfos, selectedId, busy: false, error: null, loaded: true };
-  const fns = { onCreate: vi.fn(), onSelect: vi.fn(), onRemove: vi.fn() };
-  render(<VfoPanel vfos={snap} locked={locked} {...fns} />);
+  const fns = { onCreate: vi.fn(), onSelect: vi.fn(), onRemove: vi.fn(), onListen: vi.fn() };
+  render(<VfoPanel vfos={snap} locked={locked} isListening={(id) => id !== 2} {...fns} />);
   return fns;
 }
 
@@ -55,4 +55,21 @@ it("selects and deletes from the compact list, with no editor in the sidebar", (
   fireEvent.click(screen.getByRole("button", { name: "Delete VFO 1" }));
   expect(fns.onRemove).toHaveBeenCalledWith(1);
   expect(screen.queryByRole("radiogroup", { name: "Mode" })).toBeNull();
+});
+
+it("toggles listening per VFO from the list", () => {
+  const fns = renderPanel([vfo(1, "active"), vfo(2, "active")], false, 1);
+  const on = screen.getByRole("button", { name: "Listen to VFO 1" });
+  const off = screen.getByRole("button", { name: "Listen to VFO 2" });
+  expect(on).toHaveAttribute("aria-pressed", "true");
+  expect(off).toHaveAttribute("aria-pressed", "false");
+  fireEvent.click(off);
+  expect(fns.onListen).toHaveBeenCalledWith(2, true);
+  fireEvent.click(on);
+  expect(fns.onListen).toHaveBeenCalledWith(1, false);
+});
+
+it("explains how to add the first VFO", () => {
+  renderPanel([], false);
+  expect(screen.getByText("Click the spectrum or press + to add a VFO")).toBeInTheDocument();
 });

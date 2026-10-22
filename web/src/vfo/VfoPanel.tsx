@@ -4,10 +4,11 @@ import {
   Button,
   EmptyState,
   IconButton,
-  Kbd,
   PauseIcon,
   PlusIcon,
   RowButton,
+  SpeakerIcon,
+  SpeakerMutedIcon,
   TrashIcon,
   cn,
 } from "../ui";
@@ -20,6 +21,9 @@ interface Props {
   maxVfos?: number;
   /** The tuning lock is held: a VFO outside the window stays paused instead of retuning. */
   locked?: boolean;
+  /** Whether a VFO is part of the audio mix. */
+  isListening: (id: number) => boolean;
+  onListen: (id: number, on: boolean) => void;
   onCreate: () => void;
   onSelect: (id: number) => void;
   onRemove: (id: number) => void;
@@ -30,6 +34,8 @@ export function VfoPanel({
   vfos,
   maxVfos = 8,
   locked = false,
+  isListening,
+  onListen,
   onCreate,
   onSelect,
   onRemove,
@@ -50,18 +56,13 @@ export function VfoPanel({
       </Button>
       {vfos.vfos.length === 0 ? (
         <EmptyState title="No VFOs yet">
-          {vfos.loaded ? (
-            <>
-              <Kbd>Ctrl</Kbd>+click the spectrum or press <Kbd>+ VFO</Kbd>.
-            </>
-          ) : (
-            "Loading…"
-          )}
+          {vfos.loaded ? "Click the spectrum or press + to add a VFO" : "Loading…"}
         </EmptyState>
       ) : (
         <ul className="flex flex-col gap-1" aria-label="VFO list">
           {vfos.vfos.map((v) => {
             const isSel = v.id === vfos.selectedId;
+            const listening = isListening(v.id);
             return (
               <li key={v.id} className="flex items-center gap-1">
                 <RowButton
@@ -86,6 +87,15 @@ export function VfoPanel({
                     </Badge>
                   )}
                 </RowButton>
+                <IconButton
+                  label={`Listen to VFO ${v.id}`}
+                  tip={listening ? "Listening. Click to leave this VFO out" : "Not listening"}
+                  size="sm"
+                  pressed={listening}
+                  onClick={() => onListen(v.id, !listening)}
+                >
+                  {listening ? <SpeakerIcon size={14} /> : <SpeakerMutedIcon size={14} />}
+                </IconButton>
                 <IconButton label={`Delete VFO ${v.id}`} size="sm" onClick={() => onRemove(v.id)}>
                   <TrashIcon size={14} />
                 </IconButton>

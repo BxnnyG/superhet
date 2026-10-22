@@ -58,6 +58,25 @@ export function sliderToSquelch(pos: number): number | null {
   return pos <= SQUELCH_OFF_POS ? null : Math.min(0, pos);
 }
 
+/** Window of channel-level history the squelch "Auto" looks at. */
+export const AUTO_SQUELCH_WINDOW_MS = 3000;
+/** Fewer samples than this are too little to judge the noise floor. */
+export const AUTO_SQUELCH_MIN_SAMPLES = 5;
+const AUTO_SQUELCH_PERCENTILE = 0.2;
+const AUTO_SQUELCH_MARGIN_DB = 4;
+
+/**
+ * Squelch threshold (dBFS) from recent channel powers: the 20th percentile approximates the
+ * noise floor even when a transmission was in the window; a 4 dB margin keeps noise below the
+ * threshold. Clamped to the slider range; null when there is too little data.
+ */
+export function autoSquelchDbfs(levels: readonly number[]): number | null {
+  const sorted = levels.filter(Number.isFinite).sort((a, b) => a - b);
+  if (sorted.length < AUTO_SQUELCH_MIN_SAMPLES) return null;
+  const floor = sorted[Math.floor((sorted.length - 1) * AUTO_SQUELCH_PERCENTILE)] ?? 0;
+  return Math.min(0, Math.max(SQUELCH_MIN_DBFS, Math.round(floor + AUTO_SQUELCH_MARGIN_DB)));
+}
+
 export function formatSquelch(dbfs: number | null): string {
   return dbfs === null ? "off" : `${Math.round(dbfs)} dBFS`;
 }
