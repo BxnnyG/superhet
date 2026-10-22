@@ -2,7 +2,7 @@
 # Build the ready-to-run compose bundle attached to GitHub Releases.
 # Usage: scripts/package-compose.sh <tag, e.g. v0.1.0> [output-dir, default: dist]
 # Produces in <out>: compose.yaml and install.sh (standalone release assets), superhet-<tag>-compose.tar.gz,
-# and a .sha256 next to each. The compose.yaml pulls ghcr.io/bxnnyg/superhet:<version> instead of building.
+# and a .sha256 next to each. The compose.yaml pulls ghcr.io/bxnnyg/superhet:${SUPERHET_TAG:-next|latest} instead of building.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -10,7 +10,14 @@ tag="${1:?usage: $0 <tag> [output-dir]}"
 out="${2:-dist}"
 [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "invalid tag: $tag" >&2; exit 1; }
 version="${tag#v}"
-image="${IMAGE:-ghcr.io/bxnnyg/superhet}:${version}"
+# Default moving image channel of this release: pre-releases follow `next` (newest release incl.
+# pre-releases), stable releases follow `latest`. Override per install with SUPERHET_TAG in .env.
+case "$version" in
+*-*) channel=next ;;
+*) channel=latest ;;
+esac
+image="${IMAGE:-ghcr.io/bxnnyg/superhet}"
+image_ref="${image}:\${SUPERHET_TAG:-${channel}}"
 name="superhet-${tag}-compose"
 
 stage="$(mktemp -d)"
@@ -39,13 +46,13 @@ standalone="$root/compose.yaml"
             print "        target: /etc/nats/nats.conf"
         }
     ' compose.yaml |
-        sed -e "s|\${SUPERHET_IMAGE:-superhet:dev}|\${SUPERHET_IMAGE:-${image}}|" \
+        sed -e "s|\${SUPERHET_IMAGE:-superhet:dev}|\${SUPERHET_IMAGE:-${image_ref}}|" \
             -e 's|run scripts/gen-secrets.sh|missing in .env (re-run install.sh)|'
     printf '\nconfigs:\n  nats-conf:\n    content: |\n'
     sed -e 's/\$/$$/g' -e 's/^\(.\)/      \1/' deploy/nats/nats.conf
 } >"$standalone"
 if grep -q -e 'build:' -e 'superhet:dev' -e 'gen-secrets' -e './deploy/' "$standalone" ||
-    ! grep -qF "$image" "$standalone" || ! grep -q 'source: nats-conf' "$standalone"; then
+    ! grep -qF "$image_ref" "$standalone" || ! grep -q 'source: nats-conf' "$standalone"; then
     echo "compose.yaml transformation failed (did compose.yaml change shape?)" >&2
     exit 1
 fi
@@ -60,7 +67,7 @@ install -m 0755 scripts/gen-secrets.sh "$root/scripts/gen-secrets.sh"
 cp .env.example "$root/.env.example"
 cp docs/setup-host.md "$root/docs/setup-host.md"
 cp LICENSE NOTICE "$root/"
-sed -e "s|@TAG@|${tag}|g" -e "s|@IMAGE@|${image}|g" deploy/bundle/INSTALL.md >"$root/INSTALL.md"
+sed -e "s|@TAG@|${tag}|g" -e "s|@IMAGE@|${image}|g" -e "s|@CHANNEL@|${channel}|g" deploy/bundle/INSTALL.md >"$root/INSTALL.md"
 
 mkdir -p "$out"
 archive="$out/$name.tar.gz"

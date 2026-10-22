@@ -1,7 +1,8 @@
 name: Release
 
 # main  -> ghcr.io/bxnnyg/superhet:edge and :sha-<short>
-# vX.Y.Z[-pre] tag -> :X.Y.Z, :X.Y, :latest (stable only) plus a GitHub Release.
+# vX.Y.Z[-pre] tag -> :X.Y.Z[-pre] and the moving :next (newest release incl. pre-releases);
+#   stable tags also :X.Y and :latest (pre-releases never move those); plus a GitHub Release.
 # Not gated on CI by design: tag only commits that are green on main (see docs/releasing.md).
 
 on:
@@ -58,6 +59,7 @@ jobs:
             type=edge,branch=main
             type=sha,format=short
             type=semver,pattern={{version}}
+            type=raw,value=next,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}
           labels: |
             org.opencontainers.image.title=Superhet
@@ -111,5 +113,5 @@ jobs:
           fi
           flags=(--generate-notes --verify-tag)
           case "$TAG" in *-*) flags+=(--prerelease) ;; esac
-          notes="Container image: \`${IMAGE}:${TAG#v}\` (digest \`${DIGEST}\`)"$'\n\n'"Install: \`curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/install.sh | sh\` (or download \`compose.yaml\`, see the README)."
+          notes="Container image: \`${IMAGE}:${TAG#v}\` (digest \`${DIGEST}\`)"$'\n\n'"Install: \`curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/install.sh | sh\` (or download \`compose.yaml\`, see the README). Update an existing install: \`docker compose pull && docker compose up -d\`."
           gh release create "$TAG" --title "$TAG" --notes "$notes" "${flags[@]}" "${assets[@]}"

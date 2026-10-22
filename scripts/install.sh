@@ -2,12 +2,20 @@
 # Superhet installer (POSIX sh). Creates ./superhet (or $SUPERHET_DIR) with compose.yaml and .env,
 # then pulls and starts the stack. Never overwrites an existing .env, never deletes volumes.
 #
-#   curl -fsSL https://github.com/BxnnyG/superhet/releases/download/@TAG@/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/BxnnyG/superhet/main/scripts/install.sh | sh
 #   ... | sh -s -- --no-start        # only prepare the directory, do not start
 #
-# Environment: SUPERHET_VERSION (tag, default @TAG@), SUPERHET_DIR (default ./superhet),
-# SUPERHET_PORT (written to .env), SUPERHET_KEEP_VOLUMES=1 (do not stop on leftover volumes),
-# SUPERHET_BASE_URL (download location, default: the GitHub release of that tag).
+# The raw URL always works: it fetches compose.yaml from the newest GitHub release (pre-releases
+# included). The copy attached to a release has that release baked in instead (@TAG@ = the tag).
+# The stack follows a moving image channel (SUPERHET_TAG in .env): next (newest release incl.
+# pre-releases), latest (newest stable), edge (main), or a fixed version. Update afterwards with
+# `docker compose pull && docker compose up -d`.
+#
+# Environment: SUPERHET_VERSION (release tag to fetch compose.yaml from; default: baked-in tag or
+# the newest release), SUPERHET_TAG (channel/version written to .env; default: next for
+# pre-releases, latest for stable), SUPERHET_DIR (default ./superhet), SUPERHET_PORT (written to
+# .env), SUPERHET_KEEP_VOLUMES=1 (do not stop on leftover volumes), SUPERHET_BASE_URL (download
+# location, default: the GitHub release of that tag).
 set -eu
 
 default_version='@TAG@'
@@ -18,7 +26,7 @@ for arg in "$@"; do
     case "$arg" in
     --no-start) start=0 ;;
     -h | --help)
-        sed -n '2,10p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//' || true
+        sed -n '2,17p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//' || true
         exit 0
         ;;
     *)
@@ -35,12 +43,38 @@ die() {
     exit 1
 }
 
+fetch_stdout() { # fetch_stdout URL
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$1"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -O - "$1"
+    else
+        die "neither curl nor wget found"
+    fi
+}
+
 version="${SUPERHET_VERSION:-$default_version}"
 case "$version" in
-*@* | '') die "no release version known; set SUPERHET_VERSION, e.g. SUPERHET_VERSION=v0.1.0-alpha.2" ;;
+*@* | '')
+    # Raw script from the repository: resolve the newest release (pre-releases included).
+    if [ -n "${SUPERHET_BASE_URL:-}" ]; then
+        die "SUPERHET_BASE_URL needs SUPERHET_VERSION too, e.g. SUPERHET_VERSION=v0.1.0-alpha.3"
+    fi
+    version="$(fetch_stdout "https://api.github.com/repos/BxnnyG/superhet/releases?per_page=1" 2>/dev/null |
+        sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1 || true)"
+    [ -n "$version" ] || die "could not determine the newest release (GitHub API unreachable or rate-limited?); set SUPERHET_VERSION, e.g. SUPERHET_VERSION=v0.1.0-alpha.3"
+    ;;
+esac
+case "$version" in
 v*) ;;
 *) version="v$version" ;;
 esac
+# Image channel written to .env: pre-release -> next (moves with every release), stable -> latest.
+case "$version" in
+*-*) channel=next ;;
+*) channel=latest ;;
+esac
+channel="${SUPERHET_TAG:-$channel}"
 base_url="${SUPERHET_BASE_URL:-$repo_url/releases/download/$version}"
 dir="${SUPERHET_DIR:-superhet}"
 project="${COMPOSE_PROJECT_NAME:-superhet}"
@@ -128,7 +162,7 @@ mkdir -p "$dir"
 cd "$dir"
 dir_abs="$(pwd)"
 
-say "Superhet $version -> $dir_abs"
+say "Superhet $version (image channel: $channel) -> $dir_abs"
 tmp="$(mktemp "compose.yaml.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
 fetch "$base_url/compose.yaml" "$tmp" || die "could not download $base_url/compose.yaml (wrong version or no network?)"
@@ -144,6 +178,9 @@ trap - EXIT
 if [ -e .env ]; then
     say ".env exists, keeping it untouched"
     grep -q '^SUPERHET_USB_GID=' .env || say "note: .env has no SUPERHET_USB_GID; detected $usb_gid ($usb_note)"
+    if ! grep -q -e '^SUPERHET_TAG=' -e '^SUPERHET_IMAGE=' .env; then
+        say "note: .env has no SUPERHET_TAG, so compose.yaml uses its default channel ($channel). Add SUPERHET_TAG=next|latest|edge|<version> to choose."
+    fi
 else
     # A leftover database volume was initialised with a password we no longer know: the api
     # would crash-loop with "password authentication failed" (28P01). Never delete it ourselves.
@@ -168,6 +205,12 @@ EOM
             echo "$var=$(rand)"
         done
         echo "SUPERHET_USB_GID=$usb_gid"
+        echo "# Image channel followed by 'docker compose pull && docker compose up -d':"
+        echo "#   next   newest release, pre-releases included (default while there is no stable release)"
+        echo "#   latest newest stable release"
+        echo "#   edge   development build of main"
+        echo "#   or a fixed version such as 0.1.0-alpha.3 to pin"
+        echo "SUPERHET_TAG=$channel"
         [ -z "${SUPERHET_PORT:-}" ] || echo "SUPERHET_PORT=$SUPERHET_PORT"
     } >.env
     say "created .env with random passwords"
