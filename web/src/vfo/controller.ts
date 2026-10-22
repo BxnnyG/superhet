@@ -1,8 +1,18 @@
 // VFO controller: keeps the device's VFO list, coalesces updates per VFO (latest value per
-// field wins), sends at most one request at a time and reconciles with the daemon's replies
-// and a slow poll. Plain TS; React subscribes via `subscribe`/`getSnapshot`.
+// field wins), sends at most one request at a time and reconciles with the daemon's replies.
+// The confirmed list is pushed in by the state store (`ingest`); one REST read at start is the
+// fallback if the socket is not up. Plain TS; React subscribes via `subscribe`/`getSnapshot`.
 
-import { createVfoApi, type Vfo, type VfoApi, type VfoCreate, type VfoPatch } from "./api";
+import type { DeviceState } from "../spectrum/api";
+import {
+  createVfoApi,
+  type Retune,
+  type Vfo,
+  type VfoApi,
+  type VfoCreate,
+  type VfoPatch,
+  type VfoReply,
+} from "./api";
 
 export interface VfoSnapshot {
   /** Confirmed VFOs with in-flight and pending changes applied. */
@@ -19,10 +29,11 @@ export interface VfoControllerOptions {
   device: string;
   api?: VfoApi;
   debounceMs?: number;
-  pollMs?: number;
-  /** Polls are skipped this long after a change (GET /vfos may lag the daemon). */
-  quietMs?: number;
   onCreated?: (vfo: Vfo) => void;
+  /** Free tuning outcome of a create/update that was not simply inside the window. */
+  onRetune?: (result: Exclude<Retune, "none">, vfo: Vfo) => void;
+  /** Device state carried by a create/update reply (the centre may have followed the VFO). */
+  onState?: (state: DeviceState) => void;
 }
 
 type Op = { kind: "create"; req: VfoCreate } | { kind: "delete"; id: number };
@@ -39,8 +50,6 @@ export function applyVfoPatch(vfo: Vfo, patch: VfoPatch): Vfo {
 export class VfoController {
   private readonly api: VfoApi;
   private readonly debounceMs: number;
-  private readonly pollMs: number;
-  private readonly quietMs: number;
   private confirmed: Vfo[] = [];
   private loaded = false;
   private selectedId: number | null = null;
@@ -52,10 +61,8 @@ export class VfoController {
   private sentDelete: number | null = null;
   private snapshot: VfoSnapshot;
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
-  private pollTimer: ReturnType<typeof setInterval> | undefined;
   private polling = false;
   private generation = 0;
-  private quietUntil = 0;
   private stopped = true;
   private abort: AbortController | null = null;
   private readonly listeners = new Set<() => void>();
@@ -63,8 +70,6 @@ export class VfoController {
   constructor(private readonly opts: VfoControllerOptions) {
     this.api = opts.api ?? createVfoApi();
     this.debounceMs = opts.debounceMs ?? 50;
-    this.pollMs = opts.pollMs ?? 2000;
-    this.quietMs = opts.quietMs ?? 1000;
     this.snapshot = this.build();
   }
 
@@ -79,14 +84,12 @@ export class VfoController {
     if (!this.stopped) return;
     this.stopped = false;
     void this.refresh();
-    this.pollTimer = setInterval(() => void this.refresh(), this.pollMs);
   }
 
   stop(): void {
     this.stopped = true;
     clearTimeout(this.debounceTimer);
     this.debounceTimer = undefined;
-    clearInterval(this.pollTimer);
     this.abort?.abort();
     this.abort = null;
   }
@@ -122,10 +125,17 @@ export class VfoController {
     this.schedule();
   }
 
-  /** Read the list unless a change is pending/in flight or one just completed. */
-  async refresh(force = false, keepError = false): Promise<void> {
+  /** Confirmed list pushed by the state store; ignored while a change is pending or in flight. */
+  ingest(vfos: Vfo[]): void {
+    if (this.isBusy()) return;
+    this.generation += 1;
+    this.setConfirmed(vfos);
+    this.publish();
+  }
+
+  /** Read the list unless a change is pending/in flight. */
+  async refresh(keepError = false): Promise<void> {
     if (this.stopped || this.polling || this.inFlight || this.isBusy()) return;
-    if (!force && Date.now() < this.quietUntil) return;
     this.polling = true;
     const generation = this.generation;
     const abort = new AbortController();
@@ -179,6 +189,7 @@ export class VfoController {
         this.setConfirmed(reply.vfos ?? [...this.confirmed, reply.vfo]);
         this.selectedId = reply.vfo.id;
         this.opts.onCreated?.(reply.vfo);
+        this.afterReply(reply);
       } else if (op?.kind === "delete") {
         await this.api.remove(this.opts.device, op.id);
         if (this.stopped) return;
@@ -189,6 +200,7 @@ export class VfoController {
         this.setConfirmed(
           reply.vfos ?? this.confirmed.map((v) => (v.id === reply.vfo.id ? reply.vfo : v)),
         );
+        this.afterReply(reply);
       }
     } catch (e) {
       if (this.stopped) return;
@@ -201,12 +213,16 @@ export class VfoController {
         this.inFlight = false;
         this.sent = null;
         this.sentDelete = null;
-        this.quietUntil = Date.now() + this.quietMs;
         this.publish();
-        if (failed) void this.refresh(true, true);
+        if (failed) void this.refresh(true);
         if (this.isBusy()) this.schedule();
       }
     }
+  }
+
+  private afterReply(reply: VfoReply): void {
+    if (reply.state) this.opts.onState?.(reply.state);
+    if (reply.retune !== "none") this.opts.onRetune?.(reply.retune, reply.vfo);
   }
 
   private setConfirmed(vfos: Vfo[]): void {

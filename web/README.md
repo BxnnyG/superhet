@@ -28,7 +28,7 @@ user back to login; the spectrum and audio sockets stop reconnecting until the n
 
 ## Layout and controls
 
-Top bar, collapsible sidebar (Source, Radio, Display, Audio), spectrum above waterfall, status bar
+Top bar, collapsible sidebar (Source, Profiles, Radio, Display, Audio), spectrum above waterfall, status bar
 (`docs/ui-design.md`). Below 900 px the sidebar is a slide-over drawer (menu button, Esc or backdrop
 closes it).
 
@@ -45,6 +45,24 @@ to the mode default. Volume and mute are client-side only. Source: centre freque
 accept units), sample rate, gain (auto or per step), PPM. Display: visible span with zoom
 out/in/full span, automatic levels, floor, ceiling. The theme (system, light, dark) is chosen in the
 settings menu and stored in the browser.
+
+## Live state, tuning lock and profiles
+
+Device and VFO state arrive over the state WebSocket (`/api/v1/ws/state`, `src/state/`,
+`docs/protocol-ws.md`): a full document first, then one per change, so changes made in another tab
+show up immediately. The socket reconnects with backoff and stops while logged out, like the
+spectrum and audio sockets. Nothing polls; the controllers make one REST read at start as fallback.
+
+The padlock next to the frequency readout takes or drops the user tuning lock
+(`docs/api-devices.md`). While any lock is held the centre readout, centre field and sample rate are
+read-only with the reason shown, and a refused change (client-side or `409 locked`) raises a toast
+naming the holders. VFOs stay editable: dragging one out of the usable window (85 % of the sample
+rate, outside shaded on the spectrum) makes the daemon retune; with the lock held the VFO is paused
+instead (badge in the list, dashed on the spectrum, toast).
+
+Profiles section: save the current receiver ("Save current as...", asks before overwriting a name),
+load (asks when the lock would block it, with "Unlock and load" for your own lock), rename, delete.
+Notices use the `Toaster` from `src/ui`.
 
 ## Audio
 

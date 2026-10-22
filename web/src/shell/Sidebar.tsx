@@ -1,6 +1,7 @@
 import { AudioControls } from "../audio/AudioControls";
 import { DisplayControls } from "../spectrum/DisplayControls";
 import { TuningControls } from "../spectrum/TuningControls";
+import { ProfilesPanel } from "../profiles/ProfilesPanel";
 import { VfoPanel } from "../vfo/VfoPanel";
 import { CloseIcon, IconButton, Section, cn } from "../ui";
 import type { Receiver } from "./useReceiver";
@@ -43,11 +44,21 @@ export function Sidebar({ r, open, onClose }: Props) {
         <Section title="Source">
           <TuningControls tuning={r.tuningSnap} onTune={(patch) => r.tuning.request(patch)} />
         </Section>
+        <Section title="Profiles">
+          <ProfilesPanel
+            api={r.profileApi}
+            device={r.device}
+            doc={r.currentDoc}
+            onState={r.applyDoc}
+            onUnlock={r.unlock}
+          />
+        </Section>
         <Section title="Radio">
           <VfoPanel
             vfos={r.vfoSnap}
             audio={r.audio}
             audioSnap={r.audioSnap}
+            locked={r.locks.length > 0}
             step={r.step}
             onStep={r.setStep}
             onCreate={() => r.createVfoAt(r.tuningSnap.display?.centerHz ?? null)}

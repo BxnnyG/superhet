@@ -163,3 +163,25 @@ export const AlertIcon = (p: IconProps) => (
     <path d="M12 3l10 18H2L12 3zM12 10v5M12 18v.01" />
   </Icon>
 );
+export const LockIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="5" y="11" width="14" height="10" rx="2" />
+    <path d="M8 11V8a4 4 0 018 0v3" />
+  </Icon>
+);
+export const UnlockIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="5" y="11" width="14" height="10" rx="2" />
+    <path d="M8 11V8a4 4 0 017.5-2" />
+  </Icon>
+);
+export const PauseIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 5v14M15 5v14" />
+  </Icon>
+);
+export const BookmarkIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M7 4h10a1 1 0 011 1v15l-6-4-6 4V5a1 1 0 011-1z" />
+  </Icon>
+);

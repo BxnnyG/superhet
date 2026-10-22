@@ -4,6 +4,7 @@ import { StatusBar } from "./shell/StatusBar";
 import { TopBar } from "./shell/TopBar";
 import { useReceiver } from "./shell/useReceiver";
 import { SpectrumView } from "./spectrum/SpectrumView";
+import { Toaster } from "./ui";
 import { useTheme } from "./ui/theme";
 
 interface Props {
@@ -64,6 +65,7 @@ export function App({ device = "dev0" }: Props) {
         </main>
       </div>
       <StatusBar audio={r.audio} metrics={r.metrics} />
+      <Toaster />
     </div>
   );
 }

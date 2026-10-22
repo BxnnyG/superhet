@@ -38,13 +38,15 @@ dark values again under `prefers-color-scheme: dark` unless `data-theme="light"`
 ## Layout
 
 1. Top bar: wordmark, connection pill with device id/tuner/rate, the digit-tunable frequency
-   readout (VFO if one is selected, else device centre; a badge names the target), volume of the
-   selected VFO, audio on/off, settings menu (theme).
-2. Sidebar (320 px, collapsible sections): Source, Radio, Display, Audio. Below 900 px a slide-over
+   readout (VFO if one is selected, else device centre; a badge names the target; read-only for the
+   centre while the tuning lock is held), the padlock (tuning lock, with a "Locked by ..." badge),
+   volume of the selected VFO, audio on/off, settings menu (theme).
+2. Sidebar (320 px, collapsible sections): Source, Profiles, Radio, Display, Audio. Below 900 px a slide-over
    drawer opened from the menu button (Esc or backdrop closes it).
 3. Main: spectrum above waterfall filling the remaining height, draggable splitter (keyboard:
    arrows, Home resets; stored in `localStorage`), VFO overlays with passband shading and label
-   chips, frequency axis.
+   chips (paused VFOs dashed, faded, "(paused)"), the parts of the span outside the usable window
+   (85 % of the sample rate) shaded with dashed edge lines, frequency axis.
 4. Status bar: buffer, drift, latency, underruns, dropped (audio samples replaced by silence),
    fps. The device-side `dropped_blocks` counter is not exposed to the browser yet.
 
@@ -60,7 +62,27 @@ value, optional parse/format, arrow stepping), Section (collapsible) and Panel, 
 marker, tick scale; can be driven imperatively), Field, EmptyState, Kbd, RowButton (selectable list
 row), FrequencyReadout (digit-tunable), TextField and PasswordField (label, hint, error; show/hide
 toggle), Alert (inline danger / warn / info message), Dialog (modal: portal, Esc and backdrop close,
-focus trap and restore), Logo (mark + wordmark), icons (inline SVG only), `theme.ts`.
+focus trap and restore), ConfirmDialog (Dialog with cancel/confirm; information-only without
+`onConfirm`), Toaster + `toasts` store (non-blocking notices: tones, replace-by-key, auto-dismiss,
+polite live region, danger as alert; usable from plain TS), Logo (mark + wordmark), icons (inline SVG only), `theme.ts`.
+
+## Tuning lock, free tuning, profiles
+
+- The state socket (`state/`, `docs/protocol-ws.md`) is the only source of confirmed device state
+  and VFOs; the controllers poll nothing (one REST read at start is the fallback). Control replies
+  that carry a state document (lock, VFO create/update, profile load) are applied at once.
+- Padlock (`shell/TuningLock`): pressed = user lock held. Locked: the centre readout, centre
+  field and sample rate are disabled with the reason ("Locked by you. Unlock to change ..."),
+  spectrum clicks and typed centre changes are refused client-side; a `409 locked` reply or a
+  refused change raises one toast naming the holders. VFOs stay editable.
+- Free tuning: a VFO moved outside the window makes the daemon retune (the view follows the new
+  centre). With the lock held the VFO is `paused` and a toast says "Tuning locked — VFO paused
+  outside the window"; a failed retune is a danger toast. Paused VFOs get a pause badge and hint in
+  the list and a dashed, faded marker on the spectrum.
+- Profiles (sidebar): list with name, centre, rate, VFO count and age; Load, Rename, Delete (with
+  confirmation), "Save current as..." (name dialog; a name clash asks before overwriting). Loading
+  a profile that would change centre or rate while locked opens a dialog with the reason and, if
+  only the user lock is held, "Unlock and load".
 
 ## Auth screens (`web/src/auth/`)
 

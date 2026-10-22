@@ -117,3 +117,6 @@ export function hitTestVfo(markers: readonly Marker[], hz: number, slopHz: numbe
   }
   return best;
 }
+
+/** Shown when a VFO sits outside the usable window while the tuning lock keeps the centre. */
+export const VFO_PAUSED_HINT = "Tuning locked — VFO paused outside the window";

@@ -7,6 +7,28 @@ export interface GainState {
   db: number | null;
 }
 
+/** One holder of the tuning lock (`docs/api-devices.md`, "Tuning lock"). */
+export interface LockHolder {
+  /** `user` today; recordings, decoders and claims add their own kinds. */
+  kind: string;
+  id: string;
+  sinceMs: number;
+}
+
+/** Usable window around the centre (85 % of the sample rate). */
+export interface FreqWindow {
+  startHz: number;
+  endHz: number;
+}
+
+/** Share of the sample rate that is usable (ARCHITECTURE 3). */
+export const USABLE_FRACTION = 0.85;
+
+export function usableWindow(centerHz: number, sampleRate: number): FreqWindow {
+  const half = (sampleRate * USABLE_FRACTION) / 2;
+  return { startHz: centerHz - half, endHz: centerHz + half };
+}
+
 export interface DeviceState {
   driver: string;
   tuner?: string;
@@ -18,6 +40,9 @@ export interface DeviceState {
   ppm: number;
   biasTee: boolean;
   tuningEpoch: number;
+  /** Lock holders; empty = tuning is free. */
+  locks: LockHolder[];
+  window: FreqWindow;
 }
 
 export interface TunePatch {
@@ -33,6 +58,8 @@ export class ApiError extends Error {
     message: string,
     readonly status?: number,
     readonly code?: string,
+    /** Lock holders of a `locked` (409) rejection. */
+    readonly holders?: LockHolder[],
   ) {
     super(message);
     this.name = "ApiError";
@@ -42,6 +69,9 @@ export class ApiError extends Error {
 export interface ApiClient {
   getState(device: string, signal?: AbortSignal): Promise<DeviceState>;
   tune(device: string, patch: TunePatch, signal?: AbortSignal): Promise<DeviceState>;
+  /** Take (`lock`) or drop (`unlock`) the user tuning lock; both are idempotent. */
+  lock(device: string): Promise<DeviceState>;
+  unlock(device: string): Promise<DeviceState>;
 }
 
 export type Rec = Record<string, unknown>;
@@ -60,6 +90,34 @@ function str(o: Rec, key: string): string {
   const v = o[key];
   if (typeof v !== "string") throw new ApiError(`invalid state: ${key}`);
   return v;
+}
+
+export function parseHolders(raw: unknown): LockHolder[] {
+  if (!Array.isArray(raw)) return [];
+  const out: LockHolder[] = [];
+  for (const h of raw) {
+    if (!isRec(h) || typeof h.kind !== "string") continue;
+    out.push({
+      kind: h.kind,
+      id: typeof h.id === "string" ? h.id : h.kind,
+      sinceMs: typeof h.since_ms === "number" ? h.since_ms : 0,
+    });
+  }
+  return out;
+}
+
+function parseWindow(raw: unknown, centerHz: number, sampleRate: number): FreqWindow {
+  if (
+    isRec(raw) &&
+    typeof raw.start_hz === "number" &&
+    typeof raw.end_hz === "number" &&
+    Number.isFinite(raw.start_hz) &&
+    Number.isFinite(raw.end_hz) &&
+    raw.end_hz > raw.start_hz
+  ) {
+    return { startHz: raw.start_hz, endHz: raw.end_hz };
+  }
+  return usableWindow(centerHz, sampleRate);
 }
 
 export function parseDeviceState(raw: unknown): DeviceState {
@@ -91,6 +149,8 @@ export function parseDeviceState(raw: unknown): DeviceState {
     ppm: typeof raw.ppm === "number" ? raw.ppm : 0,
     biasTee: raw.bias_tee === true,
     tuningEpoch: typeof raw.tuning_epoch === "number" ? raw.tuning_epoch : 0,
+    locks: parseHolders(raw.locks),
+    window: parseWindow(raw.window, num(raw, "center_hz"), sampleRate),
   };
   if (typeof raw.tuner === "string") state.tuner = raw.tuner;
   return state;
@@ -101,7 +161,12 @@ export function parseTuneReply(raw: unknown, status?: number): DeviceState {
   if (!isRec(raw)) throw new ApiError("invalid reply", status);
   if (raw.ok === false) {
     const msg = typeof raw.error === "string" ? raw.error : "tune rejected";
-    throw new ApiError(msg, status, typeof raw.code === "string" ? raw.code : undefined);
+    throw new ApiError(
+      msg,
+      status,
+      typeof raw.code === "string" ? raw.code : undefined,
+      parseHolders(raw.holders),
+    );
   }
   if (raw.ok !== true) throw new ApiError("invalid reply", status);
   return parseDeviceState(raw.state);
@@ -131,6 +196,7 @@ export function httpError(res: Response, body: unknown): ApiError {
       body.error,
       res.status,
       typeof body.code === "string" ? body.code : undefined,
+      parseHolders(body.holders),
     );
   }
   return new ApiError(`HTTP ${res.status}`, res.status);
@@ -139,32 +205,37 @@ export function httpError(res: Response, body: unknown): ApiError {
 export const deviceUrl = (device: string) => `/api/v1/devices/${encodeURIComponent(device)}`;
 
 export function createApiClient(fetchImpl: typeof fetch = apiFetch): ApiClient {
+  async function call(url: string, init?: RequestInit): Promise<{ res: Response; body: unknown }> {
+    let res: Response;
+    try {
+      res = await fetchImpl(url, init);
+    } catch (e) {
+      throw new ApiError(e instanceof Error ? e.message : "network error");
+    }
+    const body = await readJson(res);
+    if (!res.ok) throw httpError(res, body);
+    return { res, body };
+  }
   return {
     async getState(device, signal) {
-      let res: Response;
-      try {
-        res = await fetchImpl(`${deviceUrl(device)}/state`, { signal });
-      } catch (e) {
-        throw new ApiError(e instanceof Error ? e.message : "network error");
-      }
-      const body = await readJson(res);
-      if (!res.ok) throw httpError(res, body);
+      const { body } = await call(`${deviceUrl(device)}/state`, { signal });
       return parseDeviceState(body);
     },
     async tune(device, patch, signal) {
-      let res: Response;
-      try {
-        res = await fetchImpl(`${deviceUrl(device)}/tune`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(tuneBody(patch)),
-          signal,
-        });
-      } catch (e) {
-        throw new ApiError(e instanceof Error ? e.message : "network error");
-      }
-      const body = await readJson(res);
-      if (!res.ok) throw httpError(res, body);
+      const { res, body } = await call(`${deviceUrl(device)}/tune`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(tuneBody(patch)),
+        signal,
+      });
+      return parseTuneReply(body, res.status);
+    },
+    async lock(device) {
+      const { res, body } = await call(`${deviceUrl(device)}/lock`, { method: "POST" });
+      return parseTuneReply(body, res.status);
+    },
+    async unlock(device) {
+      const { res, body } = await call(`${deviceUrl(device)}/lock`, { method: "DELETE" });
       return parseTuneReply(body, res.status);
     },
   };

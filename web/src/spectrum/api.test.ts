@@ -119,3 +119,48 @@ describe("client", () => {
     ).rejects.toMatchObject({ message: "offline" });
   });
 });
+
+describe("lock support", () => {
+  it("parses locks and the usable window, with a fallback", () => {
+    const s = parseDeviceState({
+      ...rawState,
+      locks: [{ kind: "user", id: "user", since_ms: 9 }, { nope: 1 }],
+      window: { start_hz: 1, end_hz: 2 },
+    });
+    expect(s.locks).toEqual([{ kind: "user", id: "user", sinceMs: 9 }]);
+    expect(s.window).toEqual({ startHz: 1, endHz: 2 });
+    const d = parseDeviceState(rawState);
+    expect(d.locks).toEqual([]);
+    expect(d.window.endHz - d.window.startHz).toBeCloseTo(2_048_000 * 0.85);
+  });
+
+  it("carries the holders of a 409 locked reply", async () => {
+    const body = {
+      v: 1,
+      ok: false,
+      code: "locked",
+      error: "tuning is locked by: user",
+      holders: [{ kind: "user", id: "user", since_ms: 1 }],
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(response(body, 409));
+    const err = await createApiClient(fetchImpl)
+      .tune("dev0", { centerHz: 1 })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 409, code: "locked" });
+    expect(err.holders).toEqual([{ kind: "user", id: "user", sinceMs: 1 }]);
+  });
+
+  it("uses POST and DELETE on the lock route", async () => {
+    const reply = { v: 1, ok: true, state: { ...rawState, locks: [{ kind: "user", id: "user" }] } };
+    const fetchImpl = vi.fn().mockImplementation(async () => response(reply));
+    const api = createApiClient(fetchImpl);
+    const s = await api.lock("dev0");
+    await api.unlock("dev0");
+    expect(s.locks).toHaveLength(1);
+    expect(fetchImpl).toHaveBeenNthCalledWith(1, "/api/v1/devices/dev0/lock", { method: "POST" });
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, "/api/v1/devices/dev0/lock", {
+      method: "DELETE",
+    });
+  });
+});

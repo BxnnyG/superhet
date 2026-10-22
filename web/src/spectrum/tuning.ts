@@ -1,8 +1,17 @@
 // Tuning controller: coalesces tune requests (latest value per field wins, at most one request
-// in flight), keeps an optimistic display state and polls the device state while idle.
+// in flight) and keeps an optimistic display state. The confirmed state is pushed in by the state
+// store (`ingest`); one REST read at start is the fallback if the socket is not up. It also owns
+// the user tuning lock (take/drop) and refuses centre/rate changes while the lock is held.
 // Plain TS; React subscribes through `subscribe`/`getSnapshot` (useSyncExternalStore).
 
-import { createApiClient, type ApiClient, type DeviceState, type TunePatch } from "./api";
+import {
+  ApiError,
+  createApiClient,
+  type ApiClient,
+  type DeviceState,
+  type LockHolder,
+  type TunePatch,
+} from "./api";
 
 export interface TuningSnapshot {
   /** Last state confirmed by the device. */
@@ -11,6 +20,8 @@ export interface TuningSnapshot {
   display: DeviceState | null;
   /** A change is pending or in flight. */
   busy: boolean;
+  /** A lock/unlock request is in flight. */
+  lockBusy: boolean;
   error: string | null;
 }
 
@@ -18,7 +29,11 @@ export interface TuningOptions {
   device: string;
   api?: ApiClient;
   debounceMs?: number;
-  pollMs?: number;
+  /**
+   * A centre/rate change was refused because the tuning is locked (by the client-side guard or
+   * a 409). Without a handler the refusal is shown as the controller error.
+   */
+  onLocked?: (holders: LockHolder[], message: string) => void;
 }
 
 export function applyPatch(state: DeviceState, patch: TunePatch): DeviceState {
@@ -39,14 +54,19 @@ export function applyPatch(state: DeviceState, patch: TunePatch): DeviceState {
 export class TuningController {
   private readonly api: ApiClient;
   private readonly debounceMs: number;
-  private readonly pollMs: number;
-  private snapshot: TuningSnapshot = { state: null, display: null, busy: false, error: null };
+  private lockBusy = false;
+  private snapshot: TuningSnapshot = {
+    state: null,
+    display: null,
+    busy: false,
+    lockBusy: false,
+    error: null,
+  };
   private pending: TunePatch = {};
   private hasPending = false;
   private inFlight = false;
   private sent: TunePatch = {};
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
-  private pollTimer: ReturnType<typeof setInterval> | undefined;
   private polling = false;
   /** Bumped whenever a tune starts so older state reads are discarded. */
   private generation = 0;
@@ -57,7 +77,6 @@ export class TuningController {
   constructor(private readonly opts: TuningOptions) {
     this.api = opts.api ?? createApiClient();
     this.debounceMs = opts.debounceMs ?? 50;
-    this.pollMs = opts.pollMs ?? 5000;
   }
 
   readonly subscribe = (listener: () => void): (() => void) => {
@@ -71,25 +90,66 @@ export class TuningController {
     if (!this.stopped) return;
     this.stopped = false;
     void this.refresh();
-    this.pollTimer = setInterval(() => void this.refresh(), this.pollMs);
   }
 
   stop(): void {
     this.stopped = true;
     clearTimeout(this.debounceTimer);
     this.debounceTimer = undefined;
-    clearInterval(this.pollTimer);
     this.abort?.abort();
     this.abort = null;
   }
 
   /** Request a change; fields of earlier unsent requests are overwritten, others kept. */
   request(patch: TunePatch): void {
+    const held = this.snapshot.state?.locks ?? [];
+    if (held.length > 0) {
+      const cur = this.snapshot.state;
+      const centre = patch.centerHz !== undefined && patch.centerHz !== cur?.centerHz;
+      const rate = patch.sampleRate !== undefined && patch.sampleRate !== cur?.sampleRate;
+      if (centre || rate) {
+        const rest = { ...patch };
+        if (centre) delete rest.centerHz;
+        if (rate) delete rest.sampleRate;
+        this.rejectLocked(held, "tuning is locked");
+        if (Object.keys(rest).length === 0) return;
+        patch = rest;
+      }
+    }
     this.pending = { ...this.pending, ...patch };
     this.hasPending = true;
     this.publish({ error: null });
     if (!this.inFlight && this.debounceTimer === undefined) {
       this.debounceTimer = setTimeout(() => this.send(), this.debounceMs);
+    }
+  }
+
+  /** Confirmed state pushed by the state store; ignored while a change is pending or in flight. */
+  ingest(state: DeviceState): void {
+    if (this.inFlight || this.hasPending) return;
+    this.generation += 1;
+    this.confirm(state, true);
+  }
+
+  /** Take (`true`) or drop (`false`) the user tuning lock. */
+  async setLock(on: boolean): Promise<boolean> {
+    if (this.lockBusy) return false;
+    this.lockBusy = true;
+    this.publish({});
+    try {
+      const state = on
+        ? await this.api.lock(this.opts.device)
+        : await this.api.unlock(this.opts.device);
+      if (this.stopped) return false;
+      this.generation += 1;
+      this.lockBusy = false;
+      this.publish({ state, error: null });
+      return true;
+    } catch (e) {
+      if (this.stopped) return false;
+      this.lockBusy = false;
+      this.publish({ error: message(e) });
+      return false;
     }
   }
 
@@ -137,9 +197,19 @@ export class TuningController {
         // Drop unsent changes after an error; the display falls back to the device state.
         this.pending = {};
         this.hasPending = false;
-        this.publish({ error: message(e) });
+        if (e instanceof ApiError && e.code === "locked" && this.opts.onLocked) {
+          this.publish({});
+          this.rejectLocked(e.holders ?? [], e.message);
+        } else {
+          this.publish({ error: message(e) });
+        }
         void this.refresh(true);
       });
+  }
+
+  private rejectLocked(holders: LockHolder[], msg: string): void {
+    if (this.opts.onLocked) this.opts.onLocked(holders, msg);
+    else this.publish({ error: msg });
   }
 
   private confirm(state: DeviceState, keepError = false): void {
@@ -159,6 +229,7 @@ export class TuningController {
       state,
       display,
       busy: this.inFlight || this.hasPending,
+      lockBusy: this.lockBusy,
       error,
     };
     for (const l of this.listeners) l();

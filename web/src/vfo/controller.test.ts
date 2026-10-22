@@ -53,6 +53,13 @@ function fakeApi(initial: Vfo[] = []) {
   };
 }
 
+const reply = (v: Vfo, vfos: Vfo[] | null, retune: VfoReply["retune"] = "none"): VfoReply => ({
+  vfo: v,
+  vfos,
+  state: null,
+  retune,
+});
+
 const flush = () => vi.advanceTimersByTimeAsync(0);
 
 describe("applyVfoPatch", () => {
@@ -68,7 +75,7 @@ describe("VfoController", () => {
   afterEach(() => vi.useRealTimers());
 
   const make = (f: ReturnType<typeof fakeApi>) =>
-    new VfoController({ device: "dev0", api: f.api, debounceMs: 50, pollMs: 2000, quietMs: 1000 });
+    new VfoController({ device: "dev0", api: f.api, debounceMs: 50 });
 
   it("loads the list on start", async () => {
     const f = fakeApi([vfo(1), vfo(2)]);
@@ -113,11 +120,11 @@ describe("VfoController", () => {
     await vi.advanceTimersByTimeAsync(500);
     expect(f.updates).toHaveLength(1);
     expect(c.getSnapshot().vfos[0]?.freqHz).toBe(103e6);
-    f.updateWaiters[0]?.resolve({ vfo: vfo(1, 101e6), vfos: [vfo(1, 101e6)] });
+    f.updateWaiters[0]?.resolve(reply(vfo(1, 101e6), [vfo(1, 101e6)]));
     await vi.advanceTimersByTimeAsync(50);
     expect(f.updates).toHaveLength(2);
     expect(f.updates[1]).toEqual({ id: 1, patch: { freqHz: 103e6 } });
-    f.updateWaiters[1]?.resolve({ vfo: vfo(1, 103e6), vfos: [vfo(1, 103e6)] });
+    f.updateWaiters[1]?.resolve(reply(vfo(1, 103e6), [vfo(1, 103e6)]));
     await flush();
     expect(c.getSnapshot()).toMatchObject({ busy: false, error: null });
     expect(c.getSnapshot().vfos[0]?.freqHz).toBe(103e6);
@@ -133,7 +140,7 @@ describe("VfoController", () => {
     c.update(2, { freqHz: 102e6 });
     await vi.advanceTimersByTimeAsync(50);
     expect(f.updates.map((u) => u.id)).toEqual([1]);
-    f.updateWaiters[0]?.resolve({ vfo: vfo(1, 101e6), vfos: null });
+    f.updateWaiters[0]?.resolve(reply(vfo(1, 101e6), null));
     await vi.advanceTimersByTimeAsync(50);
     expect(f.updates.map((u) => u.id)).toEqual([1, 2]);
     c.stop();
@@ -153,7 +160,7 @@ describe("VfoController", () => {
     c.create({ freqHz: 100e6, mode: "wfm" });
     await vi.advanceTimersByTimeAsync(50);
     expect(f.creates).toEqual([{ freqHz: 100e6, mode: "wfm" }]);
-    f.createWaiters[0]?.resolve({ vfo: vfo(7), vfos: [vfo(7)] });
+    f.createWaiters[0]?.resolve(reply(vfo(7), [vfo(7)]));
     await flush();
     expect(c.getSnapshot()).toMatchObject({ selectedId: 7, busy: false });
     expect(c.getSnapshot().vfos.map((v) => v.id)).toEqual([7]);
@@ -197,35 +204,68 @@ describe("VfoController", () => {
     c.stop();
   });
 
-  it("does not let polls overwrite pending changes or right-after-change state", async () => {
+  it("does not poll; pushed lists replace the confirmed list when idle", async () => {
     const f = fakeApi([vfo(1)]);
     const c = make(f);
     c.start();
     await flush();
-    f.setList([vfo(1, 90e6)]); // stale/other value on the server
-    c.update(1, { freqHz: 101e6 });
-    await vi.advanceTimersByTimeAsync(1900); // poll tick while a change is pending
-    expect(c.getSnapshot().vfos[0]?.freqHz).toBe(101e6);
-    f.updateWaiters[0]?.resolve({ vfo: vfo(1, 101e6), vfos: [vfo(1, 101e6)] });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(f.api.list).toHaveBeenCalledTimes(1);
+    c.ingest([vfo(1, 90e6), vfo(2)]);
+    expect(c.getSnapshot().vfos.map((v) => v.freqHz)).toEqual([90e6, 100e6]);
+    c.stop();
+  });
+
+  it("does not let pushed lists overwrite pending or in-flight changes", async () => {
+    const f = fakeApi([vfo(1)]);
+    const c = make(f);
+    c.start();
     await flush();
-    // Within the quiet period the (lagging) GET is skipped.
-    await vi.advanceTimersByTimeAsync(500);
+    c.update(1, { freqHz: 101e6 });
+    c.ingest([vfo(1, 90e6)]); // pending
     expect(c.getSnapshot().vfos[0]?.freqHz).toBe(101e6);
-    // Later polls reconcile with the server again.
-    await vi.advanceTimersByTimeAsync(2500);
+    await vi.advanceTimersByTimeAsync(50);
+    c.ingest([vfo(1, 90e6)]); // in flight
+    expect(c.getSnapshot().vfos[0]?.freqHz).toBe(101e6);
+    f.updateWaiters[0]?.resolve(reply(vfo(1, 101e6), [vfo(1, 101e6)]));
+    await flush();
+    c.ingest([vfo(1, 90e6)]);
     expect(c.getSnapshot().vfos[0]?.freqHz).toBe(90e6);
     c.stop();
   });
 
-  it("drops the selection when the VFO disappears from the device", async () => {
+  it("drops the selection when a pushed list no longer has the VFO", async () => {
     const f = fakeApi([vfo(1), vfo(2)]);
     const c = make(f);
     c.start();
     await flush();
     c.select(2);
-    f.setList([vfo(1)]);
-    await vi.advanceTimersByTimeAsync(2000);
+    c.ingest([vfo(1)]);
     expect(c.getSnapshot().selectedId).toBeNull();
+    c.stop();
+  });
+
+  it("reports the free-tuning outcome and the reply state", async () => {
+    const f = fakeApi([vfo(1)]);
+    const onRetune = vi.fn();
+    const onState = vi.fn();
+    const c = new VfoController({ device: "dev0", api: f.api, debounceMs: 50, onRetune, onState });
+    c.start();
+    await flush();
+    const paused = { ...vfo(1, 120e6), status: "paused" as const };
+    c.update(1, { freqHz: 120e6 });
+    await vi.advanceTimersByTimeAsync(50);
+    const state = { driver: "file" } as unknown as NonNullable<VfoReply["state"]>;
+    f.updateWaiters[0]?.resolve({ ...reply(paused, [paused], "locked"), state });
+    await flush();
+    expect(onRetune).toHaveBeenCalledWith("locked", paused);
+    expect(onState).toHaveBeenCalledWith(state);
+    expect(c.getSnapshot().vfos[0]?.status).toBe("paused");
+    c.update(1, { freqHz: 100e6 });
+    await vi.advanceTimersByTimeAsync(50);
+    f.updateWaiters[1]?.resolve(reply(vfo(1), [vfo(1)]));
+    await flush();
+    expect(onRetune).toHaveBeenCalledTimes(1);
     c.stop();
   });
 

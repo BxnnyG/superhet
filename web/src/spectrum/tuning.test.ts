@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type ApiClient, type DeviceState, type TunePatch } from "./api";
 import { TuningController } from "./tuning";
 
+const userLock = { kind: "user", id: "user", sinceMs: 1 };
+
 const base: DeviceState = {
   driver: "rtlsdr",
   centerHz: 100e6,
@@ -11,6 +13,8 @@ const base: DeviceState = {
   ppm: 0,
   biasTee: false,
   tuningEpoch: 0,
+  locks: [],
+  window: { startHz: 100e6 - 0.425 * 2.048e6, endHz: 100e6 + 0.425 * 2.048e6 },
 };
 
 function fakeApi() {
@@ -19,6 +23,8 @@ function fakeApi() {
   let state = base;
   const api: ApiClient = {
     getState: vi.fn(() => Promise.resolve(state)),
+    lock: vi.fn(() => Promise.resolve({ ...state, locks: [userLock] })),
+    unlock: vi.fn(() => Promise.resolve({ ...state, locks: [] })),
     tune: vi.fn((_dev: string, patch: TunePatch) => {
       calls.push(patch);
       return new Promise<DeviceState>((resolve, reject) => resolvers.push({ resolve, reject }));
@@ -115,31 +121,105 @@ describe("TuningController", () => {
     t.stop();
   });
 
-  it("polls while idle but not while busy", async () => {
+  it("does not poll: one read at start, later state comes from ingest()", async () => {
     const f = fakeApi();
-    const t = new TuningController({ device: "dev0", api: f.api, debounceMs: 50, pollMs: 5000 });
+    const t = new TuningController({ device: "dev0", api: f.api, debounceMs: 50 });
     t.start();
     await flush();
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(f.api.getState).toHaveBeenCalledTimes(1);
-    f.setState({ ...base, centerHz: 90e6 });
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(f.api.getState).toHaveBeenCalledTimes(2);
+    const pushed = { ...base, centerHz: 90e6 };
+    t.ingest(pushed);
     expect(t.getSnapshot().state?.centerHz).toBe(90e6);
-
-    t.request({ centerHz: 95e6 });
-    await vi.advanceTimersByTimeAsync(50); // in flight now
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(f.api.getState).toHaveBeenCalledTimes(2);
+    expect(t.getSnapshot().display?.centerHz).toBe(90e6);
     t.stop();
   });
 
-  it("stops timers on stop()", async () => {
+  it("ignores pushed state while a change is in flight", async () => {
     const f = fakeApi();
-    const t = new TuningController({ device: "dev0", api: f.api, pollMs: 1000 });
+    const t = new TuningController({ device: "dev0", api: f.api, debounceMs: 50 });
+    t.start();
+    await flush();
+    t.request({ centerHz: 95e6 });
+    await vi.advanceTimersByTimeAsync(50);
+    t.ingest({ ...base, centerHz: 80e6 });
+    expect(t.getSnapshot().state?.centerHz).toBe(100e6);
+    f.resolvers[0]?.resolve({ ...base, centerHz: 95e6 });
+    await flush();
+    expect(t.getSnapshot().state?.centerHz).toBe(95e6);
+    t.stop();
+  });
+
+  it("stops cleanly on stop()", async () => {
+    const f = fakeApi();
+    const t = new TuningController({ device: "dev0", api: f.api });
     t.start();
     await flush();
     t.stop();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(f.api.getState).toHaveBeenCalledTimes(1);
+  });
+
+  describe("tuning lock", () => {
+    const locked = { ...base, locks: [userLock] };
+
+    it("refuses centre and rate changes while locked and reports the holders", async () => {
+      const f = fakeApi();
+      const onLocked = vi.fn();
+      const t = new TuningController({ device: "dev0", api: f.api, debounceMs: 50, onLocked });
+      t.start();
+      await flush();
+      t.ingest(locked);
+      t.request({ centerHz: 101e6 });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(f.calls).toHaveLength(0);
+      expect(onLocked).toHaveBeenCalledWith([userLock], expect.any(String));
+      expect(t.getSnapshot().display?.centerHz).toBe(100e6);
+      t.stop();
+    });
+
+    it("still sends gain changes and repeats of the current centre", async () => {
+      const f = fakeApi();
+      const onLocked = vi.fn();
+      const t = new TuningController({ device: "dev0", api: f.api, debounceMs: 50, onLocked });
+      t.start();
+      await flush();
+      t.ingest(locked);
+      t.request({ centerHz: 100e6, gain: 10 });
+      await vi.advanceTimersByTimeAsync(50);
+      expect(f.calls).toEqual([{ centerHz: 100e6, gain: 10 }]);
+      t.request({ centerHz: 101e6, ppm: 2 });
+      expect(onLocked).toHaveBeenCalledTimes(1);
+      t.stop();
+    });
+
+    it("turns a 409 locked reply into a notice instead of an error banner", async () => {
+      const f = fakeApi();
+      const onLocked = vi.fn();
+      const t = new TuningController({ device: "dev0", api: f.api, debounceMs: 50, onLocked });
+      t.start();
+      await flush();
+      t.request({ centerHz: 101e6 });
+      await vi.advanceTimersByTimeAsync(50);
+      f.resolvers[0]?.reject(new ApiError("tuning is locked by: user", 409, "locked", [userLock]));
+      await flush();
+      expect(onLocked).toHaveBeenCalledWith([userLock], "tuning is locked by: user");
+      expect(t.getSnapshot().error).toBeNull();
+      expect(t.getSnapshot().display?.centerHz).toBe(100e6);
+      t.stop();
+    });
+
+    it("takes and drops the user lock", async () => {
+      const f = fakeApi();
+      const t = new TuningController({ device: "dev0", api: f.api });
+      t.start();
+      await flush();
+      await t.setLock(true);
+      expect(t.getSnapshot().state?.locks).toEqual([userLock]);
+      expect(t.getSnapshot().lockBusy).toBe(false);
+      await t.setLock(false);
+      expect(t.getSnapshot().state?.locks).toEqual([]);
+      t.stop();
+    });
   });
 });
