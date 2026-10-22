@@ -234,8 +234,9 @@ describe("BookmarksPanel", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     const post = server.calls.find((c) => c.method === "POST");
+    // The server rejects unknown fields, so the body must not carry a version tag.
+    expect(post?.body).not.toHaveProperty("v");
     expect(post?.body).toMatchObject({
-      v: 1,
       name: "PMR446 ch 3",
       freq_hz: 446_031_250,
       mode: "nfm",

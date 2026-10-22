@@ -54,7 +54,7 @@ export function Dialog({ title, onClose, children }: Props) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-end justify-center overflow-y-auto bg-overlay p-4 sm:items-center"
+      className="fixed inset-0 z-[60] flex justify-center overflow-y-auto bg-overlay p-4"
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -65,7 +65,7 @@ export function Dialog({ title, onClose, children }: Props) {
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="flex w-full max-w-sm flex-col gap-4 rounded-xl border border-border bg-surface-1 p-5 shadow-pop outline-none"
+        className="mt-auto flex h-fit w-full max-w-sm flex-col gap-4 rounded-xl border sm:mb-auto border-border bg-surface-1 p-5 shadow-pop outline-none"
       >
         <div className="flex items-center justify-between gap-2">
           <h2 id={titleId} className="text-base font-semibold tracking-tight">
