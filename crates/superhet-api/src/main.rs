@@ -3,6 +3,7 @@
 mod audio_hub;
 mod audio_ws;
 mod auth;
+mod bookmarks;
 mod devices;
 mod hub;
 mod origin;
@@ -44,6 +45,10 @@ fn app(
         .merge(audio_ws::router(audio))
         .merge(state_ws::router(state_ws::StateWsState::new(
             devices.clone(),
+        )))
+        .merge(bookmarks::router(bookmarks::BookmarksState::new(
+            devices.clone(),
+            deps.db.clone(),
         )))
         .merge(profiles::router(profiles::ProfilesState::new(
             devices.clone(),
@@ -209,6 +214,7 @@ mod tests {
             "/api/v1/ws/audio?dev=rtl0",
             "/api/v1/ws/state?dev=rtl0",
             "/api/v1/profiles",
+            "/api/v1/bookmarks",
             "/api/v1/devices/rtl0/lock",
             "/api/v1/does/not/exist",
         ] {

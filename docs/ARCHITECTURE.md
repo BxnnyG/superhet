@@ -132,7 +132,7 @@ Definitions:
 
 ### 3.2 Profiles
 
-A profile is a preset: `center_hz`, `sample_rate`, `gain` (mode + value), `ppm`, `bias_tee`, VFO list (freq, mode, bandwidth, squelch, …), a `lock` flag, later decoder instances (plugin id, freq, config; the `decoders` array is reserved) and an `exclusive` flag. Loading (`ctl.profile.load`) applies it atomically: everything is validated first, so a refusal (lock, unrealisable VFO, unsupported setting) changes nothing; the VFO set is replaced. "Save as profile" snapshots the daemon's current state. Profiles are versioned JSON (`superhet.profiles`, `data` jsonb, unique name) and exportable; the exact contract is `docs/api-profiles.md`.
+A profile is a preset: `center_hz`, `sample_rate`, `gain` (mode + value), `ppm`, `bias_tee`, VFO list (freq, mode, bandwidth, squelch, …), a `lock` flag, later decoder instances (plugin id, freq, config; the `decoders` array is reserved) and an `exclusive` flag. Loading (`ctl.profile.load`) applies it atomically: everything is validated first, so a refusal (lock, unrealisable VFO, unsupported setting) changes nothing; the VFO set is replaced. "Save as profile" snapshots the daemon's current state. Profiles are versioned JSON (`superhet.profiles`, `data` jsonb, unique name) and exportable; the exact contract is `docs/api-profiles.md`. Bookmarks (saved frequencies, `superhet.bookmarks`): `docs/api-bookmarks.md`.
 
 ### 3.3 Decoder binding & states
 
