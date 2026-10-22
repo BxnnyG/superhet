@@ -47,7 +47,6 @@ export function AudioControls({ audio, snapshot }: Props) {
   const { unsupported } = snapshot;
   return (
     <div className="flex flex-col gap-3" role="group" aria-label="Audio">
-      <AudioButton audio={audio} snapshot={snapshot} />
       {unsupported ? (
         <p className="rounded-md bg-warn-soft px-2.5 py-2 text-xs text-warn" role="alert">
           {unsupported}
