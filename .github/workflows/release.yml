@@ -89,17 +89,23 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: Build compose bundle
+        env:
+          TAG: ${{ github.ref_name }}
+        run: scripts/package-compose.sh "$TAG" dist
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           DIGEST: ${{ needs.image.outputs.digest }}
         run: |
+          assets=("dist/superhet-${TAG}-compose.tar.gz" "dist/superhet-${TAG}-compose.tar.gz.sha256")
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists, skipping"
+            echo "Release $TAG already exists, refreshing assets"
+            gh release upload "$TAG" "${assets[@]}" --clobber
             exit 0
           fi
           flags=(--generate-notes --verify-tag)
           case "$TAG" in *-*) flags+=(--prerelease) ;; esac
-          notes="Container image: \`${IMAGE}:${TAG#v}\` (digest \`${DIGEST}\`)"
-          gh release create "$TAG" --title "$TAG" --notes "$notes" "${flags[@]}"
+          notes="Container image: \`${IMAGE}:${TAG#v}\` (digest \`${DIGEST}\`)"$'\n\n'"Ready-to-run stack: download \`superhet-${TAG}-compose.tar.gz\`, follow \`INSTALL.md\` inside."
+          gh release create "$TAG" --title "$TAG" --notes "$notes" "${flags[@]}" "${assets[@]}"

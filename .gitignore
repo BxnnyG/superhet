@@ -4,3 +4,4 @@ web/dist/
 .env
 *.sigmf-data
 /data/
+/dist/

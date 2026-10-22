@@ -32,17 +32,23 @@ docker compose up --build
 
 Services: `superhet-api` (web UI, port 8073), `superhet-sdrd` (device + DSP), `superhet-pluginhost`, `superhet-worker`, PostgreSQL, NATS JetStream – see [ARCHITECTURE](docs/ARCHITECTURE.md).
 
-Host preparation for the RTL-SDR (kernel module blacklist, udev rules) is described in `deploy/` and will be documented in `docs/setup-host.md` in phase 1.
+Host preparation for the RTL-SDR (kernel module blacklist, udev rules, USB group) is described in [docs/setup-host.md](docs/setup-host.md).
 
 ## Install from GHCR
 
-Prebuilt images are published to GitHub Packages (see [docs/releasing.md](docs/releasing.md)):
+No build needed. Every release (see [Releases](https://github.com/BxnnyG/superhet/releases)) ships a compose bundle with the stack pinned to the matching image `ghcr.io/bxnnyg/superhet:<version>`:
 
 ```bash
-scripts/gen-secrets.sh
-echo 'SUPERHET_IMAGE=ghcr.io/bxnnyg/superhet:edge' >> .env   # or a release tag, e.g. 0.1.0
-docker compose pull && docker compose up -d --no-build
+tar xzf superhet-v0.1.0-compose.tar.gz && cd superhet-v0.1.0-compose
+scripts/gen-secrets.sh             # creates .env with random passwords
+# one-time host setup for the RTL-SDR: docs/setup-host.md
+docker compose up -d
+docker compose logs superhet-api   # one-time setup token for the first admin account
 ```
+
+Then open `http://<host>:8073`. The bundle's `INSTALL.md` has the details. The image is public on GHCR (pull without login); the development tag is `ghcr.io/bxnnyg/superhet:edge`.
+
+From a git checkout, `docker compose up --build` builds the image locally; `SUPERHET_IMAGE=ghcr.io/bxnnyg/superhet:<version>` in `.env` followed by `docker compose pull && docker compose up -d --no-build` uses the published one instead.
 
 ## Legal notice
 
