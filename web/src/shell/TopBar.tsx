@@ -1,4 +1,3 @@
-import { AudioButton } from "../audio/AudioControls";
 import type { SocketStatus } from "../spectrum/socket";
 import { formatRate } from "../spectrum/TuningControls";
 import { Badge, IconButton, Logo, MenuIcon, type BadgeTone } from "../ui";
@@ -70,7 +69,6 @@ export function TopBar({ r, theme, onTheme, drawerOpen, onMenu }: Props) {
         />
       </div>
       <div className="ml-auto flex items-center gap-2 shell:ml-0">
-        <AudioButton audio={r.audio} snapshot={r.audioSnap} />
         <SettingsMenu theme={theme} onTheme={onTheme} />
       </div>
     </header>

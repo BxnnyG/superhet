@@ -100,7 +100,7 @@ export function ReceiverDock({
   return (
     <section
       aria-label="Receiver"
-      className="@container shrink-0 overflow-y-auto rounded-xl border border-border bg-surface-1 max-h-[45vh]"
+      className="@container shrink-0 rounded-xl border border-border bg-surface-1"
     >
       <div className="flex flex-col @[88rem]:flex-row @[88rem]:items-stretch">
         <Band className="@[88rem]:flex-1">
@@ -147,8 +147,8 @@ export function ReceiverDock({
               />
               <Bandwidth vfo={active} onUpdate={onUpdate} />
             </Group>
-            <Group divider label="Squelch and signal">
-              <div className="flex w-44 flex-col gap-1">
+            <Group divider label="Squelch and signal" className="basis-full @lg:basis-auto">
+              <div className="flex w-full flex-col gap-1 @lg:w-44">
                 <Slider
                   label="Squelch"
                   min={SQUELCH_OFF_POS}
@@ -207,10 +207,12 @@ function Band({
 function Group({
   label,
   divider,
+  className,
   children,
 }: {
   label?: string;
   divider?: boolean;
+  className?: string;
   children: ReactNode;
 }) {
   return (
@@ -220,6 +222,7 @@ function Group({
       className={cn(
         "flex min-w-0 flex-wrap items-center gap-2",
         divider && "@4xl:border-l @4xl:border-border @4xl:pl-4",
+        className,
       )}
     >
       {children}
@@ -273,18 +276,20 @@ function Tuner({
     onUpdate(vfo.id, { freqHz: snapFrequency(vfo.freqHz + dir * stepHz, stepHz) });
   return (
     <>
-      <IconButton label="Down one step" variant="secondary" onClick={() => nudge(-1)}>
-        <ArrowLeftIcon />
-      </IconButton>
-      <FrequencyReadout
-        key={vfo.id}
-        label="VFO frequency"
-        valueHz={vfo.freqHz}
-        onChange={(hz) => onUpdate(vfo.id, { freqHz: hz })}
-      />
-      <IconButton label="Up one step" variant="secondary" onClick={() => nudge(1)}>
-        <ArrowRightIcon />
-      </IconButton>
+      <span className="flex shrink-0 items-center gap-1.5">
+        <IconButton label="Down one step" variant="secondary" onClick={() => nudge(-1)}>
+          <ArrowLeftIcon />
+        </IconButton>
+        <FrequencyReadout
+          key={vfo.id}
+          label="VFO frequency"
+          valueHz={vfo.freqHz}
+          onChange={(hz) => onUpdate(vfo.id, { freqHz: hz })}
+        />
+        <IconButton label="Up one step" variant="secondary" onClick={() => nudge(1)}>
+          <ArrowRightIcon />
+        </IconButton>
+      </span>
       <Select
         aria-label="Tuning step"
         size="sm"
