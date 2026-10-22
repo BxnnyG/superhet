@@ -29,7 +29,10 @@ Phase 0 (foundation) done and pushed → next: P1 core receiver (docs/ROADMAP.md
 - Dev: `SUPERHET_DEV_API=http://127.0.0.1:8083 vite --port 5174` to run next to a compose stack on :8073.
 - Done: tuning lock (holders list, 409 `locked`), free-tuning retune in sdrd (usable window 0.85 × rate, VFO lands at ¼ window; locked → paused), profiles in PG (save/overwrite/load atomically, round-trip test), sdrd restores state from KV `restore.<dev>`, state push WS `/api/v1/ws/state` (web polling removed). Web: lock toggle + badge, window shading, Profiles section, toasts. Live-tested on RTL-SDR.
 - Open: exclusive claims (P2 with plugins), profile list has no push (refetch on focus/open), state feed doesn't signal sdrd gone.
-- Next: /metrics + dropped_blocks to UI, then WFM stereo + SSB/CW demods (crit. 4), perf doc (crit. 7), Docker image smoke test (crit. 1, 8).
+- Done: receiver dock under the spectrum (all active-VFO controls one click away; sidebar = setup only; first VFO auto-selected; single audio button in the dock).
+- Done: compose passes the RTL-SDR to sdrd (`SUPERHET_USB_GID` = gid of the USB node, here 944/rtlsdr; `SUPERHET_DEVICE`, `SUPERHET_PORT`), nats.conf grants sdrd KV restore; real-stick smoke test via compose image passed. Releases attach `superhet-<tag>-compose.tar.gz` (scripts/package-compose.sh). Tagged v0.1.0-alpha.1.
+- Open: user must set GHCR package public; top-bar lock button wraps on phones; arm64 image; USB gid auto-detect in gen-secrets.
+- Next: /metrics + dropped_blocks to UI, then WFM stereo + SSB/CW demods (crit. 4), perf doc (crit. 7).
 - P1 start order: file device backend + IQ bus + FFT in sdrd → spectrum via NATS → api WS gateway → WebGL waterfall; then librtlsdr backend, tuning model, demods, Opus audio, local auth.
 - Spike before P3: confirm no usable open-source TETRA DMO decoder; collect own TMO/DMO reference recordings (review for private data before committing, SECURITY.md).
 - Tooling: TypeScript pinned 6.0.3 (typescript-eslint), gitleaks installed locally, cargo-nextest not; gitleaks-action needs license if repo moves to an org.
