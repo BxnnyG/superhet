@@ -164,3 +164,12 @@ side in one row; narrower, they stack in two rows; groups get a subtle vertical 
 simply wrap below that. On phones (below the 900 px shell breakpoint, where the sidebar becomes a
 drawer) the dock stays visible, wraps further and scrolls vertically (max 45 % of the viewport)
 rather than the page scrolling horizontally. With no VFOs the dock shrinks to the hint "Click the spectrum or press + to add a VFO" and a + button.
+
+## Band plan and bookmarks
+
+Details in `docs/bandplan.md`. Sidebar: **Bookmarks** (switch "Show on spectrum", "Add bookmark...",
+search and tag filter, list with edit/delete, import/export buttons) and **Band plan** (master
+switch plus one switch per category with its colour swatch). The top bar has a star
+("Bookmark this frequency") next to the active VFO's tuning step; it opens the add dialog prefilled
+from the VFO and the band plan. Dialogs use the kit's `Dialog`/`ConfirmDialog`; the import dialog
+previews counts before anything is sent and offers Merge or Replace all.
