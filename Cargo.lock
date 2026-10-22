@@ -1961,7 +1961,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "superhet-api"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "argon2",
  "async-nats",
@@ -1986,7 +1986,7 @@ dependencies = [
 
 [[package]]
 name = "superhet-bus"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-nats",
  "serde",
@@ -1996,7 +1996,7 @@ dependencies = [
 
 [[package]]
 name = "superhet-db"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "serde_json",
  "sqlx",
@@ -2006,7 +2006,7 @@ dependencies = [
 
 [[package]]
 name = "superhet-device"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "num-complex",
  "thiserror",
@@ -2015,7 +2015,7 @@ dependencies = [
 
 [[package]]
 name = "superhet-dsp"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "num-complex",
  "rustfft",
@@ -2024,11 +2024,11 @@ dependencies = [
 
 [[package]]
 name = "superhet-plugin-protocol"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "superhet-pluginhost"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "axum",
  "http-body-util",
@@ -2040,7 +2040,7 @@ dependencies = [
 
 [[package]]
 name = "superhet-sdrd"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-nats",
  "axum",
@@ -2061,7 +2061,7 @@ dependencies = [
 
 [[package]]
 name = "superhet-worker"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "axum",
  "http-body-util",
