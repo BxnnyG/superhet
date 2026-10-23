@@ -3,6 +3,7 @@
 
 import { isSessionLost, verifySession } from "../auth/session";
 import { decodeAudioFrame, type AudioFrame } from "./frame";
+import { parseRds, type RdsState } from "./rds";
 import { backoffDelay, type SocketStatus } from "../spectrum/socket";
 
 /** The server accepts at most 8 distinct VFO ids per socket. */
@@ -11,6 +12,8 @@ export const MAX_SUBSCRIPTIONS = 8;
 export interface AudioSocketOptions {
   device: string;
   onFrame: (frame: AudioFrame) => void;
+  /** Complete RDS state of a VFO (an empty state clears the display). */
+  onRds?: (vfo: number, state: RdsState) => void;
   onStatus?: (status: SocketStatus) => void;
   onError?: (message: string) => void;
   /** Override for tests. */
@@ -123,6 +126,11 @@ export class AudioSocket {
   private handleText(text: string): void {
     try {
       const msg: unknown = JSON.parse(text);
+      const rds = parseRds(msg);
+      if (rds) {
+        this.opts.onRds?.(rds.vfo, rds.state);
+        return;
+      }
       if (
         typeof msg === "object" &&
         msg !== null &&

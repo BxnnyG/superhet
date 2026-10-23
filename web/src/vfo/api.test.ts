@@ -29,9 +29,11 @@ describe("parsing", () => {
       bandwidthHz: 180_000,
       squelchDbfs: null,
       deemphasis: "50us",
+      stereo: null,
       offsetHz: 0,
       status: "active",
     });
+    expect(parseVfo({ ...raw, stereo: false }).stereo).toBe(false);
     expect(parseVfo({ ...raw, squelch_dbfs: -70, status: "paused" })).toMatchObject({
       squelchDbfs: -70,
       status: "paused",

@@ -46,10 +46,11 @@ function setup() {
     const last = sockets[0]?.sent.at(-1);
     return last ? (JSON.parse(last) as { vfos: number[] }).vfos : null;
   };
-  const frame = (vfoId: number, powerDbfs = -80): AudioFrame =>
-    ({ vfoId, powerDbfs, squelchOpen: true }) as unknown as AudioFrame;
+  const frame = (vfoId: number, powerDbfs = -80, stereo = false): AudioFrame =>
+    ({ vfoId, powerDbfs, squelchOpen: true, stereo }) as unknown as AudioFrame;
+  const text = (msg: unknown) => sockets[0]?.onmessage?.({ data: JSON.stringify(msg) });
   const feed = (f: AudioFrame) => (audio as unknown as { onFrame(f: AudioFrame): void }).onFrame(f);
-  return { audio, engine, subscribed, frame, feed };
+  return { audio, engine, subscribed, frame, feed, text };
 }
 
 beforeEach(() => window.localStorage.clear());
@@ -138,4 +139,71 @@ it("keeps about the last seconds of channel levels per VFO", () => {
   now.mockReturnValue(6200);
   expect(audio.getRecentLevels(1, 10_000, 6200)).toEqual([-80, -70]);
   now.mockRestore();
+});
+
+const rdsMsg = (vfo: number, extra: Record<string, unknown> = {}) => ({
+  v: 1,
+  type: "rds",
+  vfo,
+  synced: true,
+  pi: "D3C2",
+  pty: 10,
+  tp: null,
+  ta: null,
+  ms: null,
+  ps: "SUPERHET",
+  rt: null,
+  ...extra,
+});
+
+it("keeps the RDS state of subscribed VFOs and drops it when they go", () => {
+  const { audio, text } = setup();
+  audio.setVfos([1, 2]);
+  text(rdsMsg(1));
+  text(rdsMsg(2, { ps: "OTHER   " }));
+  expect(audio.getSnapshot().rds[1]?.ps).toBe("SUPERHET");
+  expect(audio.getSnapshot().rds[2]?.ps).toBe("OTHER   ");
+  // An unchanged state does not notify again.
+  const listener = vi.fn();
+  audio.subscribe(listener);
+  text(rdsMsg(1));
+  expect(listener).not.toHaveBeenCalled();
+  text(rdsMsg(1, { rt: "Now" }));
+  expect(listener).toHaveBeenCalledTimes(1);
+  // VFO 2 disappears.
+  audio.setVfos([1]);
+  expect(audio.getSnapshot().rds[2]).toBeUndefined();
+  expect(audio.getSnapshot().rds[1]?.rt).toBe("Now");
+  // Messages for VFOs we do not follow are ignored.
+  text(rdsMsg(5));
+  expect(audio.getSnapshot().rds[5]).toBeUndefined();
+});
+
+it("an empty RDS state from the daemon clears the display", () => {
+  const { audio, text } = setup();
+  audio.setVfos([1]);
+  text(rdsMsg(1));
+  expect(audio.getSnapshot().rds[1]).toBeDefined();
+  text(rdsMsg(1, { synced: false, pi: null, pty: null, ps: null }));
+  expect(audio.getSnapshot().rds[1]).toBeUndefined();
+});
+
+it("a retune clears the RDS state at once, a fine tuning step does not", () => {
+  const { audio, text } = setup();
+  audio.setVfos([1]);
+  audio.noteFrequency(1, 99_500_000);
+  text(rdsMsg(1));
+  audio.noteFrequency(1, 99_501_000);
+  expect(audio.getSnapshot().rds[1]).toBeDefined();
+  audio.noteFrequency(1, 100_100_000);
+  expect(audio.getSnapshot().rds[1]).toBeUndefined();
+});
+
+it("exposes the stereo lock of the latest frame", () => {
+  const { audio, feed, frame } = setup();
+  audio.setVfos([1]);
+  feed(frame(1, -50, true));
+  expect(audio.getMeter(1)?.stereo).toBe(true);
+  feed(frame(1, -50, false));
+  expect(audio.getMeter(1)?.stereo).toBe(false);
 });

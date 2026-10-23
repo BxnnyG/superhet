@@ -14,6 +14,8 @@ export interface AudioFrame {
   flags: number;
   /** Squelch open, or no squelch set (flag bit 0). */
   squelchOpen: boolean;
+  /** A stereo broadcast with a locked pilot: the two channels differ (flag bit 1). */
+  stereo: boolean;
   sampleRate: number;
   channels: number;
   /** 48 kHz sample counter of the first sample. */
@@ -55,14 +57,19 @@ export function decodeAudioFrame(data: ArrayBuffer | ArrayBufferView): AudioFram
       `audio length mismatch: expected ${AUDIO_HEADER_LEN + payloadLen} bytes, got ${bytes.length}`,
     );
   }
+  const channels = view.getUint8(6);
+  if (channels !== 1 && channels !== 2) {
+    throw new AudioFrameError(`unsupported channel count ${channels}`);
+  }
   const flags = view.getUint8(7);
   return {
     vfoId: view.getUint32(12, true),
     seq: view.getUint32(16, true),
     flags,
     squelchOpen: (flags & 1) !== 0,
+    stereo: (flags & 2) !== 0,
     sampleRate: view.getUint32(8, true),
-    channels: view.getUint8(6),
+    channels,
     // Sample counters stay below 2^53 for thousands of years. Epoch nanoseconds exceed 2^53 and
     // are rounded to ~256 ns, which is irrelevant for latency measurement.
     samplePos: Number(view.getBigUint64(20, true)),

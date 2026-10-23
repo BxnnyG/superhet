@@ -8,6 +8,7 @@ import type { AudioFrame } from "./frame";
 import { volumeToGain } from "./gain";
 import { DEFAULT_TARGET_MS } from "./jitter";
 import { loadSilent, saveSilent } from "./listen";
+import { isEmptyRds, sameRds, type RdsState } from "./rds";
 import { AudioSocket, normalizeVfoIds } from "./socket";
 
 export const DEFAULT_VOLUME = 0.8;
@@ -29,11 +30,19 @@ export interface AudioSnapshot {
   socket: SocketStatus;
   targetMs: number;
   levels: Readonly<Record<number, VfoLevel>>;
+  /** Latest RDS state of the VFOs that have any. */
+  rds: Readonly<Record<number, RdsState>>;
+}
+
+function withoutRds(rds: Record<number, RdsState>, id: number): Record<number, RdsState> {
+  return Object.fromEntries(Object.entries(rds).filter(([key]) => Number(key) !== id));
 }
 
 export interface Meter {
   powerDbfs: number;
   squelchOpen: boolean;
+  /** Stereo pilot locked (the audio is genuinely stereo). */
+  stereo: boolean;
   /** ms since the last frame. */
   ageMs: number;
 }
@@ -54,8 +63,10 @@ export class AudioController {
   private readonly socket: AudioSocket;
   private readonly meters = new Map<
     number,
-    { powerDbfs: number; squelchOpen: boolean; at: number }
+    { powerDbfs: number; squelchOpen: boolean; stereo: boolean; at: number }
   >();
+  private rds: Record<number, RdsState> = {};
+  private readonly frequencies = new Map<number, number>();
   private readonly history = new Map<number, { powerDbfs: number; at: number }[]>();
   private levels: Record<number, VfoLevel> = {};
   private ids: number[] = [];
@@ -82,11 +93,13 @@ export class AudioController {
       socket: "connecting",
       targetMs: DEFAULT_TARGET_MS,
       levels: this.levels,
+      rds: this.rds,
     };
     this.socket = new AudioSocket({
       device: opts.device,
       createSocket: opts.createSocket,
       onFrame: (f) => this.onFrame(f),
+      onRds: (id, state) => this.onRds(id, state),
       onStatus: (socket) => this.publish({ socket }),
       onError: (m) => this.setError(m),
     });
@@ -108,7 +121,8 @@ export class AudioController {
     void this.engine.disable();
     this.meters.clear();
     this.history.clear();
-    this.publish({ enabled: false, starting: false });
+    this.rds = {};
+    this.publish({ enabled: false, starting: false, rds: this.rds });
   }
 
   /**
@@ -158,6 +172,15 @@ export class AudioController {
     this.engine.setVfos(listening);
     for (const id of [...this.meters.keys()]) if (!subscribed.has(id)) this.meters.delete(id);
     for (const id of [...this.history.keys()]) if (!subscribed.has(id)) this.history.delete(id);
+    const stale = Object.keys(this.rds)
+      .map(Number)
+      .filter((id) => !subscribed.has(id));
+    if (stale.length > 0) {
+      this.rds = Object.fromEntries(
+        Object.entries(this.rds).filter(([id]) => subscribed.has(Number(id))),
+      );
+      this.publish({ rds: this.rds });
+    }
     const levels: Record<number, VfoLevel> = {};
     for (const id of known) {
       const cur = this.levels[id];
@@ -209,7 +232,9 @@ export class AudioController {
 
   getMeter(id: number, now = performance.now()): Meter | null {
     const m = this.meters.get(id);
-    return m ? { powerDbfs: m.powerDbfs, squelchOpen: m.squelchOpen, ageMs: now - m.at } : null;
+    return m
+      ? { powerDbfs: m.powerDbfs, squelchOpen: m.squelchOpen, stereo: m.stereo, ageMs: now - m.at }
+      : null;
   }
 
   /** Channel powers (dBFS) received for a VFO within the last `windowMs`, oldest first. */
@@ -241,6 +266,7 @@ export class AudioController {
     this.meters.set(frame.vfoId, {
       powerDbfs: frame.powerDbfs,
       squelchOpen: frame.squelchOpen,
+      stereo: frame.stereo,
       at,
     });
     let h = this.history.get(frame.vfoId);
@@ -250,6 +276,31 @@ export class AudioController {
     while (drop < h.length && at - (h[drop]?.at ?? at) > HISTORY_MS) drop++;
     if (drop > 0) h.splice(0, drop);
     if (this.listening.has(frame.vfoId)) this.engine.onFrame(frame);
+  }
+
+  private onRds(id: number, state: RdsState): void {
+    if (!this.subscribed.has(id)) return;
+    const cur = this.rds[id];
+    if (isEmptyRds(state)) {
+      if (!cur) return;
+      this.rds = withoutRds(this.rds, id);
+    } else {
+      if (cur && sameRds(cur, state)) return;
+      this.rds = { ...this.rds, [id]: state };
+    }
+    this.publish({ rds: this.rds });
+  }
+
+  /**
+   * Tell the controller where a VFO is tuned. A retune by more than 5 kHz means another station:
+   * its RDS data is dropped at once instead of waiting for the daemon's clear message.
+   */
+  noteFrequency(id: number, freqHz: number): void {
+    const prev = this.frequencies.get(id);
+    this.frequencies.set(id, freqHz);
+    if (prev === undefined || Math.abs(prev - freqHz) <= 5000 || !this.rds[id]) return;
+    this.rds = withoutRds(this.rds, id);
+    this.publish({ rds: this.rds });
   }
 
   private setError(error: string): void {
