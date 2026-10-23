@@ -16,6 +16,7 @@ use async_nats::jetstream::{self, kv};
 use async_nats::{Client, Message, connection::State as Connection};
 use futures_util::StreamExt;
 use superhet_bus::subjects;
+use superhet_bus::zoom::ZoomCommand;
 use superhet_device::DeviceControl;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
@@ -25,6 +26,7 @@ use crate::control::{
 };
 use crate::controller::Controller;
 use crate::vfo::VfoShared;
+use crate::zoom::ZoomHandle;
 
 /// Tune requests queued between the bus loop and the executor.
 const QUEUE_JOBS: usize = 64;
@@ -60,6 +62,7 @@ pub async fn start(
     device: String,
     control: Arc<dyn DeviceControl>,
     vfos: Arc<VfoShared>,
+    zoom: ZoomHandle,
 ) -> Result<Service, Box<dyn std::error::Error>> {
     let ctl_subject = subjects::ctl_all(&device)?;
     let state_subject = subjects::state(&device)?;
@@ -98,7 +101,7 @@ pub async fn start(
         let client = client.clone();
         tokio::spawn(async move {
             while let Some(message) = subscription.next().await {
-                handle_message(&client, &controller, &job_tx, message).await;
+                handle_message(&client, &controller, &job_tx, &zoom, message).await;
             }
         })
     };
@@ -234,6 +237,7 @@ async fn handle_message(
     client: &Client,
     controller: &Arc<Controller>,
     jobs: &mpsc::Sender<TuneJob>,
+    zoom: &ZoomHandle,
     message: Message,
 ) {
     let command = message
@@ -254,6 +258,15 @@ async fn handle_message(
                 }
             }
             Err(err) => respond(client, &message, error_reply(&err)).await,
+        },
+        // Fire-and-forget lease of the zoom spectrum slice; a reply is only sent on errors.
+        "spectrum.zoom" => match ZoomCommand::decode(&message.payload) {
+            Ok(command) => zoom.set(command),
+            Err(err) => {
+                tracing::debug!(%err, "zoom request rejected");
+                let err = CtlError::invalid(err.to_string());
+                respond(client, &message, error_reply(&err)).await;
+            }
         },
         "state" => {
             let reply = match controller.latest() {

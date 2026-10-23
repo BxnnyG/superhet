@@ -143,6 +143,25 @@ pub fn spectrum(device: &str) -> Result<String, InvalidToken> {
     Ok(format!("{PREFIX}.dev.{device}.spectrum"))
 }
 
+/// Zoom spectrum frames of `device` (see `zoom`): `sh.v1.dev.<dev>.spectrum.zoom`. Not matched
+/// by [`ALL_SPECTRUM`], so existing consumers never see them.
+///
+/// # Errors
+/// Fails if `device` is not a valid token.
+pub fn spectrum_zoom(device: &str) -> Result<String, InvalidToken> {
+    check(device)?;
+    Ok(format!("{PREFIX}.dev.{device}.spectrum.zoom"))
+}
+
+/// Zoom request (lease) for the daemon owning `device`: `sh.v1.dev.<dev>.ctl.spectrum.zoom`.
+///
+/// # Errors
+/// Fails if `device` is not a valid token.
+pub fn ctl_spectrum_zoom(device: &str) -> Result<String, InvalidToken> {
+    check(device)?;
+    Ok(format!("{PREFIX}.dev.{device}.ctl.spectrum.zoom"))
+}
+
 /// Audio subject of a stream: `sh.v1.dev.<dev>.audio.<stream>`.
 ///
 /// # Errors
@@ -195,6 +214,16 @@ mod tests {
         assert_eq!(ctl_all("rtl0").as_deref(), Ok("sh.v1.dev.rtl0.ctl.>"));
         assert_eq!(state_key("rtl-0_a").as_deref(), Ok("dev.rtl-0_a"));
         assert_eq!(spectrum("rtl0").as_deref(), Ok("sh.v1.dev.rtl0.spectrum"));
+        assert_eq!(
+            spectrum_zoom("rtl0").as_deref(),
+            Ok("sh.v1.dev.rtl0.spectrum.zoom")
+        );
+        assert_eq!(
+            ctl_spectrum_zoom("rtl0").as_deref(),
+            Ok("sh.v1.dev.rtl0.ctl.spectrum.zoom")
+        );
+        assert!(spectrum_zoom("a.b").is_err());
+        assert!(ctl_spectrum_zoom("*").is_err());
         assert_eq!(
             audio("rtl0", "main").as_deref(),
             Ok("sh.v1.dev.rtl0.audio.main")

@@ -4,7 +4,8 @@
 //! and NATS configured, spectrum frames are published on `sh.v1.dev.<id>.spectrum`, control
 //! requests are served on `sh.v1.dev.<id>.ctl.*` (including VFOs, whose Opus audio goes to
 //! `sh.v1.dev.<id>.audio.<vfo>`) and the device state is kept in the KV bucket
-//! `STATE` (see `docs/api-devices.md`).
+//! `STATE` (see `docs/api-devices.md`). While the gateway leases a slice (`ctl.spectrum.zoom`), a
+//! zoom spectrum with real resolution is published on `sh.v1.dev.<id>.spectrum.zoom`.
 
 mod audio;
 mod config;
@@ -16,6 +17,7 @@ mod publish;
 mod service;
 mod vfo;
 mod window;
+mod zoom;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -140,10 +142,29 @@ async fn start_pipeline(
     let audio_sink = publish::spawn_audio_publisher(client.clone(), &config.device_id)?;
     let audio = audio::AudioEngine::start(Arc::clone(&vfos), audio_sink)?;
     let sink = publish::spawn_spectrum_publisher(client.clone(), subject);
-    let pipeline = pipeline::Pipeline::start(device, &config.spectrum, sink, Some(audio.tap()))?;
+    let zoom_handle = zoom::ZoomHandle::default();
+    let zoom_sink = publish::spawn_spectrum_publisher(
+        client.clone(),
+        superhet_bus::subjects::spectrum_zoom(&config.device_id)?,
+    );
+    let zoom_engine =
+        zoom::ZoomEngine::new(zoom_handle.clone(), config.spectrum.clone(), zoom_sink);
+    let pipeline = pipeline::Pipeline::start(
+        device,
+        &config.spectrum,
+        sink,
+        Some(audio.tap()),
+        Some(zoom_engine),
+    )?;
     deps.pipeline_running = Some(pipeline.running_flag());
-    let service =
-        service::start(client, config.device_id.clone(), pipeline.control(), vfos).await?;
+    let service = service::start(
+        client,
+        config.device_id.clone(),
+        pipeline.control(),
+        vfos,
+        zoom_handle,
+    )
+    .await?;
     let running = Running {
         _pipeline: pipeline,
         _audio: audio,

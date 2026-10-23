@@ -23,6 +23,12 @@ browser-facing edge described in `docs/ARCHITECTURE.md` (section 2, step 3a). Th
   Cropping snaps outwards to source bin edges, so the header always matches the bins exactly.
   Frames are never upsampled (fewer source bins than requested are sent as-is). Decimation takes
   the maximum of each source group, so narrow peaks survive.
+- **Zoom frames.** When the view is narrow, the frames come from the zoom spectrum of the
+  daemon instead (see "Zoom" below): the same wire format, but the source bins are much finer, so
+  the header describes a span that matches the request to within a few bins and a zoomed view
+  shows real detail instead of stretched pixels. Clients need no change: always draw a frame
+  at the span its header states. Rows from different zoom levels have different spans and noise
+  floors; place each row by its own header.
 - **Text** (JSON, always with `"v":1`): `{"v":1,"type":"ack"}` after a valid `view`, or
   `{"v":1,"type":"error","error":"<reason>"}` for a rejected message (connection stays open).
 
@@ -39,6 +45,28 @@ Text frames, at most 4096 bytes. Until the first `view` the full frame is sent a
 - `bins`: target bin count (client pixel width), clamped to 16..4096 (default 1024).
 - `max_fps`: frame rate limit, clamped to 1..30 (default 30; sdrd publishes about 25 fps).
 - `v`, `bins`, `max_fps` are optional. A new `view` replaces the previous one.
+
+## Zoom
+
+A `view` whose span is at most 40 % of the full band makes the gateway lease a **zoom
+spectrum** from the daemon (ADR-0009): the daemon shifts the slice to DC, decimates by a power of
+two and runs an FFT with the same bin count, so the bin width shrinks by that factor (2.4 MS/s:
+1172 Hz per bin full band, 73 Hz for a 100 kHz view, 9 Hz for a 10 kHz view).
+
+- The lease is requested 100 ms after the view stopped changing and repeated while it is needed;
+  until zoom frames arrive (about one FFT window, at most 125 ms) the client keeps receiving the
+  stretched full-band rows. Zoom frames are used while they arrive and cover the view; the
+  full-band frames are held back for that session meanwhile.
+- **One slice per device, last writer wins.** With several tabs, the tab whose view changed last
+  owns the slice; tabs whose view the slice does not cover keep the full-band spectrum. Closing the
+  owner hands the slice to the most recent other tab or releases it.
+- **Limits.** The slice cannot be narrower than about 15 kHz of usable band at 2.4 MS/s (the
+  decimated rate stays at 12.5 kHz or more and the FFT window at 125 ms or less, so the bin width
+  stays at 9 Hz or more); narrower views are served from that slice and cropped. Spans above about
+  35 % of the sample rate are served from the full band. Panning inside the slice is free; leaving
+  it re-plans the slice (one FFT window without zoom frames).
+- No new client message: the existing `view` carries everything. Bus subjects and the lease
+  message are described in `docs/ARCHITECTURE.md` (bus table) and ADR-0009.
 
 ## Flow control
 

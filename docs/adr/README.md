@@ -12,3 +12,4 @@ Format: one file per decision, `NNNN-short-title.md`, sections *Status*, *Contex
 | [0006](0006-database.md) | Database | accepted |
 | [0007](0007-service-decomposition-and-bus.md) | Service decomposition and message bus | accepted |
 | [0008](0008-local-auth.md) | Local admin authentication | accepted |
+| [0009](0009-zoom-fft.md) | Zoom FFT (real resolution when zoomed) | accepted |

@@ -488,3 +488,87 @@ async fn vfo_audio_flows_through_real_nats_and_follows_retunes() {
     );
     let _ = std::fs::remove_file(&path);
 }
+
+#[tokio::test]
+async fn zoom_lease_produces_fine_frames_and_expires() {
+    let Ok(url) = std::env::var("SUPERHET_TEST_NATS_URL") else {
+        eprintln!("SUPERHET_TEST_NATS_URL not set; skipping");
+        return;
+    };
+    let pid = std::process::id();
+    let device_id = format!("zoom{pid}");
+    let path = std::env::temp_dir().join(format!("superhet-sdrd-zoom-{pid}.cu8"));
+    write_tone(&path);
+
+    let client = connect(&url).await;
+    let mut zoom = client
+        .subscribe(format!("sh.v1.dev.{device_id}.spectrum.zoom"))
+        .await
+        .expect("subscribe");
+    client.flush().await.expect("flush");
+    let _daemon = start_daemon(&url, &device_id, &path).await;
+    let _ = std::fs::remove_file(&path);
+
+    // No lease, no zoom frames.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(800), zoom.next())
+            .await
+            .is_err(),
+        "zoom frames without a request"
+    );
+
+    // Lease a 20 kHz slice around the tone (433.92 MHz + 50 kHz).
+    let ctl = format!("sh.v1.dev.{device_id}.ctl.spectrum.zoom");
+    let request = br#"{"v":1,"center_hz":433970000,"span_hz":20000}"#;
+    client
+        .publish(ctl.clone(), request.as_slice().into())
+        .await
+        .expect("publish");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let frame = loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let msg = tokio::time::timeout(remaining, zoom.next())
+            .await
+            .expect("no zoom frame after the request")
+            .expect("subscription ended");
+        let frame = SpectrumFrame::decode(&msg.payload).expect("decode");
+        if frame.center_hz == 433_970_000 {
+            break frame;
+        }
+    };
+    // The slice holds the view and the tone sits at the centre, in a fine bin.
+    assert!(frame.sample_rate >= 23_000, "{}", frame.sample_rate);
+    let hz_per_bin = f64::from(frame.sample_rate) / frame.bins.len() as f64;
+    // The full-band spectrum has 1000 Hz per bin here.
+    assert!(hz_per_bin < 40.0, "{hz_per_bin} Hz per bin");
+    let peak = frame
+        .bins
+        .iter()
+        .enumerate()
+        .max_by_key(|(_, q)| **q)
+        .map(|(i, _)| i)
+        .expect("bins");
+    let peak_hz = (peak as f64 + 0.5) * hz_per_bin - f64::from(frame.sample_rate) / 2.0;
+    assert!(
+        peak_hz.abs() < 3.0 * hz_per_bin,
+        "peak {peak_hz} Hz off centre"
+    );
+
+    // `off` stops the stream.
+    client
+        .publish(ctl, br#"{"v":1,"off":true}"#.as_slice().into())
+        .await
+        .expect("publish");
+    client.flush().await.expect("flush");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    while tokio::time::timeout(Duration::from_millis(50), zoom.next())
+        .await
+        .is_ok()
+    {}
+    assert!(
+        tokio::time::timeout(Duration::from_millis(800), zoom.next())
+            .await
+            .is_err(),
+        "zoom frames after off"
+    );
+}

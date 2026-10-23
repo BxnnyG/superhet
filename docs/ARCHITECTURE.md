@@ -83,7 +83,9 @@ Concurrency inside sdrd: tokio for I/O; DSP runs on dedicated OS threads (device
 |---|---|---|
 | `sh.v1.dev.<dev>.ctl.<cmd>` | request/reply | api/pluginhost → sdrd (tune, state, vfo.create/update/delete, lock.acquire/release, profile.load implemented; claim planned; see `docs/api-devices.md`) |
 | `sh.v1.dev.<dev>.state` | pub/sub + KV bucket `STATE` (key `dev.<dev>`) | sdrd → all (tuning, VFOs and lock holders implemented, one document per change; decoder bindings planned). The KV key `restore.<dev>` keeps the last state across restarts. Browsers receive the documents through `/api/v1/ws/state` (`docs/protocol-ws.md`) |
-| `sh.v1.dev.<dev>.spectrum` | pub/sub | sdrd → api (quantised FFT frames) |
+| `sh.v1.dev.<dev>.spectrum` | pub/sub | sdrd → api (quantised FFT frames, full band) |
+| `sh.v1.dev.<dev>.spectrum.zoom` | pub/sub | sdrd → api (frames of the leased zoom slice, same format; ADR-0009) |
+| `sh.v1.dev.<dev>.ctl.spectrum.zoom` | publish | api → sdrd (lease a zoom slice or release it; repeated every 3 s) |
 | `sh.v1.dev.<dev>.audio.<stream>` | pub/sub (core NATS, lossy) | sdrd / pluginhost → api, recorder (binary `AudioFrame` v1 with one Opus packet each, see `docs/protocol-audio.md`; `<stream>` is the VFO id for device VFOs) |
 | `sh.v1.events.<plugin>.<type>` | JetStream `EVENTS` | pluginhost → worker (persist), api (live) |
 | `sh.v1.lookup.<key>` | request/reply | api/worker → worker lookup service |
@@ -94,7 +96,7 @@ Concurrency inside sdrd: tokio for I/O; DSP runs on dedicated OS threads (device
 1. **Device read thread** pulls USB bulk transfers (librtlsdr async API), stamps each block with a sequence number, a monotonic timestamp and the tuning state (`center_hz`, `sample_rate`, `tuning_epoch`), converts `cu8` → `cf32` and publishes it on the IQ bus.
 2. **IQ bus**: fixed-size ring of `Arc` sample blocks. Consumers read at their own pace; a consumer that falls behind loses blocks and increments its overrun counter instead of blocking the device thread.
 3. **Spectrum service**: windowed FFT (Blackman-Harris, size 2048–16384 configurable), linear averaging / peak-hold, then per client: crop to the requested span, max-decimate to the client's bin count, quantise to `u8` dB with min/max in the header. ~1024–4096 bins × 25 fps ≈ 25–100 KB/s per client.
-3a. Spectrum frames are published on NATS; **api** crops/decimates per browser client (requested span and bin count). Deep zoom beyond the FFT resolution is served by a dedicated zoom-DDC channel in sdrd.
+3a. Spectrum frames are published on NATS; **api** crops/decimates per browser client (requested span and bin count). Zoomed views get real resolution from a zoom FFT in sdrd (shift to the view centre, decimate, FFT; ADR-0009): api leases the slice the user looks at and serves the client from `spectrum.zoom` frames while they cover its view.
 4. **Channelizer**: per channel (VFO or plugin input) a numerically controlled oscillator shifts the channel to baseband, then a multi-stage polyphase FIR decimates to the channel rate. If more than ~8 channels are active, switch to an FFT overlap-save filterbank (decision deferred to measurement in P1/P2).
 5. **Demodulators** (VFOs) produce 48 kHz mono/stereo `f32` audio → squelch → AGC → **audio pipeline**: Opus encoder (20 ms frames) → WebSocket clients, recorder and always-on audio ring buffer.
 6. **pluginhost** subscribes channels on the sdrd sample socket and feeds channelised data (IQ, FM discriminator output or 48 kHz audio, per manifest) into plugin processes and reads events/audio/voice frames back (§6).
