@@ -80,7 +80,9 @@ describe("key map", () => {
     expect(shortcutFor(key("ArrowDown"))).toEqual({ type: "vfo", delta: -1 });
     expect(shortcutFor(key("1"))).toMatchObject({ type: "mode", mode: "wfm" });
     expect(shortcutFor(key("3"))).toMatchObject({ type: "mode", mode: "am" });
-    expect(shortcutFor(key("5"))).toMatchObject({ type: "mode", mode: null, label: "LSB" });
+    expect(shortcutFor(key("4"))).toMatchObject({ type: "mode", mode: "usb", label: "USB" });
+    expect(shortcutFor(key("5"))).toMatchObject({ type: "mode", mode: "lsb", label: "LSB" });
+    expect(shortcutFor(key("6"))).toMatchObject({ type: "mode", mode: "cw", label: "CW" });
     expect(shortcutFor(key("m"))).toEqual({ type: "listen" });
     expect(shortcutFor(key("S", { shiftKey: true }))).toEqual({ type: "autoSquelch" });
     expect(shortcutFor(key("b"))).toEqual({ type: "bookmark" });
@@ -175,14 +177,13 @@ describe("actions", () => {
     expect(calls.update).not.toHaveBeenCalled();
   });
 
-  it("changes the mode and resets the bandwidth; unsupported modes only notify", () => {
+  it("changes the mode and resets the bandwidth", () => {
     const { ctx, calls } = context(vfos, 1);
     runShortcut({ type: "mode", mode: "am", label: "AM" }, ctx);
     expect(calls.update).toHaveBeenLastCalledWith(1, { mode: "am", bandwidthHz: null });
     calls.update.mockClear();
-    runShortcut({ type: "mode", mode: null, label: "USB" }, ctx);
-    expect(calls.update).not.toHaveBeenCalled();
-    expect(toasts.getSnapshot().some((t) => t.title.includes("USB"))).toBe(true);
+    runShortcut({ type: "mode", mode: "usb", label: "USB" }, ctx);
+    expect(calls.update).toHaveBeenLastCalledWith(1, { mode: "usb", bandwidthHz: null });
   });
 
   it("toggles listening from the current state", () => {

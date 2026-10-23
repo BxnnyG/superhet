@@ -515,7 +515,13 @@ export const CHANNEL_PLANS: readonly ChannelPlan[] = [
     name: "Amateur calling / APRS",
     source: SRC_IARU,
     channels: [
-      { label: "SSB call", freqHz: khz(144300), name: "2 m SSB calling", note: "USB." },
+      {
+        label: "SSB call",
+        freqHz: khz(144300),
+        name: "2 m SSB calling",
+        mode: "usb",
+        note: "USB.",
+      },
       {
         label: "APRS",
         freqHz: khz(144800),

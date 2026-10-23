@@ -1,9 +1,9 @@
 // Bookmark import/export formats, parsed and written client-side: Superhet JSON, the gqrx
-// bookmarks.csv and the SDR++ frequency manager JSON. Only wfm/nfm/am exist as VFO modes, so
-// other modulations import without a mode and keep the original name in the notes.
+// bookmarks.csv and the SDR++ frequency manager JSON. Modulations without a VFO mode (DSB, raw)
+// import without a mode and keep the original name in the notes.
 
 import { VFO_MODES, type VfoMode } from "../vfo/api";
-import { defaultModeFor } from "../vfo/model";
+import { DEFAULT_BANDWIDTH_HZ, defaultModeFor } from "../vfo/model";
 import { NAME_MAX, parseTags, type Bookmark, type BookmarkInput } from "./model";
 
 export type ImportFormat = "superhet" | "gqrx" | "sdrpp";
@@ -85,6 +85,9 @@ function gqrxMode(label: string): { mode: VfoMode | null; unsupported: string | 
   if (m.startsWith("wfm")) return { mode: "wfm", unsupported: null };
   if (m === "narrow fm" || m === "nfm" || m === "fm") return { mode: "nfm", unsupported: null };
   if (m === "am") return { mode: "am", unsupported: null };
+  if (m === "usb") return { mode: "usb", unsupported: null };
+  if (m === "lsb") return { mode: "lsb", unsupported: null };
+  if (m === "cw" || m === "cw-u" || m === "cw-l") return { mode: "cw", unsupported: null };
   return { mode: null, unsupported: m === "" ? null : label.trim() };
 }
 
@@ -118,8 +121,14 @@ export function parseGqrx(text: string): ImportResult {
   return out.result("gqrx");
 }
 
-const GQRX_LABEL: Record<VfoMode, string> = { wfm: "WFM (mono)", nfm: "Narrow FM", am: "AM" };
-const EXPORT_BANDWIDTH_HZ: Record<VfoMode, number> = { wfm: 180_000, nfm: 12_500, am: 10_000 };
+const GQRX_LABEL: Record<VfoMode, string> = {
+  wfm: "WFM (mono)",
+  nfm: "Narrow FM",
+  am: "AM",
+  usb: "USB",
+  lsb: "LSB",
+  cw: "CW-U",
+};
 
 const csvCell = (s: string) => s.replace(/[;\r\n]+/g, " ").trim();
 
@@ -141,7 +150,7 @@ export function exportGqrx(list: readonly Pick<Bookmark, keyof BookmarkInput>[])
     "# Frequency ; Name ; Modulation ; Bandwidth ; Tags",
     ...list.map((b) => {
       const mode = b.mode ?? defaultModeFor(b.freqHz);
-      const bw = b.bandwidthHz ?? EXPORT_BANDWIDTH_HZ[mode];
+      const bw = b.bandwidthHz ?? DEFAULT_BANDWIDTH_HZ[mode];
       const t = b.tags.map((x) => csvCell(x.replace(/,/g, " "))).join(",");
       return `${Math.round(b.freqHz)} ; ${csvCell(b.name)} ; ${GQRX_LABEL[mode]} ; ${bw} ; ${t || "Untagged"}`;
     }),
@@ -158,9 +167,9 @@ const SDRPP_MODES: readonly (VfoMode | string)[] = [
   "wfm",
   "am",
   "DSB",
-  "USB",
-  "CW",
-  "LSB",
+  "usb",
+  "cw",
+  "lsb",
   "RAW",
 ];
 

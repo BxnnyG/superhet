@@ -16,7 +16,8 @@ pub const MAX_DECODERS: usize = 32;
 const MAX_CENTER_HZ: u64 = 1_000_000_000_000;
 const GAIN_RANGE_DB: std::ops::RangeInclusive<f32> = -20.0..=100.0;
 const PPM_RANGE: std::ops::RangeInclusive<i32> = -1000..=1000;
-const BANDWIDTH_RANGE: std::ops::RangeInclusive<u32> = 1_000..=1_000_000;
+const BANDWIDTH_RANGE: std::ops::RangeInclusive<u32> = 100..=1_000_000;
+const CW_PITCH_RANGE: std::ops::RangeInclusive<u32> = 200..=2_000;
 const SQUELCH_RANGE: std::ops::RangeInclusive<f32> = -200.0..=0.0;
 
 /// Tuner gain mode.
@@ -50,6 +51,12 @@ pub enum Mode {
     Nfm,
     /// Envelope AM.
     Am,
+    /// Upper sideband.
+    Usb,
+    /// Lower sideband.
+    Lsb,
+    /// CW (Morse).
+    Cw,
 }
 
 /// De-emphasis.
@@ -83,6 +90,9 @@ pub struct Vfo {
     /// De-emphasis; absent/`null` = mode default (never for AM).
     #[serde(default)]
     pub deemphasis: Option<Deemphasis>,
+    /// CW tone pitch in Hz (CW only); absent/`null` = 700 Hz.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cw_pitch_hz: Option<u32>,
 }
 
 /// The preset itself.
@@ -175,7 +185,7 @@ impl ProfileData {
                 .bandwidth_hz
                 .is_some_and(|b| !BANDWIDTH_RANGE.contains(&b))
             {
-                return Err("VFO bandwidth_hz outside 1000..=1000000".into());
+                return Err("VFO bandwidth_hz outside 100..=1000000".into());
             }
             if vfo
                 .squelch_dbfs
@@ -183,8 +193,16 @@ impl ProfileData {
             {
                 return Err("VFO squelch_dbfs outside -200..=0".into());
             }
-            if vfo.mode == Mode::Am && vfo.deemphasis.is_some() {
-                return Err("deemphasis does not apply to am".into());
+            if vfo.mode != Mode::Wfm && vfo.mode != Mode::Nfm && vfo.deemphasis.is_some() {
+                return Err("deemphasis only applies to wfm and nfm".into());
+            }
+            if let Some(pitch) = vfo.cw_pitch_hz {
+                if vfo.mode != Mode::Cw {
+                    return Err("cw_pitch_hz only applies to cw".into());
+                }
+                if !CW_PITCH_RANGE.contains(&pitch) {
+                    return Err("VFO cw_pitch_hz outside 200..=2000".into());
+                }
             }
         }
         if self.decoders.len() > MAX_DECODERS || self.decoders.iter().any(|d| !d.is_object()) {
@@ -213,6 +231,8 @@ impl ProfileData {
             bandwidth_hz: u32,
             squelch_dbfs: Option<f32>,
             deemphasis: Option<Deemphasis>,
+            #[serde(default)]
+            cw_pitch_hz: Option<u32>,
         }
         #[derive(Deserialize)]
         struct StateLock {
@@ -254,6 +274,7 @@ impl ProfileData {
                     bandwidth_hz: Some(v.bandwidth_hz),
                     squelch_dbfs: v.squelch_dbfs,
                     deemphasis: v.deemphasis,
+                    cw_pitch_hz: v.cw_pitch_hz,
                 })
                 .collect(),
             lock: state.locks.iter().any(|l| l.kind == "user"),
@@ -307,9 +328,12 @@ mod tests {
             r#"{"v":1,"center_hz":1,"sample_rate":2,"gain":{"mode":"auto","db":3}}"#,
             r#"{"v":1,"center_hz":1,"sample_rate":2,"gain":{"mode":"manual","db":500}}"#,
             r#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[{"freq_hz":0,"mode":"am"}]}"#,
-            r#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[{"freq_hz":5,"mode":"usb"}]}"#,
+            r#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[{"freq_hz":5,"mode":"dsb"}]}"#,
             r#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[{"freq_hz":5,"mode":"am","deemphasis":"50us"}]}"#,
+            r#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[{"freq_hz":5,"mode":"usb","deemphasis":"50us"}]}"#,
             r#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[{"freq_hz":5,"mode":"am","bandwidth_hz":5}]}"#,
+            r#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[{"freq_hz":5,"mode":"usb","cw_pitch_hz":700}]}"#,
+            r#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[{"freq_hz":5,"mode":"cw","cw_pitch_hz":100}]}"#,
             r#"{"v":1,"center_hz":1,"sample_rate":2,"decoders":[1]}"#,
         ] {
             assert!(ProfileData::parse(bad.as_bytes()).is_err(), "{bad}");
@@ -319,6 +343,19 @@ mod tests {
             [r#"{"freq_hz":5,"mode":"am"}"#; 9].join(",")
         );
         assert!(ProfileData::parse(nine.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn accepts_ssb_and_cw_vfos() {
+        let doc = r#"{"v":1,"center_hz":7100000,"sample_rate":2048000,"vfos":[
+            {"freq_hz":7100000,"mode":"lsb"},
+            {"freq_hz":7030000,"mode":"cw","bandwidth_hz":200,"cw_pitch_hz":650}]}"#;
+        let data = ProfileData::parse(doc.as_bytes()).expect("valid");
+        assert_eq!(data.vfos[0].mode, Mode::Lsb);
+        assert_eq!(data.vfos[1].cw_pitch_hz, Some(650));
+        // An unset pitch is not serialised, so existing documents keep their shape.
+        let json = serde_json::to_value(&data).expect("json");
+        assert!(json["vfos"][0].get("cw_pitch_hz").is_none());
     }
 
     #[test]

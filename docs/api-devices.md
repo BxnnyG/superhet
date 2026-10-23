@@ -53,7 +53,7 @@ fields and limits: section "VFOs" below. Bodies are at most 4 KiB, `Content-Type
   (`{"v":1,"ok":true,"vfo":{...},"retune":"none|applied|locked|failed","state":{...}}`) and `Location: /api/v1/devices/{dev}/vfos/{id}`.
 - `PATCH`: partial update as `ctl.vfo.update`; the id comes from the URL (a different `"id"` in the
   body is a `400`). At least one field is required; `null` resets `bandwidth_hz`, `squelch_dbfs`
-  and `deemphasis`. `200` with the daemon's reply.
+  `deemphasis` and `cw_pitch_hz`. `200` with the daemon's reply.
 - `DELETE`: `204` without body.
 - Errors use the shape of the tune route: `400` invalid body/value, non-numeric id, or the daemon's
   `invalid`/`unsupported` (including the limit of 8 VFOs); `404` the daemon's `not_found` (unknown
@@ -117,14 +117,22 @@ daemon runs one channelizer per VFO on a dedicated thread, encodes the audio to 
 VFOs per device.
 
 VFO object (in `vfos` and in replies):
-`{"id","freq_hz","mode":"wfm"|"nfm"|"am","bandwidth_hz","squelch_dbfs":null|number,"deemphasis":"none"|"50us"|"75us"|null,"offset_hz","status":"active"|"paused"}`
+`{"id","freq_hz","mode":"wfm"|"nfm"|"am"|"usb"|"lsb"|"cw","bandwidth_hz","squelch_dbfs":null|number,"deemphasis":"none"|"50us"|"75us"|null,"cw_pitch_hz"?:number,"offset_hz","status":"active"|"paused"}`
 
 - `id` is assigned by the daemon (starting at 1, increasing, not reused while the daemon runs).
-- `bandwidth_hz` is the effective value (mode default: WFM 180 kHz, NFM 12.5 kHz, AM 10 kHz).
-  `deemphasis` is the effective value (WFM 50 us, NFM none) and `null` for AM.
+- `bandwidth_hz` is the effective value (mode default: WFM 180 kHz, NFM 12.5 kHz, AM 10 kHz,
+  USB/LSB 2.4 kHz, CW 500 Hz). For USB/LSB it is the width of the passband, which starts 300 Hz
+  from `freq_hz` (default 300 Hz ..= 2.7 kHz above for USB, below for LSB); the carrier side and
+  the opposite sideband are rejected (> 40 dB, tested). For CW it is the width of the filter centred on
+  `freq_hz`. `deemphasis` is the effective value (WFM 50 us, NFM none) and `null` for the other
+  modes. `cw_pitch_hz` is present for CW only (effective value, default 700): a carrier exactly
+  on `freq_hz` is heard as a tone of this frequency, one 100 Hz above as pitch + 100 Hz.
+- USB/LSB/CW audio goes through a peak AGC with fast attack (2-3 ms), a hang time (250 ms SSB,
+  100 ms CW) and a slow decay (400 ms SSB, 200 ms CW); the squelch measures the power after the
+  channel filter like in the other modes.
 - `offset_hz` = `freq_hz` minus the device centre, recomputed on every retune.
-- `status` is `paused` when `|offset_hz| + bandwidth_hz / 2 > 0.85 * sample_rate / 2` (outside the
-  usable window): no DSP, no audio frames; the VFO resumes (channel reset) as soon as a retune
+- `status` is `paused` when `|offset_hz| + span / 2 > 0.85 * sample_rate / 2` (outside the
+  usable window; `span` is `bandwidth_hz`, for USB/LSB `2 * (300 + bandwidth_hz)`): no DSP, no audio frames; the VFO resumes (channel reset) as soon as a retune
   brings it back into the window.
   While the squelch is closed frames keep flowing (they are tiny) with the squelch flag cleared.
 
@@ -133,13 +141,15 @@ Requests (request/reply, JSON, `v` required, unknown fields rejected). Success r
 `{"v":1,"ok":true,"state":{...}}` (delete); failures use the same `{"ok":false,"code","error"}`
 shape as `ctl.tune`. VFO requests are not coalesced.
 
-- `sh.v1.dev.<dev>.ctl.vfo.create`: `{"v":1,"freq_hz":..,"mode":"wfm"|"nfm"|"am","bandwidth_hz"?:..,
-  "squelch_dbfs"?:..,"deemphasis"?:..}`. `freq_hz` 1..1 THz, `bandwidth_hz` 1000..1000000 (and
-  realisable for the mode at the device's sample rate), `squelch_dbfs` -200..0 (absent or `null`
-  = off), `deemphasis` only for WFM/NFM. A VFO outside the passband is created `paused`.
+- `sh.v1.dev.<dev>.ctl.vfo.create`: `{"v":1,"freq_hz":..,"mode":"wfm"|"nfm"|"am"|"usb"|"lsb"|"cw","bandwidth_hz"?:..,
+  "squelch_dbfs"?:..,"deemphasis"?:..,"cw_pitch_hz"?:..}`. `freq_hz` 1..1 THz, `bandwidth_hz`
+  100..1000000 (and realisable for the mode at the device's sample rate: at least 1000 for
+  WFM/NFM/AM, 300 for USB/LSB, 100 for CW), `squelch_dbfs` -200..0 (absent or `null` = off),
+  `deemphasis` only for WFM/NFM, `cw_pitch_hz` 200..2000 only for CW. A VFO outside the passband is created `paused`.
 - `sh.v1.dev.<dev>.ctl.vfo.update`: `{"v":1,"id":..}` plus any of the fields above (partial patch,
-  at least one). `null` for `bandwidth_hz` / `squelch_dbfs` / `deemphasis` resets to the default /
-  off. Changing `mode` drops a `deemphasis` override unless given in the same request. Changing
+  at least one). `null` for `bandwidth_hz` / `squelch_dbfs` / `deemphasis` / `cw_pitch_hz` resets to the
+  default / off. Changing `mode` drops a `deemphasis` or `cw_pitch_hz` override unless given in
+  the same request. Changing
   mode or bandwidth rebuilds the channel (a short audio gap); frequency and squelch changes do not.
 - `sh.v1.dev.<dev>.ctl.vfo.delete`: `{"v":1,"id":..}`.
 
@@ -153,7 +163,7 @@ applied immediately, not debounced: every one moves the window by most of its wi
 causes few of them.
 
 Error codes: `invalid` (malformed or out-of-range request, unrealisable bandwidth, de-emphasis on
-AM), `not_found` (unknown VFO id in update/delete) and `unsupported` (the limit of 8 VFOs is
+anything but WFM/NFM, `cw_pitch_hz` on anything but CW), `not_found` (unknown VFO id in update/delete) and `unsupported` (the limit of 8 VFOs is
 reached).
 
 ## Tuning lock

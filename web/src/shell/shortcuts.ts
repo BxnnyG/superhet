@@ -9,8 +9,8 @@ export type ShortcutAction =
   | { type: "step"; steps: number }
   /** Select the next (+1) or previous (-1) VFO. */
   | { type: "vfo"; delta: 1 | -1 }
-  /** Set the mode of the active VFO; `mode` is null for modes the backend does not have yet. */
-  | { type: "mode"; mode: VfoMode | null; label: string }
+  /** Set the mode of the active VFO. */
+  | { type: "mode"; mode: VfoMode; label: string }
   | { type: "listen" }
   | { type: "autoSquelch" }
   | { type: "bookmark" }
@@ -21,14 +21,14 @@ export type ShortcutAction =
   | { type: "delete" }
   | { type: "help" };
 
-/** Modes on keys 1-6; USB, LSB and CW wait for the backend. */
-export const MODE_KEYS: readonly { mode: VfoMode | null; label: string }[] = [
+/** Modes on keys 1-6. */
+export const MODE_KEYS: readonly { mode: VfoMode; label: string }[] = [
   { mode: "wfm", label: "WFM" },
   { mode: "nfm", label: "NFM" },
   { mode: "am", label: "AM" },
-  { mode: null, label: "USB" },
-  { mode: null, label: "LSB" },
-  { mode: null, label: "CW" },
+  { mode: "usb", label: "USB" },
+  { mode: "lsb", label: "LSB" },
+  { mode: "cw", label: "CW" },
 ];
 
 /** Steps of Shift+Arrow relative to a plain arrow. */
@@ -136,7 +136,10 @@ export const SHORTCUT_GROUPS: readonly {
     title: "Receiver",
     items: [
       { keys: ["1", "2", "3"], label: "Mode WFM / NFM / AM" },
-      { keys: ["4", "5", "6"], label: "USB / LSB / CW (not available yet)" },
+      {
+        keys: ["4", "5", "6"],
+        label: "Mode USB / LSB / CW (bandwidth resets to the mode default)",
+      },
       { keys: ["M"], label: "Listen to the active VFO on / off" },
       { keys: ["S"], label: "Squelch Auto on / off" },
     ],

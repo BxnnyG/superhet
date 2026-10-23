@@ -2,13 +2,58 @@
 
 import type { Vfo, VfoMode } from "./api";
 
-export const MODE_LABEL: Record<VfoMode, string> = { wfm: "WFM", nfm: "NFM", am: "AM" };
+export const MODE_LABEL: Record<VfoMode, string> = {
+  wfm: "WFM",
+  nfm: "NFM",
+  am: "AM",
+  usb: "USB",
+  lsb: "LSB",
+  cw: "CW",
+};
+
+/** Default bandwidth per mode (Hz), as the daemon applies it when no override is set. */
+export const DEFAULT_BANDWIDTH_HZ: Record<VfoMode, number> = {
+  wfm: 180_000,
+  nfm: 12_500,
+  am: 10_000,
+  usb: 2_400,
+  lsb: 2_400,
+  cw: 500,
+};
+
+/**
+ * Lower audio edge of the USB/LSB passband (Hz from the carrier): the passband spans
+ * `SSB_LOW_CUT_HZ` .. `SSB_LOW_CUT_HZ + bandwidth` on one side of the VFO frequency.
+ */
+export const SSB_LOW_CUT_HZ = 300;
+
+/** Frequency range the receiver passes for a VFO: one-sided for USB/LSB, centred otherwise. */
+export function passbandRange(
+  mode: VfoMode,
+  freqHz: number,
+  bandwidthHz: number,
+): { loHz: number; hiHz: number } {
+  if (mode === "usb")
+    return { loHz: freqHz + SSB_LOW_CUT_HZ, hiHz: freqHz + SSB_LOW_CUT_HZ + bandwidthHz };
+  if (mode === "lsb")
+    return { loHz: freqHz - SSB_LOW_CUT_HZ - bandwidthHz, hiHz: freqHz - SSB_LOW_CUT_HZ };
+  return { loHz: freqHz - bandwidthHz / 2, hiHz: freqHz + bandwidthHz / 2 };
+}
 
 /** Default tuning step per mode (Hz). */
-export const DEFAULT_STEP_HZ: Record<VfoMode, number> = { wfm: 10_000, nfm: 12_500, am: 5_000 };
+export const DEFAULT_STEP_HZ: Record<VfoMode, number> = {
+  wfm: 10_000,
+  nfm: 12_500,
+  am: 5_000,
+  usb: 100,
+  lsb: 100,
+  cw: 50,
+};
 
 /** Selectable steps; "auto" (the mode default) is handled by the UI. */
-export const STEPS_HZ = [100, 1_000, 5_000, 6_250, 10_000, 12_500, 25_000, 100_000] as const;
+export const STEPS_HZ = [
+  10, 50, 100, 500, 1_000, 5_000, 6_250, 10_000, 12_500, 25_000, 100_000,
+] as const;
 
 export type StepChoice = "auto" | number;
 
@@ -38,6 +83,9 @@ export const BANDWIDTH_PRESETS: Record<VfoMode, readonly number[]> = {
   wfm: [100_000, 150_000, 180_000, 200_000],
   nfm: [6_250, 8_500, 12_500, 15_000, 25_000],
   am: [5_000, 6_000, 8_000, 10_000, 12_000],
+  usb: [1_800, 2_100, 2_400, 2_700, 3_000, 3_600],
+  lsb: [1_800, 2_100, 2_400, 2_700, 3_000, 3_600],
+  cw: [100, 200, 300, 500, 800, 1_200, 2_000],
 };
 
 /** Smallest and largest bandwidth offered for a mode (the ends of its presets). */
@@ -132,15 +180,16 @@ export function toMarker(v: Vfo): Marker {
 }
 
 /**
- * The VFO under a frequency: inside its bandwidth, or within `slopHz` of its centre line for
- * narrow VFOs. Ties go to the VFO with the nearest centre.
+ * The VFO under a frequency: inside its passband, or within `slopHz` of its centre line for
+ * narrow VFOs (and for the carrier of single-sideband VFOs, which lies outside their passband). Ties go to the VFO with the nearest centre.
  */
 export function hitTestVfo(markers: readonly Marker[], hz: number, slopHz: number): Marker | null {
   let best: Marker | null = null;
   let bestDist = Infinity;
   for (const m of markers) {
     const dist = Math.abs(hz - m.freqHz);
-    if (dist <= Math.max(m.bandwidthHz / 2, slopHz) && dist < bestDist) {
+    const { loHz, hiHz } = passbandRange(m.mode, m.freqHz, m.bandwidthHz);
+    if (dist < bestDist && ((hz >= loHz && hz <= hiHz) || dist <= slopHz)) {
       best = m;
       bestDist = dist;
     }

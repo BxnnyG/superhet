@@ -30,14 +30,14 @@ loaded onto any device the settings fit (a file replay refuses other sample rate
   Unknown fields are rejected.
 - `gain`: `{"mode":"auto"}` or `{"mode":"manual","db":-20..100}` (`db` required for manual,
   absent/`null` for auto). `ppm` -1000..1000.
-- `vfos` (at most 8): `freq_hz` (1..1e12) and `mode` (`wfm`|`nfm`|`am`) required;
-  `bandwidth_hz` (1000..1000000), `squelch_dbfs` (-200..0) and `deemphasis` (`none`|`50us`|`75us`,
-  never with `am`) optional, `null`/absent = mode default / squelch off. Whether a VFO can be
+- `vfos` (at most 8): `freq_hz` (1..1e12) and `mode` (`wfm`|`nfm`|`am`|`usb`|`lsb`|`cw`) required;
+  `bandwidth_hz` (100..1000000), `squelch_dbfs` (-200..0), `deemphasis` (`none`|`50us`|`75us`,
+  only with `wfm`/`nfm`) and `cw_pitch_hz` (200..2000, only with `cw`; not written when unset) optional, `null`/absent = mode default / squelch off. Whether a VFO can be
   realised at the profile's sample rate is checked when loading.
 - `lock`: take the user tuning lock after loading. Loading never releases a lock.
 - `decoders`: reserved for decoder instances (P2); at most 32 objects, stored and returned
   untouched, ignored by the daemon.
-- "Save" stores effective values (the VFO's actual bandwidth and de-emphasis), so a profile keeps
+- "Save" stores effective values (the VFO's actual bandwidth, de-emphasis and CW pitch), so a profile keeps
   its meaning if mode defaults change. The API stores documents normalised (defaults filled in).
 
 ## REST (superhet-api, port 8073)

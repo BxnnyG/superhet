@@ -45,6 +45,27 @@ describe("passband edges", () => {
   });
 });
 
+describe("single-sideband passband", () => {
+  const slop = 100;
+  const usb: Marker = { ...nfm, mode: "usb", bandwidthHz: 2_400 }; // f+300 .. f+2700
+  const lsb: Marker = { ...nfm, mode: "lsb", bandwidthHz: 2_400 }; // f-2700 .. f-300
+  it("offers only the outer edge for dragging", () => {
+    expect(hitPassbandEdge(usb, usb.freqHz + 2_700, slop)).toBe("hi");
+    expect(hitPassbandEdge(usb, usb.freqHz + 300, slop)).toBeNull();
+    expect(hitPassbandEdge(usb, usb.freqHz - 2_700, slop)).toBeNull();
+    expect(hitPassbandEdge(lsb, lsb.freqHz - 2_700, slop)).toBe("lo");
+    expect(hitPassbandEdge(lsb, lsb.freqHz - 300, slop)).toBeNull();
+    expect(hitPassbandEdge(lsb, lsb.freqHz + 2_700, slop)).toBeNull();
+  });
+  it("is over the passband on its own side and at the carrier only", () => {
+    expect(isOverPassband(usb, usb.freqHz + 1_500, slop)).toBe(true);
+    expect(isOverPassband(usb, usb.freqHz - 1_500, slop)).toBe(false);
+    expect(isOverPassband(usb, usb.freqHz + 50, slop)).toBe(true);
+    expect(isOverPassband(lsb, lsb.freqHz - 1_500, slop)).toBe(true);
+    expect(isOverPassband(lsb, lsb.freqHz + 1_500, slop)).toBe(false);
+  });
+});
+
 describe("bandwidth from an edge drag", () => {
   const f = 145_500_000;
   it("doubles the distance to the carrier and snaps to 100 Hz", () => {
@@ -59,11 +80,13 @@ describe("bandwidth from an edge drag", () => {
     expect(bandwidthFromEdge("wfm", f + 10_000, f)).toBe(100_000);
     expect(bandwidthFromEdge("wfm", f + 1_000_000, f)).toBe(200_000);
   });
-  it("uses the one-sided distance for single sideband", () => {
-    expect(bandwidthFromEdge("am", f + 8_000, f, "upper")).toBe(8_000);
-    expect(bandwidthFromEdge("am", f - 8_000, f, "lower")).toBe(8_000);
+  it("uses the one-sided distance minus the low cut for single sideband", () => {
+    expect(bandwidthFromEdge("usb", f + 3_000, f)).toBe(2_700);
+    expect(bandwidthFromEdge("lsb", f - 3_000, f)).toBe(2_700);
+    expect(bandwidthFromEdge("am", f + 8_300, f, "upper")).toBe(8_000);
     // Dragging an upper-sideband edge across the carrier bottoms out at the minimum.
-    expect(bandwidthFromEdge("am", f - 8_000, f, "upper")).toBe(5_000);
+    expect(bandwidthFromEdge("usb", f - 3_000, f)).toBe(1_800);
+    expect(bandwidthFromEdge("usb", f + 100_000, f)).toBe(3_600);
   });
 });
 

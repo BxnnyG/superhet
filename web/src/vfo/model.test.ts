@@ -7,6 +7,7 @@ import {
   defaultModeFor,
   hitTestVfo,
   meterFraction,
+  passbandRange,
   sliderToSquelch,
   snapFrequency,
   squelchToSlider,
@@ -77,6 +78,23 @@ describe("meterFraction", () => {
     expect(meterFraction(10)).toBe(1);
     expect(meterFraction(null)).toBe(0);
     expect(meterFraction(NaN)).toBe(0);
+  });
+});
+
+describe("passbandRange", () => {
+  it("is centred for FM, AM and CW and one-sided for USB / LSB", () => {
+    expect(passbandRange("nfm", 1000, 400)).toEqual({ loHz: 800, hiHz: 1200 });
+    expect(passbandRange("cw", 1000, 200)).toEqual({ loHz: 900, hiHz: 1100 });
+    // 300 Hz low cut, then the bandwidth.
+    expect(passbandRange("usb", 10_000, 2_400)).toEqual({ loHz: 10_300, hiHz: 12_700 });
+    expect(passbandRange("lsb", 10_000, 2_400)).toEqual({ loHz: 7_300, hiHz: 9_700 });
+  });
+
+  it("hit-tests a single-sideband VFO on its sideband and at its carrier", () => {
+    const usb: Marker = { id: 1, freqHz: 10e6, bandwidthHz: 2_400, mode: "usb", paused: false };
+    expect(hitTestVfo([usb], 10e6 + 1_500, 0)?.id).toBe(1);
+    expect(hitTestVfo([usb], 10e6 - 1_500, 0)).toBeNull();
+    expect(hitTestVfo([usb], 10e6 + 50, 100)?.id).toBe(1);
   });
 });
 

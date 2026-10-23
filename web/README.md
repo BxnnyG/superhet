@@ -13,23 +13,29 @@ user back to login; the spectrum and audio sockets stop reconnecting until the n
 
 ## Spectrum gestures
 
-| Gesture                                           | Action                                                         |
-| ------------------------------------------------- | -------------------------------------------------------------- |
-| Wheel                                             | Zoom around the pointer                                        |
-| Wheel over the selected VFO's passband            | Tune it by the current step (wheel up = higher)                |
-| Ctrl+wheel                                        | Always zoom                                                    |
-| Drag on empty spectrum or waterfall               | Pan a zoomed view (a press that moves 4 px or less is a click) |
-| Shift-drag / middle-drag                          | Pan                                                            |
-| Drag on the frequency axis                        | Pan (never grabs a VFO)                                        |
-| Double-click                                      | Reset zoom                                                     |
-| Click on empty spectrum, no VFO selected          | Tune the device centre                                         |
-| Click on empty spectrum or the axis, VFO selected | Move the selected VFO there (snapped to the step)              |
-| Click on a VFO (its shaded band or centre line)   | Select it                                                      |
-| Drag a VFO                                        | Retune it (snapped to the step)                                |
-| Drag an edge of the selected VFO's passband       | Change its bandwidth (symmetric, 100 Hz grid, mode limits)     |
-| Alt-click or Ctrl-click on empty spectrum         | Create a VFO at the pointer (default mode by band)             |
-| Drag the splitter between spectrum and waterfall  | Resize the two panes (arrow keys, Home resets)                 |
-| Esc (or "Deselect")                               | Deselect, so a plain click tunes the centre again              |
+| Gesture                                           | Action                                                                                                        |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Wheel                                             | Zoom around the pointer                                                                                       |
+| Wheel over the selected VFO's passband            | Tune it by the current step (wheel up = higher)                                                               |
+| Ctrl+wheel                                        | Always zoom                                                                                                   |
+| Drag on empty spectrum or waterfall               | Pan a zoomed view (a press that moves 4 px or less is a click)                                                |
+| Shift-drag / middle-drag                          | Pan                                                                                                           |
+| Drag on the frequency axis                        | Pan (never grabs a VFO)                                                                                       |
+| Double-click                                      | Reset zoom                                                                                                    |
+| Click on empty spectrum, no VFO selected          | Tune the device centre                                                                                        |
+| Click on empty spectrum or the axis, VFO selected | Move the selected VFO there (snapped to the step)                                                             |
+| Click on a VFO (its shaded band or centre line)   | Select it                                                                                                     |
+| Drag a VFO                                        | Retune it (snapped to the step)                                                                               |
+| Drag an edge of the selected VFO's passband       | Change its bandwidth (100 Hz grid, mode limits; symmetric for WFM/NFM/AM/CW, the outer edge only for USB/LSB) |
+| Alt-click or Ctrl-click on empty spectrum         | Create a VFO at the pointer (default mode by band)                                                            |
+| Drag the splitter between spectrum and waterfall  | Resize the two panes (arrow keys, Home resets)                                                                |
+| Esc (or "Deselect")                               | Deselect, so a plain click tunes the centre again                                                             |
+
+USB and LSB passbands are one-sided: the shaded band spans 300 Hz to 300 Hz + bandwidth on the upper
+(USB) or lower (LSB) side of the VFO line (default 2.4 kHz wide), the line itself marks the carrier
+frequency, and only the outer edge can be dragged. CW is centred on the line (default 500 Hz): a
+carrier exactly on the line is heard as a 700 Hz tone (the pitch can be set through the API,
+`cw_pitch_hz`, `docs/api-devices.md`).
 
 Zooming asks the daemon for a zoom FFT of the visible slice (ADR-0009), so a narrow view shows finer
 bins instead of stretched pixels (about 9 Hz per bin at the 10 kHz minimum span, 2.4 MS/s). The
@@ -44,18 +50,18 @@ everywhere on the spectrum (Ctrl+wheel still zooms). Stored in `localStorage`.
 Active on the page (not while typing in a field, on a slider/splitter/digit readout that has focus,
 or with a dialog open); `?` or Settings, "Keyboard shortcuts" lists them.
 
-| Key            | Action                                                      |
-| -------------- | ----------------------------------------------------------- |
-| `←` / `→`      | Step the selected VFO down / up (`Shift`: ten steps)        |
-| `↑` / `↓`      | Select the next / previous VFO                              |
-| `1` `2` `3`    | Mode WFM / NFM / AM (`4` `5` `6` = USB / LSB / CW: not yet) |
-| `M`            | Listen to the selected VFO on / off                         |
-| `S`            | Squelch Auto on / off                                       |
-| `B`            | Bookmark the selected VFO                                   |
-| `+` / `-`, `0` | Zoom in / out, reset zoom                                   |
-| `N`            | New VFO at the display centre                               |
-| `Delete`       | Remove the selected VFO (the notice offers Undo)            |
-| `?`            | Show the shortcut list                                      |
+| Key            | Action                                                                      |
+| -------------- | --------------------------------------------------------------------------- |
+| `←` / `→`      | Step the selected VFO down / up (`Shift`: ten steps)                        |
+| `↑` / `↓`      | Select the next / previous VFO                                              |
+| `1` … `6`      | Mode WFM / NFM / AM / USB / LSB / CW (bandwidth resets to the mode default) |
+| `M`            | Listen to the selected VFO on / off                                         |
+| `S`            | Squelch Auto on / off                                                       |
+| `B`            | Bookmark the selected VFO                                                   |
+| `+` / `-`, `0` | Zoom in / out, reset zoom                                                   |
+| `N`            | New VFO at the display centre                                               |
+| `Delete`       | Remove the selected VFO (the notice offers Undo)                            |
+| `?`            | Show the shortcut list                                                      |
 
 ## Layout and controls
 
@@ -69,8 +75,8 @@ clamped), ArrowLeft/Right/Home/End move between digits, typing a digit overwrite
 double-click or the pencil button switch to typed entry (`104.2`, `433.92M`, `7100k`, Esc cancels).
 
 Radio section: `+ VFO` (at the display centre), the VFO list (mode badge, delete), the tuning step
-(default per mode: WFM 10 kHz, NFM 12.5 kHz, AM 5 kHz; selectable 100 Hz to 100 kHz), and for the
-selected VFO: step nudge, mode (WFM/NFM/AM), bandwidth, squelch (off, -120..0 dBFS, green tick =
+(default per mode: WFM 10 kHz, NFM 12.5 kHz, AM 5 kHz, USB/LSB 100 Hz, CW 50 Hz; selectable 10 Hz to 100 kHz), and for the
+selected VFO: step nudge, mode (WFM/NFM/AM/USB/LSB/CW), bandwidth, squelch (off, -120..0 dBFS, green tick =
 live channel power), volume, mute, S-meter, deselect, delete. Changing the mode resets the bandwidth
 to the mode default. Volume and mute are client-side only. Source: centre frequency (typed values
 accept units), sample rate, gain (auto or per step), PPM. Display: visible span with zoom

@@ -128,7 +128,7 @@ afterEach(() => {
 
 describe("bookmark api", () => {
   it("parses a bookmark and tolerates numeric ids and unknown modes", () => {
-    const b = parseBookmark({ ...raw("x", "N", 1e8), id: 7, mode: "usb" });
+    const b = parseBookmark({ ...raw("x", "N", 1e8), id: 7, mode: "dsb" });
     expect(b).toMatchObject({ id: "7", mode: null, freqHz: 1e8 });
     expect(() => parseBookmark({ name: "x" })).toThrow();
   });

@@ -25,9 +25,8 @@ Related: profiles (`docs/api-profiles.md`) preset a whole receiver, bookmarks ar
 - `name`: trimmed, 1..100 characters, no control characters. Not unique.
 - `freq_hz`: integer, 1..10 000 000 000.
 - `mode`: `wfm`, `nfm`, `am`, `usb`, `lsb`, `cw` (lower case) or `null`. The spelling is that of
-  the VFO API (`docs/api-devices.md`), which currently realises only `wfm|nfm|am`; `usb|lsb|cw`
-  are storable ahead of their demodulators.
-- `bandwidth_hz`: integer 1..10 000 000 or `null` (= mode default).
+  the VFO API (`docs/api-devices.md`), which realises all six modes.
+- `bandwidth_hz`: integer 1..10 000 000 (for `usb`/`lsb` the passband width above the 300 Hz low cut) or `null` (= mode default).
 - `tags`: at most 16 strings, each trimmed, 1..32 characters, no control characters. Duplicates
   are dropped (first occurrence wins), order is kept.
 - `color`: `#rrggbb` (any case accepted, stored lower case) or `null`.

@@ -105,6 +105,6 @@ entries whose modulation has no VFO mode, then offers **Merge** (only new ones) 
 | gqrx `bookmarks.csv` (`freq ; name ; modulation ; bandwidth ; tags`, tag colours) | yes | yes |
 | SDR++ frequency manager JSON (`lists` / single list, mode ids 0 NFM, 1 WFM, 2 AM) | yes | no |
 
-Superhet only has the demodulators WFM, NFM and AM. Other modulations (USB, LSB, CW, DSB, raw) import
-without a mode and keep the original name in the notes ("Mode: USB"). SDR++ list names become tags
+Superhet has the demodulators WFM, NFM, AM, USB, LSB and CW (gqrx `CW-L`/`CW-U` both map to CW).
+Other modulations (DSB, raw) import without a mode and keep the original name in the notes ("Mode: USB"). SDR++ list names become tags
 (the default list "General" does not).

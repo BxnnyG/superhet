@@ -32,7 +32,7 @@ phase (plugins, recording) first.
 | Default VFO on a fresh install | done (alpha.3) | P1 |
 | Per-VFO volume and stereo pan (left/right split for two VFOs) | next | P1 polish |
 | WFM stereo + RDS (station name, radio text) | next | P1 crit. 4 / RDS decoder in P2 (redsea) |
-| USB/LSB/CW demodulators | next | P1 crit. 4 |
+| USB/LSB/CW demodulators (one-sided SSB passband with edge drag, CW pitch) | done (alpha.5) | P1 crit. 4 |
 | Noise reduction / notch filter | later | P1 polish |
 
 ## Memory and data
