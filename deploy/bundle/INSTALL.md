@@ -15,10 +15,14 @@ for a real receiver, an RTL-SDR dongle plugged into this host. Single user, self
 
 Check the receiver: `docker compose logs superhet-sdrd` shows `RTL-SDR opened`.
 
-Update: `docker compose pull && docker compose up -d`. The stack follows the image channel `SUPERHET_TAG`
-(default `@CHANNEL@`; `next` = newest release incl. pre-releases, `latest` = newest stable, `edge` = main).
-To pin a version set e.g. `SUPERHET_TAG=0.1.0-alpha.3` in `.env`. New services or settings need the
-`compose.yaml` of the new release (re-run `install.sh` or use the new bundle). Data lives in the
+Update (in this directory):
+`curl -fsSL https://raw.githubusercontent.com/BxnnyG/superhet/main/scripts/install.sh | sh -s -- --update`.
+It fetches the `compose.yaml` of the release matching your channel (checksum verified, includes the NATS
+config), keeps `.env`, saves the old file as `compose.yaml.bak` and runs `docker compose pull && docker compose up -d`.
+Warning: a plain `docker compose pull` only updates the images; with an old `compose.yaml` newer images can
+run against outdated NATS permissions or settings and features silently fail. The stack follows the image
+channel `SUPERHET_TAG` (default `@CHANNEL@`; `next` = newest release incl. pre-releases, `latest` = newest
+stable, `edge` = main). To pin a version set e.g. `SUPERHET_TAG=0.1.0-alpha.3` in `.env`. Data lives in the
 named volumes `postgres-data` and `nats-data`.
 
 Plain HTTP is meant for a trusted LAN. For access from the internet put a TLS reverse proxy in front,

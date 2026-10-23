@@ -46,16 +46,21 @@ The installer creates `./superhet` with `compose.yaml` and a `.env` (random pass
 
 ### Update
 
+Run in the install directory (where `compose.yaml` and `.env` live):
+
 ```sh
-cd superhet
-docker compose pull && docker compose up -d
+curl -fsSL https://raw.githubusercontent.com/BxnnyG/superhet/main/scripts/install.sh | sh -s -- --update
 ```
 
-The stack follows the image channel `SUPERHET_TAG` in `.env`: `next` (newest release incl. pre-releases, the current default), `latest` (newest stable release), `edge` (development build of `main`). Data lives in named volumes and survives updates. When a release adds services or settings, re-run the installer in the same directory; it refreshes `compose.yaml` (old one saved as `compose.yaml.bak`) and keeps your `.env`.
+This fetches the `compose.yaml` of the release matching your channel (checksum verified; it embeds the NATS permissions the new images need), keeps your `.env`, saves the old file as `compose.yaml.bak`, then runs `docker compose pull && docker compose up -d`. A changed NATS config recreates the `nats` container automatically.
+
+Warning: a plain `docker compose pull && docker compose up -d` only updates the images. It keeps your old `compose.yaml`, so a newer image can run against outdated NATS permissions or service settings and features such as zoom or RDS silently fail (NATS "Permissions Violation" in the logs). Use it only for a quick image refresh within the same release line.
+
+The stack follows the image channel `SUPERHET_TAG` in `.env`: `next` (newest release incl. pre-releases, the current default), `latest` (newest stable release), `edge` (development build of `main`). Data lives in named volumes and survives updates.
 
 ### Pin a version
 
-Set `SUPERHET_TAG=0.1.0-alpha.3` (any published version tag) in `.env`, then `docker compose pull && docker compose up -d`. Back to a channel: `SUPERHET_TAG=next`.
+Set `SUPERHET_TAG=0.1.0-alpha.3` (any published version tag) in `.env`, then run the update command above (`--update` takes `compose.yaml` from the pinned release). Back to a channel: `SUPERHET_TAG=next`.
 
 Manual alternative (same result, two files):
 
