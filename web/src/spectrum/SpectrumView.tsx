@@ -135,6 +135,10 @@ export function SpectrumView({
         plot.push(frame);
         waterfall?.push(frame);
         interaction?.setFrameSpan(frame.centerHz, frame.sampleRate);
+        view.setShown({
+          startHz: frame.centerHz - frame.sampleRate / 2,
+          endHz: frame.centerHz + frame.sampleRate / 2,
+        });
         if (
           !last ||
           last.centerHz !== frame.centerHz ||

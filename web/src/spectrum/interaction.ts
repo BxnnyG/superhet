@@ -338,7 +338,9 @@ export class SpectrumInteraction {
     if (d.pan && d.moved && d.base) {
       const base = d.base;
       const plotW = rect.width - this.o.leftPad;
-      if (plotW > 0) this.o.view.panFrom(base, -(dx / plotW) * spanWidth(base));
+      // Pixels map to the span on screen; the requested span keeps its own width.
+      const onScreen = this.frameSpan ?? base;
+      if (plotW > 0) this.o.view.panFrom(base, -(dx / plotW) * spanWidth(onScreen));
     }
   };
 
