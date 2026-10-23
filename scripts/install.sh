@@ -4,12 +4,18 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/BxnnyG/superhet/main/scripts/install.sh | sh
 #   ... | sh -s -- --no-start        # only prepare the directory, do not start
+#   ... | sh -s -- --update          # update an existing install (run in the install dir)
 #
 # The raw URL always works: it fetches compose.yaml from the newest GitHub release (pre-releases
 # included). The copy attached to a release has that release baked in instead (@TAG@ = the tag).
 # The stack follows a moving image channel (SUPERHET_TAG in .env): next (newest release incl.
-# pre-releases), latest (newest stable), edge (main), or a fixed version. Update afterwards with
-# `docker compose pull && docker compose up -d`.
+# pre-releases), latest (newest stable), edge (main), or a fixed version.
+#
+# --update is the supported way to update: it fetches the compose.yaml (which embeds the NATS
+# config) of the release matching the channel in .env, verifies its sha256, keeps .env, saves the
+# old file as compose.yaml.bak, then runs `docker compose pull && docker compose up -d`. A plain
+# `docker compose pull` only refreshes images and leaves an outdated compose.yaml/NATS config in
+# place, which can silently break newer images.
 #
 # Environment: SUPERHET_VERSION (release tag to fetch compose.yaml from; default: baked-in tag or
 # the newest release), SUPERHET_TAG (channel/version written to .env; default: next for
@@ -21,16 +27,18 @@ set -eu
 default_version='@TAG@'
 repo_url='https://github.com/BxnnyG/superhet'
 start=1
+update=0
 
 for arg in "$@"; do
     case "$arg" in
     --no-start) start=0 ;;
+    --update) update=1 ;;
     -h | --help)
-        sed -n '2,17p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//' || true
+        sed -n '2,24p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//' || true
         exit 0
         ;;
     *)
-        echo "unknown argument: $arg (supported: --no-start)" >&2
+        echo "unknown argument: $arg (supported: --no-start, --update)" >&2
         exit 2
         ;;
     esac
@@ -53,15 +61,47 @@ fetch_stdout() { # fetch_stdout URL
     fi
 }
 
+dir="${SUPERHET_DIR:-}"
+env_tag=''
+if [ "$update" = 1 ]; then
+    # Update mode: act on the existing install (current directory if it looks like one).
+    if [ -z "$dir" ]; then
+        if [ -f .env ] && [ -f compose.yaml ]; then dir=.; else dir=superhet; fi
+    fi
+    [ -f "$dir/.env" ] || die "no installation found in $dir (no .env); run this in the install directory or set SUPERHET_DIR, or omit --update for a fresh install"
+    env_tag="$(sed -n 's/^SUPERHET_TAG=//p' "$dir/.env" | tail -n 1 | tr -d "\"' \r")"
+    default_version=''
+fi
+dir="${dir:-superhet}"
+
+latest_release() { # latest_release stable|any
+    if [ "$1" = stable ]; then
+        url="https://api.github.com/repos/BxnnyG/superhet/releases/latest"
+    else
+        url="https://api.github.com/repos/BxnnyG/superhet/releases?per_page=1"
+    fi
+    fetch_stdout "$url" 2>/dev/null |
+        sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1 || true
+}
+
 version="${SUPERHET_VERSION:-$default_version}"
+if [ -z "$version" ] && [ "$update" = 1 ]; then
+    # The release matching the channel: latest -> newest stable, a fixed version -> that release,
+    # next/edge/unset -> newest release (pre-releases included).
+    case "$env_tag" in
+    latest) version="$(latest_release stable)" ;;
+    [0-9]* | v[0-9]*) version="$env_tag" ;;
+    *) version="$(latest_release any)" ;;
+    esac
+    [ -n "$version" ] || die "could not determine the release for channel '${env_tag:-next}' (GitHub API unreachable or rate-limited?); set SUPERHET_VERSION, e.g. SUPERHET_VERSION=v0.1.0-alpha.3"
+fi
 case "$version" in
 *@* | '')
     # Raw script from the repository: resolve the newest release (pre-releases included).
     if [ -n "${SUPERHET_BASE_URL:-}" ]; then
         die "SUPERHET_BASE_URL needs SUPERHET_VERSION too, e.g. SUPERHET_VERSION=v0.1.0-alpha.3"
     fi
-    version="$(fetch_stdout "https://api.github.com/repos/BxnnyG/superhet/releases?per_page=1" 2>/dev/null |
-        sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1 || true)"
+    version="$(latest_release any)"
     [ -n "$version" ] || die "could not determine the newest release (GitHub API unreachable or rate-limited?); set SUPERHET_VERSION, e.g. SUPERHET_VERSION=v0.1.0-alpha.3"
     ;;
 esac
@@ -75,8 +115,8 @@ case "$version" in
 *) channel=latest ;;
 esac
 channel="${SUPERHET_TAG:-$channel}"
+[ "$update" = 0 ] || channel="${env_tag:-$channel}"
 base_url="${SUPERHET_BASE_URL:-$repo_url/releases/download/$version}"
-dir="${SUPERHET_DIR:-superhet}"
 project="${COMPOSE_PROJECT_NAME:-superhet}"
 
 # --- prerequisites -------------------------------------------------------------------------
@@ -164,15 +204,43 @@ dir_abs="$(pwd)"
 
 say "Superhet $version (image channel: $channel) -> $dir_abs"
 tmp="$(mktemp "compose.yaml.XXXXXX")"
-trap 'rm -f "$tmp"' EXIT
+trap 'rm -f "$tmp" "$tmp.sha256"' EXIT
 fetch "$base_url/compose.yaml" "$tmp" || die "could not download $base_url/compose.yaml (wrong version or no network?)"
+
+# Verify the download against the sha256 published next to it in the release.
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    else
+        return 1
+    fi
+}
+if fetch "$base_url/compose.yaml.sha256" "$tmp.sha256" 2>/dev/null; then
+    expected="$(cut -d' ' -f1 "$tmp.sha256" | head -n 1)"
+    if actual="$(sha256_of "$tmp")"; then
+        [ "$expected" = "$actual" ] || die "sha256 mismatch for compose.yaml from $base_url (expected $expected, got $actual); nothing was changed"
+        say "compose.yaml sha256 verified"
+    else
+        warn "no sha256sum/shasum available, skipping checksum verification"
+    fi
+else
+    warn "no compose.yaml.sha256 published for $version, skipping checksum verification"
+fi
+
+compose_changed=0
 if [ -e compose.yaml ] && ! cmp -s "$tmp" compose.yaml; then
     cp compose.yaml compose.yaml.bak
+    compose_changed=1
     say "compose.yaml updated (previous one saved as compose.yaml.bak)"
+elif [ -e compose.yaml ]; then
+    say "compose.yaml already up to date"
 fi
 chmod 0644 "$tmp"
 mv "$tmp" compose.yaml
 trap - EXIT
+rm -f "$tmp.sha256"
 
 # --- .env ----------------------------------------------------------------------------------
 if [ -e .env ]; then
@@ -237,6 +305,17 @@ fi
 # --- start ---------------------------------------------------------------------------------
 docker compose pull
 docker compose up -d
+
+if [ "$update" = 1 ]; then
+    say ""
+    if [ "$compose_changed" = 1 ]; then
+        say "Updated to $version: new compose.yaml (incl. NATS config) and images are active. Previous compose.yaml: compose.yaml.bak"
+    else
+        say "Updated images for $version; compose.yaml was already current."
+    fi
+    say "Check: docker compose ps"
+    exit 0
+fi
 
 port="$(sed -n 's/^SUPERHET_PORT=//p' .env | tail -n 1)"
 port="${port:-8073}"
