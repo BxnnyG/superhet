@@ -13,6 +13,7 @@ phase (plugins, recording) first.
 | Waterfall history kept on zoom, pan, retune | done (alpha.3) | P1 |
 | Click preview: cursor line, snapped frequency, ghost passband, glide | done (alpha.3) | P1 |
 | Clear marking of the usable tuning window | done (alpha.3) | P1 |
+| Zoom FFT: real resolution when zoomed (and pointer anchor fix: markers no longer drift when zooming out) | done in next alpha | P1, ADR-0009 |
 | Band plan overlay (broadcast, amateur, PMR446, Freenet, LPD, CB, air, marine, ISM, BOS/TETRA range, business radio), per-category toggles | now | pulled forward from P4 |
 | Click a band-plan channel to tune with its mode and bandwidth | now | P4 |
 | Keyboard shortcuts (step up/down, next/previous VFO, mute, bookmark) | next | P1 polish |

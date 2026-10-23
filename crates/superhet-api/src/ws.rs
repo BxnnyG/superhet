@@ -5,6 +5,7 @@
 //! carry JSON control messages and acknowledgements.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use axum::{
@@ -20,9 +21,10 @@ use serde::Deserialize;
 use tokio::sync::{Semaphore, broadcast};
 use tokio::time::Instant;
 
-use crate::hub::{Hub, HubError};
+use crate::hub::{Hub, HubError, Streams};
 use crate::origin::OriginPolicy;
-use crate::view::{View, crop_decimate, parse_control};
+use crate::view::{View, covers, crop_decimate, parse_control};
+use superhet_bus::spectrum::SpectrumFrame;
 
 /// Route path of the spectrum gateway.
 pub const PATH: &str = "/api/v1/ws/spectrum";
@@ -32,6 +34,14 @@ const MAX_CONTROL_BYTES: usize = 4096;
 const MAX_CLIENTS: usize = 32;
 /// A client that cannot take a frame within this time is disconnected.
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
+/// A changed view is passed on to the daemon after it stayed unchanged this long (a wheel
+/// zoom sends many; only the last one needs a new slice).
+const ZOOM_DEBOUNCE: Duration = Duration::from_millis(100);
+/// Zoom frames count as flowing for this long after the last one that covered the view; the
+/// full-band frames are held back meanwhile, so a client never gets both for one view.
+const ZOOM_FLOW: Duration = Duration::from_millis(400);
+/// Identifies a spectrum session towards the zoom lease.
+static SESSION_IDS: AtomicU64 = AtomicU64::new(1);
 
 /// Shared state of the WebSocket routes.
 #[derive(Clone)]
@@ -79,7 +89,7 @@ async fn spectrum_ws(
         .try_acquire_owned()
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     let device = query.dev;
-    let frames = state.hub.subscribe(&device).await.map_err(|err| {
+    let streams = state.hub.subscribe(&device).await.map_err(|err| {
         tracing::warn!(%err, "spectrum ws: subscribe failed");
         match err {
             HubError::InvalidDevice => StatusCode::BAD_REQUEST,
@@ -91,8 +101,8 @@ async fn spectrum_ws(
         .max_message_size(MAX_CONTROL_BYTES)
         .max_frame_size(MAX_CONTROL_BYTES)
         .on_upgrade(move |socket| async move {
-            serve_client(socket, frames).await;
-            // The receiver was moved into `serve_client` and is dropped by now.
+            serve_client(socket, streams, &hub, &device).await;
+            // The receivers were moved into `serve_client` and are dropped by now.
             hub.release(&device).await;
             drop(permit);
         }))
@@ -106,21 +116,63 @@ pub(crate) async fn send(socket: &mut WebSocket, message: Message) -> bool {
     )
 }
 
-async fn serve_client(
-    mut socket: WebSocket,
-    mut frames: broadcast::Receiver<Arc<superhet_bus::spectrum::SpectrumFrame>>,
-) {
-    let mut view = View::default();
-    let mut last_sent: Option<Instant> = None;
+/// What one spectrum session knows about the frames it is fed.
+struct Session {
+    view: View,
+    last_sent: Option<Instant>,
+    /// Bandwidth of the newest full-band frame (0 until one arrived).
+    full_rate: u32,
+    /// Newest zoom frame and when it arrived.
+    last_zoom: Option<(Arc<SpectrumFrame>, Instant)>,
+    /// Slice last reported to the hub.
+    leased: Option<(u64, u32)>,
+    /// When to report the slice for the current view (debounce).
+    zoom_due: Option<Instant>,
+}
+
+impl Session {
+    fn new() -> Self {
+        Self {
+            view: View::default(),
+            last_sent: None,
+            full_rate: 0,
+            last_zoom: None,
+            leased: None,
+            zoom_due: None,
+        }
+    }
+
+    /// Zoom frames that cover the view arrived recently: they serve this view.
+    fn zoom_flowing(&self) -> bool {
+        self.last_zoom
+            .as_ref()
+            .is_some_and(|(frame, at)| at.elapsed() < ZOOM_FLOW && covers(frame, &self.view))
+    }
+
+    fn rate_limited(&self) -> bool {
+        self.last_sent
+            .is_some_and(|t| t.elapsed() < self.view.min_interval)
+    }
+}
+
+async fn serve_client(mut socket: WebSocket, streams: Streams, hub: &Hub, device: &str) {
+    let Streams {
+        full: mut frames,
+        zoom: mut zoom_frames,
+    } = streams;
+    let id = SESSION_IDS.fetch_add(1, Ordering::Relaxed);
+    let mut s = Session::new();
     loop {
+        let due = s.zoom_due;
         tokio::select! {
             incoming = socket.recv() => match incoming {
                 None | Some(Err(_) | Ok(Message::Close(_))) => break,
                 Some(Ok(Message::Text(text))) => {
                     let reply = match parse_control(text.as_str()) {
                         Ok(new_view) => {
-                            view = new_view;
-                            last_sent = None;
+                            s.view = new_view;
+                            s.last_sent = None;
+                            s.zoom_due = Some(Instant::now() + ZOOM_DEBOUNCE);
                             r#"{"v":1,"type":"ack"}"#.to_owned()
                         }
                         Err(err) => format!(r#"{{"v":1,"type":"error","error":"{err}"}}"#),
@@ -132,16 +184,31 @@ async fn serve_client(
                 // Pings are answered by the transport; binary input is not part of the protocol.
                 Some(Ok(_)) => {}
             },
+            () = async { tokio::time::sleep_until(due.unwrap_or_else(Instant::now)).await },
+                if due.is_some() =>
+            {
+                s.zoom_due = None;
+                let wanted = s.view.zoom_request(s.full_rate);
+                if wanted != s.leased {
+                    s.leased = wanted;
+                    hub.zoom_set(device, id, wanted).await;
+                }
+            }
             frame = frames.recv() => match frame {
                 Ok(frame) => {
-                    if last_sent.is_some_and(|t| t.elapsed() < view.min_interval) {
+                    if frame.sample_rate != s.full_rate {
+                        // The band became known or changed: the slice to ask for may differ.
+                        s.full_rate = frame.sample_rate;
+                        s.zoom_due.get_or_insert_with(Instant::now);
+                    }
+                    if s.rate_limited() || s.zoom_flowing() {
                         continue;
                     }
-                    let Some(out) = crop_decimate(&frame, &view) else { continue };
+                    let Some(out) = crop_decimate(&frame, &s.view) else { continue };
                     if !send(&mut socket, Message::Binary(out.encode().into())).await {
                         break;
                     }
-                    last_sent = Some(Instant::now());
+                    s.last_sent = Some(Instant::now());
                 }
                 // This client was too slow: the oldest frames are gone, carry on with fresh ones.
                 Err(broadcast::error::RecvError::Lagged(missed)) => {
@@ -149,7 +216,30 @@ async fn serve_client(
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
             },
+            frame = zoom_frames.recv() => match frame {
+                Ok(frame) => {
+                    if !covers(&frame, &s.view) {
+                        continue;
+                    }
+                    s.last_zoom = Some((Arc::clone(&frame), Instant::now()));
+                    if s.rate_limited() {
+                        continue;
+                    }
+                    let Some(out) = crop_decimate(&frame, &s.view) else { continue };
+                    if !send(&mut socket, Message::Binary(out.encode().into())).await {
+                        break;
+                    }
+                    s.last_sent = Some(Instant::now());
+                }
+                Err(broadcast::error::RecvError::Lagged(missed)) => {
+                    tracing::debug!(missed, "zoom client lagging, frames dropped");
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
         }
+    }
+    if s.leased.is_some() {
+        hub.zoom_set(device, id, None).await;
     }
 }
 
@@ -158,7 +248,7 @@ mod tests {
     use super::*;
     use axum::http::{HeaderValue, header};
     use futures_util::{SinkExt, StreamExt};
-    use superhet_bus::spectrum::SpectrumFrame;
+    use superhet_bus::zoom::ZoomCommand;
     use tokio_tungstenite::tungstenite::{self, client::IntoClientRequest};
 
     struct Server {
@@ -277,6 +367,122 @@ mod tests {
         }
         assert_eq!(out.sample_rate, 200_000);
         assert_eq!(out.center_hz, 100_000_000);
+    }
+
+    /// A zoom frame: 250 kHz over 2000 bins (125 Hz each) around 100 MHz.
+    fn zoom_frame() -> SpectrumFrame {
+        let mut db = vec![-90.0f32; 2000];
+        db[1000] = -10.0;
+        SpectrumFrame::quantize(100_000_000, 250_000, 8, -100.0, 0.0, &db)
+    }
+
+    /// Next binary frame within `ms`, if any.
+    async fn try_binary(client: &mut Client, ms: u64) -> Option<SpectrumFrame> {
+        match tokio::time::timeout(Duration::from_millis(ms), client.next()).await {
+            Ok(Some(Ok(tungstenite::Message::Binary(data)))) => SpectrumFrame::decode(&data).ok(),
+            _ => None,
+        }
+    }
+
+    #[tokio::test]
+    async fn narrow_views_lease_a_slice_and_are_served_from_zoom_frames() {
+        let server = start(Hub::local(), OriginPolicy::default()).await;
+        let mut client = connect(&server, "?dev=dev0", None).await.expect("connect");
+        // The full-band frame tells the session how wide the band is.
+        next_binary(&server, &mut client).await;
+        let view = r#"{"type":"view","center_hz":100000000,"span_hz":200000,"bins":4096}"#;
+        client
+            .send(tungstenite::Message::text(view))
+            .await
+            .expect("send");
+        assert_eq!(next_text(&mut client).await, r#"{"v":1,"type":"ack"}"#);
+
+        // After the debounce the slice is leased (exactly once).
+        let mut leased = false;
+        for _ in 0..50 {
+            server.hub.publish_local("dev0", test_frame()).await;
+            let _ = try_binary(&mut client, 50).await;
+            if !server.hub.zoom_commands().is_empty() {
+                leased = true;
+                break;
+            }
+        }
+        assert!(leased, "no zoom request");
+        assert_eq!(
+            server.hub.zoom_commands(),
+            vec![(
+                "dev0".to_owned(),
+                ZoomCommand::View {
+                    center_hz: 100_000_000,
+                    span_hz: 200_000
+                }
+            )]
+        );
+
+        // Zoom frames now carry the view at 125 Hz per bin; full-band frames in between are
+        // held back (they would only give 200 bins).
+        server.hub.publish_local_zoom("dev0", zoom_frame()).await;
+        let mut got = Vec::new();
+        for _ in 0..6 {
+            server.hub.publish_local_zoom("dev0", zoom_frame()).await;
+            server.hub.publish_local("dev0", test_frame()).await;
+            while let Some(f) = try_binary(&mut client, 60).await {
+                got.push(f);
+            }
+        }
+        // Until the first zoom frame was seen a full-band frame may still slip through.
+        let first = got
+            .iter()
+            .position(|f| f.bins.len() > 1500)
+            .expect("zoom frame");
+        for f in &got[first..] {
+            assert!(f.bins.len() > 1500, "{} bins", f.bins.len());
+            assert!(f.sample_rate >= 200_000 && f.sample_rate <= 200_250);
+            assert_eq!(f.timestamp_us, 8);
+        }
+
+        // Leaving the zoomed view returns the lease.
+        let view = r#"{"type":"view","bins":4096}"#;
+        client
+            .send(tungstenite::Message::text(view))
+            .await
+            .expect("send");
+        let mut returned = false;
+        for _ in 0..50 {
+            server.hub.publish_local("dev0", test_frame()).await;
+            let _ = try_binary(&mut client, 50).await;
+            if server.hub.zoom_commands().len() == 2 {
+                returned = true;
+                break;
+            }
+        }
+        assert!(returned, "slice not released");
+        assert_eq!(
+            server.hub.zoom_commands().last().map(|(_, c)| *c),
+            Some(ZoomCommand::Off)
+        );
+    }
+
+    #[tokio::test]
+    async fn zoom_frames_that_miss_the_view_are_ignored() {
+        let server = start(Hub::local(), OriginPolicy::default()).await;
+        let mut client = connect(&server, "?dev=dev0", None).await.expect("connect");
+        next_binary(&server, &mut client).await;
+        // View 99.60 .. 99.65 MHz; the zoom frame covers 99.875 .. 100.125 MHz.
+        let view = r#"{"type":"view","start_hz":99600000,"end_hz":99650000,"bins":4096}"#;
+        client
+            .send(tungstenite::Message::text(view))
+            .await
+            .expect("send");
+        assert_eq!(next_text(&mut client).await, r#"{"v":1,"type":"ack"}"#);
+        for _ in 0..6 {
+            server.hub.publish_local_zoom("dev0", zoom_frame()).await;
+            server.hub.publish_local("dev0", test_frame()).await;
+            while let Some(f) = try_binary(&mut client, 60).await {
+                // Only the full-band frame fits: 1 kHz bins over the 50 kHz view.
+                assert!(f.bins.len() <= 52, "{} bins", f.bins.len());
+            }
+        }
     }
 
     #[tokio::test]

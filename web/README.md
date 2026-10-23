@@ -31,6 +31,11 @@ user back to login; the spectrum and audio sockets stop reconnecting until the n
 | Drag the splitter between spectrum and waterfall  | Resize the two panes (arrow keys, Home resets)                 |
 | Esc (or "Deselect")                               | Deselect, so a plain click tunes the centre again              |
 
+Zooming asks the daemon for a zoom FFT of the visible slice (ADR-0009), so a narrow view shows finer
+bins instead of stretched pixels (about 9 Hz per bin at the 10 kHz minimum span, 2.4 MS/s). The
+zoom and pan maths anchor on the span of the newest frame (`ViewController.setShown`), so the
+pointer stays on its frequency while zooming and a marker does not drift.
+
 Settings menu, "Mouse wheel": `Zoom` (default) as above; `Tune` makes the wheel tune the selected VFO
 everywhere on the spectrum (Ctrl+wheel still zooms). Stored in `localStorage`.
 

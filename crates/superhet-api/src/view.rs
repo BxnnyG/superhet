@@ -19,6 +19,8 @@ pub const DEFAULT_BINS: usize = 1024;
 pub const MIN_FPS: f64 = 1.0;
 /// Highest accepted frame rate limit (also the default).
 pub const MAX_FPS: f64 = 30.0;
+/// A view narrower than this share of the full band asks the daemon for a zoom spectrum.
+pub const ZOOM_MAX_SHARE: f64 = 0.4;
 /// Frequencies above this are rejected (1 THz, far beyond any supported receiver).
 const MAX_HZ: f64 = 1e12;
 
@@ -87,6 +89,40 @@ impl Default for View {
             min_interval: Duration::from_secs_f64(1.0 / MAX_FPS),
         }
     }
+}
+
+impl View {
+    /// The slice `(center_hz, span_hz)` to lease from the daemon for a band `full_rate` Hz wide,
+    /// or `None` when the full-band spectrum is good enough (no span, or a wide one).
+    #[must_use]
+    pub fn zoom_request(&self, full_rate: u32) -> Option<(u64, u32)> {
+        let (start, end) = self.span?;
+        let width = end - start;
+        if full_rate == 0 || width > ZOOM_MAX_SHARE * f64::from(full_rate) {
+            return None;
+        }
+        let center = ((start + end) / 2.0).round();
+        // Range-checked by `validate`: 0..=1e12; the width fits `u32` by the share check above.
+        Some((center as u64, width.ceil().max(1.0) as u32))
+    }
+}
+
+/// True when `frame` covers the view's whole span (within one of its bins), i.e. cropping it
+/// yields what the client asked for. Always false for a view without a span.
+#[must_use]
+pub fn covers(frame: &SpectrumFrame, view: &View) -> bool {
+    let Some((start, end)) = view.span else {
+        return false;
+    };
+    let n = frame.bins.len();
+    if n == 0 || frame.sample_rate == 0 {
+        return false;
+    }
+    let rate = f64::from(frame.sample_rate);
+    let tolerance = rate / n as f64;
+    let lo = frame.center_hz as f64 - rate / 2.0;
+    let hi = frame.center_hz as f64 + rate / 2.0;
+    lo <= start + tolerance && hi >= end - tolerance
 }
 
 fn valid_hz(v: f64) -> bool {
@@ -229,6 +265,42 @@ mod tests {
             bins,
             ..View::default()
         }
+    }
+
+    #[test]
+    fn zoom_request_only_for_narrow_spans() {
+        let v = |span| view(span, 1000);
+        // 1 MHz band: 400 kHz and below ask for a zoom spectrum.
+        assert_eq!(v(None).zoom_request(1_000_000), None);
+        assert_eq!(
+            v(Some((99_900_000.0, 100_100_000.0))).zoom_request(1_000_000),
+            Some((100_000_000, 200_000))
+        );
+        assert_eq!(
+            v(Some((99_700_000.0, 100_300_000.0))).zoom_request(1_000_000),
+            None
+        );
+        assert_eq!(v(Some((1.0, 5.0))).zoom_request(0), None);
+        // Fractional edges are rounded outwards in width and to the nearest Hz in the centre.
+        assert_eq!(
+            v(Some((1000.25, 1010.5))).zoom_request(1_000_000),
+            Some((1005, 11))
+        );
+    }
+
+    #[test]
+    fn covers_needs_the_whole_span_within_a_bin() {
+        let f = frame(vec![0; 1000]); // 99.5..100.5 MHz, 1 kHz bins
+        let v = |a, b| view(Some((a, b)), 100);
+        assert!(covers(&f, &v(99_600_000.0, 100_400_000.0)));
+        assert!(
+            covers(&f, &v(99_500_500.0, 100_499_500.0)),
+            "within one bin"
+        );
+        assert!(!covers(&f, &v(99_400_000.0, 100_000_000.0)));
+        assert!(!covers(&f, &v(100_000_000.0, 100_600_000.0)));
+        assert!(!covers(&f, &view(None, 100)));
+        assert!(!covers(&frame(Vec::new()), &v(99_600_000.0, 100_400_000.0)));
     }
 
     #[test]

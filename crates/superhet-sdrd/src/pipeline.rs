@@ -14,6 +14,7 @@ use superhet_dsp::{SpectrumConfig, SpectrumError, SpectrumProcessor};
 
 use crate::audio::IqTap;
 use crate::config::SpectrumSettings;
+use crate::zoom::ZoomEngine;
 
 /// Blocks buffered between device thread and DSP thread.
 const QUEUE_BLOCKS: usize = 16;
@@ -68,7 +69,8 @@ impl Pipeline {
 
     /// Start streaming from `device` and call `sink` with each encoded [`SpectrumFrame`].
     /// Every IQ block is also offered (as a shared `Arc`, not copied) to `tap` if given; a lagging
-    /// tap drops blocks and never delays the spectrum path.
+    /// tap drops blocks and never delays the spectrum path. `zoom` computes the leased zoom
+    /// spectrum on the same thread (it costs nothing while no slice is requested).
     ///
     /// # Errors
     /// Fails if the settings are invalid or the device cannot start.
@@ -77,6 +79,7 @@ impl Pipeline {
         settings: &SpectrumSettings,
         mut sink: impl FnMut(Vec<u8>) + Send + 'static,
         tap: Option<IqTap>,
+        mut zoom: Option<ZoomEngine>,
     ) -> Result<Self, PipelineError> {
         let mut processor = SpectrumProcessor::new(SpectrumConfig {
             fft_size: settings.fft_size,
@@ -107,6 +110,9 @@ impl Pipeline {
                     {
                         // Retuned: drop averaging/overlap state and the first block(s), which
                         // may still hold the front end's settling transient.
+                        if let Some(zoom) = &mut zoom {
+                            zoom.reset();
+                        }
                         if processor.set_sample_rate(block.sample_rate).is_err() {
                             continue;
                         }
@@ -116,6 +122,9 @@ impl Pipeline {
                     if settle > 0 {
                         settle -= 1;
                         continue;
+                    }
+                    if let Some(zoom) = &mut zoom {
+                        zoom.process(&block.samples, block.center_hz, block.sample_rate);
                     }
                     for frame in processor.push(&block.samples) {
                         let quantised = SpectrumFrame::quantize(
@@ -218,6 +227,7 @@ mod tests {
                 let _ = tx.send(frame);
             },
             None,
+            None,
         )
         .expect("start");
         let bytes = rx.recv_timeout(Duration::from_secs(5)).expect("frame");
@@ -262,6 +272,7 @@ mod tests {
             move |frame| {
                 let _ = tx.send(frame);
             },
+            None,
             None,
         )
         .expect("start");
