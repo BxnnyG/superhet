@@ -159,8 +159,11 @@ export class AudioEngine {
     if (!s) {
       const stream: Stream = {
         opus: new OpusStream({
-          onPcm: (samples, pos) =>
-            this.post({ type: "pcm", vfo: frame.vfoId, pos, samples }, [samples.buffer]),
+          onPcm: (samples, pos, right) =>
+            this.post(
+              { type: "pcm", vfo: frame.vfoId, pos, samples, right },
+              right ? [samples.buffer, right.buffer] : [samples.buffer],
+            ),
           onError: this.onError,
         }),
         transitMs: null,

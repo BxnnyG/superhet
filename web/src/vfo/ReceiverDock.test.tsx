@@ -37,6 +37,7 @@ const audioSnap = {
   enabled: false,
   starting: false,
   unsupported: null,
+  rds: {},
 } as unknown as AudioSnapshot;
 
 beforeEach(() => {
@@ -44,7 +45,12 @@ beforeEach(() => {
   toasts.clear();
 });
 
-function setup(vfos: Vfo[], selectedId: number | null, loaded = true) {
+function setup(
+  vfos: Vfo[],
+  selectedId: number | null,
+  loaded = true,
+  snapshot: AudioSnapshot = audioSnap,
+) {
   const snap: VfoSnapshot = { vfos, selectedId, busy: false, error: null, loaded };
   const fns = {
     onCreate: vi.fn(),
@@ -52,7 +58,7 @@ function setup(vfos: Vfo[], selectedId: number | null, loaded = true) {
     onUpdate: vi.fn(),
     onRemove: vi.fn(),
   };
-  render(<ReceiverDock vfos={snap} audio={audio} audioSnap={audioSnap} {...fns} />);
+  render(<ReceiverDock vfos={snap} audio={audio} audioSnap={snapshot} {...fns} />);
   return fns;
 }
 
@@ -162,4 +168,81 @@ it("Auto squelch without enough signal data only tells the user", () => {
   fireEvent.click(screen.getByRole("button", { name: "Auto" }));
   expect(fns.onUpdate).not.toHaveBeenCalled();
   expect(toasts.getSnapshot()[0]?.title).toBe("Not enough signal data yet");
+});
+
+const wfm = (over: Partial<Vfo> = {}) =>
+  vfo(1, { mode: "wfm", bandwidthHz: 180_000, deemphasis: "50us", stereo: true, ...over });
+
+it("offers the stereo switch for WFM only and toggles it", () => {
+  const { onUpdate } = setup([wfm()], 1);
+  const toggle = screen.getByRole("button", { name: "Stereo" });
+  expect(toggle).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(toggle);
+  expect(onUpdate).toHaveBeenCalledWith(1, { stereo: false });
+  expect(screen.getByTestId("stereo-lamp")).toBeInTheDocument();
+});
+
+it("shows the switch as off when stereo is disabled", () => {
+  const { onUpdate } = setup([wfm({ stereo: false })], 1);
+  const toggle = screen.getByRole("button", { name: "Stereo" });
+  expect(toggle).toHaveAttribute("aria-pressed", "false");
+  fireEvent.click(toggle);
+  expect(onUpdate).toHaveBeenCalledWith(1, { stereo: true });
+});
+
+it("has no stereo switch and no RDS row for narrow-band modes", () => {
+  setup([vfo(1)], 1);
+  expect(screen.queryByRole("button", { name: "Stereo" })).toBeNull();
+  expect(screen.queryByRole("group", { name: "RDS" })).toBeNull();
+});
+
+it("shows RDS station name, programme type, PI and RadioText of a WFM VFO", () => {
+  const snapshot = {
+    ...audioSnap,
+    rds: {
+      1: {
+        synced: true,
+        pi: "D3C2",
+        pty: 10,
+        tp: true,
+        ta: false,
+        ms: true,
+        ps: "SUPERHET",
+        rt: "Now playing something",
+      },
+    },
+  } as unknown as AudioSnapshot;
+  setup([wfm()], 1, true, snapshot);
+  expect(screen.getByTestId("rds-ps")).toHaveTextContent("SUPERHET");
+  expect(screen.getByText("Pop music")).toBeInTheDocument();
+  expect(screen.getByText("PI D3C2")).toBeInTheDocument();
+  expect(screen.getByText("TP")).toBeInTheDocument();
+  expect(screen.queryByText("TA")).toBeNull();
+  expect(screen.getByTestId("rds-rt")).toHaveTextContent("Now playing something");
+  expect(screen.queryByText("signal lost")).toBeNull();
+});
+
+it("says so when a WFM VFO has no RDS data, and when the signal was lost", () => {
+  setup([wfm()], 1);
+  expect(screen.getByText("no data")).toBeInTheDocument();
+});
+
+it("marks stale RDS data when the signal is lost", () => {
+  const snapshot = {
+    ...audioSnap,
+    rds: {
+      1: {
+        synced: false,
+        pi: "D3C2",
+        pty: null,
+        tp: null,
+        ta: null,
+        ms: null,
+        ps: "SUPERHET",
+        rt: null,
+      },
+    },
+  } as unknown as AudioSnapshot;
+  setup([wfm()], 1, true, snapshot);
+  expect(screen.getByText("signal lost")).toBeInTheDocument();
 });

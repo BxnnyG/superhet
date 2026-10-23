@@ -34,7 +34,9 @@ import {
   squelchToSlider,
   vfoColor,
 } from "./model";
+import { RdsPanel } from "./RdsPanel";
 import { SMeter } from "./SMeter";
+import { StereoControl } from "./StereoControl";
 
 const DEFAULT_BW = "default";
 
@@ -148,6 +150,9 @@ export function ReceiverDock({
                 onChange={(m: VfoMode) => onUpdate(active.id, { mode: m, bandwidthHz: null })}
               />
               <Bandwidth vfo={active} onUpdate={onUpdate} />
+              {active.mode === "wfm" && (
+                <StereoControl vfo={active} audio={audio} onUpdate={onUpdate} />
+              )}
             </Group>
             <Group divider label="Squelch and signal" className="basis-full @lg:basis-auto">
               <div className="flex w-full flex-col gap-1 @lg:w-52">
@@ -174,6 +179,11 @@ export function ReceiverDock({
           </Band>
         )}
       </div>
+      {active?.mode === "wfm" && (
+        <div className="border-t border-border">
+          <RdsPanel rds={audioSnap.rds[active.id]} deemphasis={active.deemphasis} />
+        </div>
+      )}
     </section>
   );
 }

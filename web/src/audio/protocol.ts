@@ -10,7 +10,8 @@ export type ToWorklet =
   | { type: "remove"; vfo: number }
   | { type: "gain"; vfo: number; gain: number }
   | { type: "target"; ms: number }
-  | { type: "pcm"; vfo: number; pos: number; samples: Float32Array };
+  // `samples` is the left (or only) channel; `right` is present for stereo frames.
+  | { type: "pcm"; vfo: number; pos: number; samples: Float32Array; right?: Float32Array };
 
 export interface FromWorklet {
   type: "stats";

@@ -29,6 +29,8 @@ export interface Vfo {
   /** null = squelch off. */
   squelchDbfs: number | null;
   deemphasis: string | null;
+  /** Stereo decoding on/off; null for modes without stereo (everything but WFM). */
+  stereo?: boolean | null;
   offsetHz: number;
   status: "active" | "paused";
 }
@@ -46,6 +48,8 @@ export interface VfoPatch {
   mode?: VfoMode;
   bandwidthHz?: number | null;
   squelchDbfs?: number | null;
+  /** WFM only; `null` resets to the default (on). */
+  stereo?: boolean | null;
 }
 
 /**
@@ -77,7 +81,8 @@ function bad(what: string): never {
 
 export function parseVfo(raw: unknown): Vfo {
   if (!isRec(raw)) return bad("not an object");
-  const { id, freq_hz, mode, bandwidth_hz, squelch_dbfs, deemphasis, offset_hz, status } = raw;
+  const { id, freq_hz, mode, bandwidth_hz, squelch_dbfs, deemphasis, stereo, offset_hz, status } =
+    raw;
   if (typeof id !== "number" || !Number.isInteger(id) || id < 1) return bad("id");
   if (typeof freq_hz !== "number" || !Number.isFinite(freq_hz)) return bad("freq_hz");
   if (!isVfoMode(mode)) return bad("mode");
@@ -97,6 +102,7 @@ export function parseVfo(raw: unknown): Vfo {
     bandwidthHz: bandwidth_hz,
     squelchDbfs: typeof squelch_dbfs === "number" ? squelch_dbfs : null,
     deemphasis: typeof deemphasis === "string" ? deemphasis : null,
+    stereo: typeof stereo === "boolean" ? stereo : null,
     offsetHz: typeof offset_hz === "number" ? offset_hz : 0,
     status: status === "paused" ? "paused" : "active",
   };
@@ -157,6 +163,7 @@ export function patchBody(patch: VfoPatch): Rec {
   if (patch.mode !== undefined) body.mode = patch.mode;
   if (patch.bandwidthHz !== undefined) body.bandwidth_hz = patch.bandwidthHz;
   if (patch.squelchDbfs !== undefined) body.squelch_dbfs = patch.squelchDbfs;
+  if (patch.stereo !== undefined) body.stereo = patch.stereo;
   return body;
 }
 

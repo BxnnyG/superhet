@@ -140,6 +140,10 @@ export function useReceiver(device: string) {
   useEffect(() => {
     audio.setActive(vfoSnap.selectedId);
   }, [audio, vfoSnap.selectedId]);
+  // A VFO that moves to another station must not keep showing the old station's RDS data.
+  useEffect(() => {
+    for (const v of vfoSnap.vfos) audio.noteFrequency(v.id, v.freqHz);
+  }, [audio, vfoSnap.vfos]);
 
   // The dock always edits one VFO: keep the first selected whenever VFOs exist.
   const firstVfoId = vfoSnap.vfos[0]?.id ?? null;

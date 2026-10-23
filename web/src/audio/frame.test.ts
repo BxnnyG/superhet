@@ -6,6 +6,7 @@ interface Opts {
   version?: number;
   codec?: number;
   flags?: number;
+  channels?: number;
   vfo?: number;
   seq?: number;
   pos?: bigint;
@@ -23,7 +24,7 @@ function build(o: Opts = {}): ArrayBuffer {
   for (let i = 0; i < 4; i++) v.setUint8(i, magic.charCodeAt(i));
   v.setUint8(4, o.version ?? 1);
   v.setUint8(5, o.codec ?? 1);
-  v.setUint8(6, 1);
+  v.setUint8(6, o.channels ?? 1);
   v.setUint8(7, o.flags ?? 1);
   v.setUint32(8, 48000, true);
   v.setUint32(12, o.vfo ?? 3, true);
@@ -74,5 +75,24 @@ describe("decodeAudioFrame", () => {
 
   it("rejects a truncated header", () => {
     expect(() => decodeAudioFrame(new ArrayBuffer(41))).toThrow(/truncated/);
+  });
+});
+
+describe("stereo frames", () => {
+  it("reports the channel count and the stereo flag", () => {
+    const mono = decodeAudioFrame(build());
+    expect(mono.channels).toBe(1);
+    expect(mono.stereo).toBe(false);
+    const st = decodeAudioFrame(build({ channels: 2, flags: 3 }));
+    expect(st.channels).toBe(2);
+    expect(st.stereo).toBe(true);
+    expect(st.squelchOpen).toBe(true);
+    // Two channels without a locked pilot (mono station on a stereo stream).
+    expect(decodeAudioFrame(build({ channels: 2, flags: 1 })).stereo).toBe(false);
+  });
+
+  it("rejects other channel counts", () => {
+    expect(() => decodeAudioFrame(build({ channels: 0 }))).toThrow(AudioFrameError);
+    expect(() => decodeAudioFrame(build({ channels: 3 }))).toThrow(AudioFrameError);
   });
 });

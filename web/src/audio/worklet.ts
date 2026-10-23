@@ -41,7 +41,7 @@ class MixerProcessor extends AudioWorkletProcessor {
           this.mixer.setTargetMs(msg.ms);
           break;
         case "pcm":
-          this.mixer.push(msg.vfo, msg.samples, msg.pos);
+          this.mixer.push(msg.vfo, msg.samples, msg.pos, msg.right);
           break;
       }
     };
@@ -51,8 +51,9 @@ class MixerProcessor extends AudioWorkletProcessor {
     const out = outputs[0];
     const first = out?.[0];
     if (!out || !first) return true;
-    this.mixer.render(first);
-    for (let c = 1; c < out.length; c++) out[c]?.set(first);
+    const second = out[1];
+    this.mixer.render(first, second);
+    for (let c = 2; c < out.length; c++) out[c]?.set(first);
     this.statsAcc += first.length / sampleRate;
     if (this.statsAcc >= STATS_INTERVAL_S) {
       this.statsAcc = 0;
