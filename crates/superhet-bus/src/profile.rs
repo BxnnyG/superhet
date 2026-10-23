@@ -93,6 +93,9 @@ pub struct Vfo {
     /// CW tone pitch in Hz (CW only); absent/`null` = 700 Hz.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cw_pitch_hz: Option<u32>,
+    /// Stereo decoding (WFM only); absent/`null` = mode default (on).
+    #[serde(default)]
+    pub stereo: Option<bool>,
 }
 
 /// The preset itself.
@@ -204,6 +207,9 @@ impl ProfileData {
                     return Err("VFO cw_pitch_hz outside 200..=2000".into());
                 }
             }
+            if vfo.mode != Mode::Wfm && vfo.stereo.is_some() {
+                return Err("stereo applies to wfm only".into());
+            }
         }
         if self.decoders.len() > MAX_DECODERS || self.decoders.iter().any(|d| !d.is_object()) {
             return Err(format!(
@@ -233,6 +239,7 @@ impl ProfileData {
             deemphasis: Option<Deemphasis>,
             #[serde(default)]
             cw_pitch_hz: Option<u32>,
+            stereo: Option<bool>,
         }
         #[derive(Deserialize)]
         struct StateLock {
@@ -275,6 +282,7 @@ impl ProfileData {
                     squelch_dbfs: v.squelch_dbfs,
                     deemphasis: v.deemphasis,
                     cw_pitch_hz: v.cw_pitch_hz,
+                    stereo: v.stereo,
                 })
                 .collect(),
             lock: state.locks.iter().any(|l| l.kind == "user"),
@@ -292,14 +300,16 @@ mod tests {
     const FULL: &str = r#"{"v":1,"center_hz":433920000,"sample_rate":2048000,
         "gain":{"mode":"manual","db":28.0},"ppm":-2,"bias_tee":true,
         "vfos":[{"freq_hz":433970000,"mode":"nfm","bandwidth_hz":12500,"squelch_dbfs":-40.0,"deemphasis":"none"},
-                {"freq_hz":433800000,"mode":"am"}],
+                {"freq_hz":433800000,"mode":"am"},
+                {"freq_hz":99500000,"mode":"wfm","stereo":false}],
         "lock":true,"decoders":[{"plugin":"x"}]}"#;
 
     #[test]
     fn parses_and_round_trips() {
         let data = ProfileData::parse(FULL.as_bytes()).expect("valid");
-        assert_eq!(data.vfos.len(), 2);
+        assert_eq!(data.vfos.len(), 3);
         assert_eq!(data.vfos[1].bandwidth_hz, None);
+        assert_eq!(data.vfos[2].stereo, Some(false));
         let again = ProfileData::parse(&serde_json::to_vec(&data).expect("json")).expect("valid");
         assert_eq!(data, again);
     }
@@ -335,6 +345,7 @@ mod tests {
             r#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[{"freq_hz":5,"mode":"usb","cw_pitch_hz":700}]}"#,
             r#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[{"freq_hz":5,"mode":"cw","cw_pitch_hz":100}]}"#,
             r#"{"v":1,"center_hz":1,"sample_rate":2,"decoders":[1]}"#,
+            r#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[{"freq_hz":5,"mode":"nfm","stereo":true}]}"#,
         ] {
             assert!(ProfileData::parse(bad.as_bytes()).is_err(), "{bad}");
         }
@@ -365,8 +376,8 @@ mod tests {
             "sample_rate": 2_048_000, "gain": {"mode": "manual", "db": 28.0}, "ppm": 3,
             "bias_tee": false, "tuning_epoch": 4, "gains_db": [],
             "vfos": [{"id": 7, "freq_hz": 100_300_000u64, "mode": "wfm", "bandwidth_hz": 180_000,
-                      "squelch_dbfs": null, "deemphasis": "50us", "offset_hz": 300_000.0,
-                      "status": "active"}],
+                      "squelch_dbfs": null, "deemphasis": "50us", "stereo": false,
+                      "offset_hz": 300_000.0, "status": "active"}],
             "locks": [{"kind": "user", "id": "user", "since_ms": 1}],
         });
         let data = ProfileData::from_state(&state).expect("usable");
@@ -376,6 +387,7 @@ mod tests {
         );
         assert_eq!(data.vfos[0].deemphasis, Some(Deemphasis::Us50));
         assert_eq!(data.vfos[0].bandwidth_hz, Some(180_000));
+        assert_eq!(data.vfos[0].stereo, Some(false));
         let auto = serde_json::json!({
             "center_hz": 1, "sample_rate": 2, "gain": {"mode": "auto", "db": null},
             "ppm": 0, "bias_tee": false

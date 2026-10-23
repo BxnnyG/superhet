@@ -1,15 +1,15 @@
 //! Binary audio frame published on `sh.v1.dev.<dev>.audio.<vfo>`.
 //!
 //! Wire format version 1, all integers and floats little-endian, 42-byte header followed by one
-//! Opus packet (one packet = one frame of audio, 20 ms at 48 kHz = 960 samples):
+//! Opus packet (one packet = one frame of audio, 20 ms at 48 kHz = 960 samples per channel):
 //!
 //! | offset | type | field |
 //! |---|---|---|
 //! | 0 | `u8[4]` | `magic` (= `"SHAU"`) |
 //! | 4 | `u8` | `version` (= 1) |
 //! | 5 | `u8` | `codec` (= 1: Opus) |
-//! | 6 | `u8` | `channels` (= 1) |
-//! | 7 | `u8` | `flags`: bit 0 = squelch open |
+//! | 6 | `u8` | `channels` (1 = mono, 2 = interleaved stereo) |
+//! | 7 | `u8` | `flags`: bit 0 = squelch open, bit 1 = stereo pilot locked |
 //! | 8 | `u32` | `sample_rate` in Hz (= 48000) |
 //! | 12 | `u32` | `vfo_id` |
 //! | 16 | `u32` | `seq`, +1 per frame, wraps |
@@ -32,7 +32,10 @@ pub const HEADER_LEN: usize = 42;
 pub const CODEC_OPUS: u8 = 1;
 /// Flag bit 0: the squelch is open (or disabled), i.e. the frame carries real audio.
 pub const FLAG_SQUELCH_OPEN: u8 = 0x01;
-/// Samples per frame at 48 kHz (20 ms).
+/// Flag bit 1: the VFO is a stereo broadcast with a locked pilot, i.e. the two channels of the
+/// frame differ (only ever set on `channels = 2` frames).
+pub const FLAG_STEREO: u8 = 0x02;
+/// Samples per channel per frame at 48 kHz (20 ms).
 pub const FRAME_SAMPLES: usize = 960;
 
 /// Decoding failed.
@@ -50,14 +53,17 @@ pub enum FrameError {
     /// Unknown codec id.
     #[error("unsupported audio codec {0}")]
     Codec(u8),
+    /// Channel count other than 1 or 2.
+    #[error("unsupported channel count {0}")]
+    Channels(u8),
 }
 
 /// One audio frame.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioFrame {
-    /// Channel count (1).
+    /// Channel count (1 mono, 2 interleaved stereo).
     pub channels: u8,
-    /// Flag bits, see [`FLAG_SQUELCH_OPEN`].
+    /// Flag bits, see [`FLAG_SQUELCH_OPEN`] and [`FLAG_STEREO`].
     pub flags: u8,
     /// Sample rate in Hz.
     pub sample_rate: u32,
@@ -80,6 +86,12 @@ impl AudioFrame {
     #[must_use]
     pub fn squelch_open(&self) -> bool {
         self.flags & FLAG_SQUELCH_OPEN != 0
+    }
+
+    /// True if the pilot of a stereo broadcast is locked (the channels carry different audio).
+    #[must_use]
+    pub fn stereo(&self) -> bool {
+        self.flags & FLAG_STEREO != 0
     }
 
     /// Serialise to the wire format. A payload beyond `u16::MAX` bytes is not encoded (an Opus
@@ -121,6 +133,9 @@ impl AudioFrame {
         }
         if header[5] != CODEC_OPUS {
             return Err(FrameError::Codec(header[5]));
+        }
+        if !(1..=2).contains(&header[6]) {
+            return Err(FrameError::Channels(header[6]));
         }
         let payload_len = usize::from(u16::from_le_bytes([header[40], header[41]]));
         if data.len() != HEADER_LEN + payload_len {
@@ -174,11 +189,19 @@ mod tests {
         assert_eq!(bytes[4], VERSION);
         assert_eq!(AudioFrame::decode(&bytes), Ok(f.clone()));
         assert!(f.squelch_open());
-        let mut closed = f;
+        let mut closed = f.clone();
         closed.flags = 0;
         closed.payload.clear();
         assert!(!closed.squelch_open());
-        assert_eq!(AudioFrame::decode(&closed.encode()), Ok(closed));
+        assert_eq!(AudioFrame::decode(&closed.encode()), Ok(closed.clone()));
+
+        let mut stereo = closed;
+        stereo.channels = 2;
+        stereo.flags = FLAG_SQUELCH_OPEN | FLAG_STEREO;
+        let decoded = AudioFrame::decode(&stereo.encode()).expect("decode");
+        assert_eq!(decoded.channels, 2);
+        assert!(decoded.stereo() && decoded.squelch_open());
+        assert!(!f.stereo());
     }
 
     #[test]
@@ -209,8 +232,13 @@ mod tests {
         let mut v = ok.clone();
         v[4] = 2;
         assert_eq!(AudioFrame::decode(&v), Err(FrameError::Version(2)));
-        let mut v = ok;
+        let mut v = ok.clone();
         v[5] = 9;
         assert_eq!(AudioFrame::decode(&v), Err(FrameError::Codec(9)));
+        for channels in [0, 3] {
+            let mut v = ok.clone();
+            v[6] = channels;
+            assert_eq!(AudioFrame::decode(&v), Err(FrameError::Channels(channels)));
+        }
     }
 }

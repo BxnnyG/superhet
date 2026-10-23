@@ -219,7 +219,7 @@ impl SsbDemod {
 }
 
 /// Smoothing coefficient of a one-pole low-pass with time constant `tau_s`.
-fn one_pole_coeff(rate_hz: f64, tau_s: f64) -> f32 {
+pub(crate) fn one_pole_coeff(rate_hz: f64, tau_s: f64) -> f32 {
     (1.0 - (-1.0 / (rate_hz * tau_s)).exp()) as f32
 }
 

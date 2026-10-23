@@ -11,5 +11,9 @@ publish.workspace = true
 num-complex.workspace = true
 thiserror.workspace = true
 rustfft.workspace = true
+[features]
+# Synthetic broadcast-FM signal generators for tests of dependent crates.
+testsig = []
+
 [lints]
 workspace = true

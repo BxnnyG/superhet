@@ -17,6 +17,12 @@
 //!    DC block and de-emphasis for FM.
 //! 6. Arbitrary-ratio [`Resampler`] to exactly [`OUTPUT_RATE`], then the squelch gate.
 //!
+//! WFM additionally runs the multiplex through a pilot PLL ([`StereoMpx`]): the L-R signal is
+//! demodulated with the doubled pilot phase, filtered like the L+R path, de-emphasised and
+//! matrixed to left/right; the matrix gain follows the pilot lock, so a weak or missing pilot
+//! fades to mono. The 57 kHz RDS subcarrier is mixed to DC with the tripled pilot phase and fed
+//! to an [`RdsDecoder`]. Stereo output is opt-in ([`Channel::set_stereo`]); RDS is always decoded.
+//!
 //! Changing mode, bandwidth or input rate rebuilds the filter chain (state is cleared; the NCO
 //! phase and squelch settings are kept). Changing the offset is glitch-free.
 
@@ -27,7 +33,9 @@ use crate::demod::{
 };
 use crate::fir::{DecimFir, design_lowpass};
 use crate::nco::Nco;
+use crate::rds::{RdsDecoder, RdsInfo};
 use crate::resample::Resampler;
+use crate::wfm::StereoMpx;
 
 /// Audio output sample rate in Hz.
 pub const OUTPUT_RATE: u32 = 48_000;
@@ -57,6 +65,10 @@ const SSB_TRANSITION_HZ: f64 = 250.0;
 pub const CW_DEFAULT_PITCH_HZ: u32 = 700;
 /// Accepted CW pitch range in Hz.
 pub const CW_PITCH_RANGE_HZ: std::ops::RangeInclusive<u32> = 200..=2_000;
+/// Time the stereo matrix needs to fade between mono and stereo.
+const STEREO_BLEND_S: f64 = 0.05;
+/// A retune by more than this is a different station: forget RDS and the pilot lock.
+const STATION_CHANGE_HZ: f64 = 5_000.0;
 /// Lowest power reported (avoids `-inf`).
 const POWER_FLOOR: f32 = 1e-20;
 
@@ -85,7 +97,7 @@ impl Deemphasis {
 /// Demodulation mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
-    /// Broadcast FM, mono (stereo/RDS are not decoded).
+    /// Broadcast FM (stereo and RDS are decoded, see [`Channel::set_stereo`]).
     Wfm {
         /// De-emphasis (default 50 us).
         deemphasis: Deemphasis,
@@ -209,6 +221,20 @@ enum Demod {
     Ssb(SsbDemod),
 }
 
+/// Broadcast-FM extras: stereo difference path and RDS.
+struct WfmPath {
+    mpx: StereoMpx,
+    rds: RdsDecoder,
+    /// L-R path: same filter as the L+R `audio_dec`.
+    audio_dec_d: DecimFir<f32>,
+    deemph_d: Option<Deemph>,
+    resampler_r: Resampler,
+    /// Current stereo matrix gain (0 = mono, 1 = full stereo).
+    blend: f32,
+    /// Blend change per audio sample.
+    blend_step: f32,
+}
+
 /// Everything that depends on mode, bandwidth and input rate.
 struct Chain {
     stages: Vec<DecimFir<Complex32>>,
@@ -221,6 +247,7 @@ struct Chain {
     dc_block: Option<DcBlock>,
     deemph: Option<Deemph>,
     resampler: Resampler,
+    wfm: Option<WfmPath>,
 }
 
 impl Chain {
@@ -317,10 +344,20 @@ impl Chain {
         let ma = ((rch / f64::from(OUTPUT_RATE)).floor() as usize).max(1);
         let audio_rate = rch / ma as f64;
         let fc_stop = fc_stop.min(0.45 * audio_rate);
-        let audio_dec = DecimFir::new(
-            design_lowpass(rch, fc_pass.min(fc_stop * 0.9), fc_stop, AUDIO_ATTEN_DB),
-            ma,
-        );
+        let audio_taps = design_lowpass(rch, fc_pass.min(fc_stop * 0.9), fc_stop, AUDIO_ATTEN_DB);
+        let audio_dec = DecimFir::new(audio_taps.clone(), ma);
+        let wfm = matches!(mode, Mode::Wfm { .. }).then(|| WfmPath {
+            mpx: StereoMpx::new(rch),
+            rds: RdsDecoder::new(rch),
+            audio_dec_d: DecimFir::new(audio_taps, ma),
+            deemph_d: mode
+                .deemphasis()
+                .tau_us()
+                .map(|t| Deemph::new(audio_rate, t)),
+            resampler_r: Resampler::new(audio_rate, f64::from(OUTPUT_RATE)),
+            blend: 0.0,
+            blend_step: (1.0 / (STEREO_BLEND_S * audio_rate)) as f32,
+        });
         let is_fm = matches!(mode, Mode::Wfm { .. } | Mode::Nfm { .. });
         Ok(Self {
             stages,
@@ -335,6 +372,7 @@ impl Chain {
                 .tau_us()
                 .map(|t| Deemph::new(audio_rate, t)),
             resampler: Resampler::new(audio_rate, f64::from(OUTPUT_RATE)),
+            wfm,
         })
     }
 
@@ -359,6 +397,36 @@ impl Chain {
             d.reset();
         }
         self.resampler.reset();
+        if let Some(w) = &mut self.wfm {
+            w.mpx.reset();
+            w.rds.reset();
+            w.audio_dec_d.reset();
+            if let Some(d) = &mut w.deemph_d {
+                d.reset();
+            }
+            w.resampler_r.reset();
+            w.blend = 0.0;
+        }
+    }
+
+    /// Clears the audio filters only (pilot lock and RDS data are kept).
+    fn reset_audio(&mut self) {
+        self.audio_dec.reset();
+        if let Some(d) = &mut self.dc_block {
+            d.reset();
+        }
+        if let Some(d) = &mut self.deemph {
+            d.reset();
+        }
+        self.resampler.reset();
+        if let Some(w) = &mut self.wfm {
+            w.audio_dec_d.reset();
+            if let Some(d) = &mut w.deemph_d {
+                d.reset();
+            }
+            w.resampler_r.reset();
+            w.blend = 0.0;
+        }
     }
 }
 
@@ -428,10 +496,16 @@ pub struct Channel {
     squelch: Squelch,
     gate: f32,
     last_power_dbfs: f32,
+    stereo: bool,
     buf_a: Vec<Complex32>,
     buf_b: Vec<Complex32>,
     audio_a: Vec<f32>,
     audio_b: Vec<f32>,
+    diff: Vec<f32>,
+    rds_mix: Vec<Complex32>,
+    audio_d: Vec<f32>,
+    out_l: Vec<f32>,
+    out_r: Vec<f32>,
 }
 
 fn validate_offset(offset_hz: f64, rate: u32) -> Result<(), DspError> {
@@ -464,10 +538,16 @@ impl Channel {
             last_power_dbfs: -200.0,
             chain,
             cfg,
+            stereo: false,
             buf_a: Vec::new(),
             buf_b: Vec::new(),
             audio_a: Vec::new(),
             audio_b: Vec::new(),
+            diff: Vec::new(),
+            rds_mix: Vec::new(),
+            audio_d: Vec::new(),
+            out_l: Vec::new(),
+            out_r: Vec::new(),
         })
     }
 
@@ -484,10 +564,64 @@ impl Channel {
     /// Retunes within the input band; only the NCO phase increment changes (no state reset).
     pub fn set_offset(&mut self, offset_hz: f64) -> Result<(), DspError> {
         validate_offset(offset_hz, self.cfg.input_rate)?;
+        if (offset_hz - self.cfg.offset_hz).abs() > STATION_CHANGE_HZ
+            && let Some(w) = &mut self.chain.wfm
+        {
+            // A different station: its pilot and RDS data are not those of the old one.
+            w.mpx.reset();
+            w.rds.reset();
+            w.blend = 0.0;
+        }
         self.cfg.offset_hz = offset_hz;
         self.nco
             .set_offset(offset_hz, f64::from(self.cfg.input_rate));
         Ok(())
+    }
+
+    /// Enables or disables stereo output (WFM only; ignored by the other modes). Takes effect
+    /// through [`Self::output_channels`]; toggling clears the audio filters (a short gap) but
+    /// keeps the pilot lock and the RDS data.
+    pub fn set_stereo(&mut self, stereo: bool) {
+        if self.stereo != stereo {
+            self.stereo = stereo;
+            self.chain.reset_audio();
+            self.gate = if self.squelch.open { 1.0 } else { 0.0 };
+        }
+    }
+
+    /// Channels per output frame of [`Self::process`]: 2 (interleaved left/right) for WFM with
+    /// stereo enabled, otherwise 1.
+    #[must_use]
+    pub fn output_channels(&self) -> usize {
+        if self.stereo && self.chain.wfm.is_some() {
+            2
+        } else {
+            1
+        }
+    }
+
+    /// True while a stereo pilot is locked (WFM); the matrix is then (fading towards) stereo.
+    #[must_use]
+    pub fn stereo_locked(&self) -> bool {
+        self.chain.wfm.as_ref().is_some_and(|w| w.mpx.locked())
+    }
+
+    /// RDS data decoded so far (WFM only).
+    #[must_use]
+    pub fn rds_info(&self) -> Option<&RdsInfo> {
+        self.chain.wfm.as_ref().map(|w| w.rds.info())
+    }
+
+    /// True while the RDS block synchronisation holds.
+    #[must_use]
+    pub fn rds_synced(&self) -> bool {
+        self.chain.wfm.as_ref().is_some_and(|w| w.rds.synced())
+    }
+
+    /// Counter that increases whenever [`Self::rds_info`] changes.
+    #[must_use]
+    pub fn rds_revision(&self) -> u64 {
+        self.chain.wfm.as_ref().map_or(0, |w| w.rds.revision())
     }
 
     fn rebuild(&mut self, cfg: ChannelConfig) -> Result<(), DspError> {
@@ -581,11 +715,12 @@ impl Channel {
         }
     }
 
-    /// Processes a block of IQ, appending 48 kHz mono audio to `out`.
+    /// Processes a block of IQ, appending 48 kHz audio to `out`: mono samples, or interleaved
+    /// left/right frames if [`Self::output_channels`] is 2.
     ///
     /// Blocks may have any length; the long-term output count is exactly
-    /// `48000 / input_rate` per input sample (plus a fixed filter delay). While the squelch is
-    /// closed the output is silence of the same length.
+    /// `48000 / input_rate` frames per input sample (plus a fixed filter delay). While the
+    /// squelch is closed the output is silence of the same length.
     pub fn process(&mut self, iq: &[Complex32], out: &mut Vec<f32>) -> ChannelStats {
         let mut power_sum = 0.0f64;
         let mut power_n = 0usize;
@@ -621,6 +756,14 @@ impl Channel {
                 Demod::Am(d) => d.process(&self.buf_a, &mut self.audio_a),
                 Demod::Ssb(d) => d.process(&self.buf_a, &mut self.audio_a),
             }
+            let stereo = self.output_channels() == 2;
+            if let Some(w) = &mut self.chain.wfm {
+                self.diff.clear();
+                self.rds_mix.clear();
+                w.mpx
+                    .process(&self.audio_a, stereo, &mut self.diff, &mut self.rds_mix);
+                w.rds.process(&self.rds_mix);
+            }
             self.audio_b.clear();
             self.chain
                 .audio_dec
@@ -632,14 +775,43 @@ impl Channel {
                 d.process_block(&mut self.audio_b);
             }
             let start = out.len();
-            self.chain.resampler.process(&self.audio_b, out);
+            match &mut self.chain.wfm {
+                Some(w) if stereo => {
+                    self.audio_d.clear();
+                    w.audio_dec_d.process(&self.diff, &mut self.audio_d);
+                    if let Some(d) = &mut w.deemph_d {
+                        d.process_block(&mut self.audio_d);
+                    }
+                    let n = self.audio_b.len().min(self.audio_d.len());
+                    let target = if w.mpx.locked() { 1.0 } else { 0.0 };
+                    for (s, d) in self.audio_b[..n].iter_mut().zip(&mut self.audio_d[..n]) {
+                        w.blend += (target - w.blend).clamp(-w.blend_step, w.blend_step);
+                        let side = w.blend * *d;
+                        *d = *s - side;
+                        *s += side;
+                    }
+                    self.out_l.clear();
+                    self.out_r.clear();
+                    self.chain
+                        .resampler
+                        .process(&self.audio_b[..n], &mut self.out_l);
+                    w.resampler_r.process(&self.audio_d[..n], &mut self.out_r);
+                    for (l, r) in self.out_l.iter().zip(&self.out_r) {
+                        out.push(*l);
+                        out.push(*r);
+                    }
+                }
+                _ => self.chain.resampler.process(&self.audio_b, out),
+            }
 
             let target = if self.squelch.open { 1.0 } else { 0.0 };
             if self.gate != target || target == 0.0 {
                 let step = (1.0 / (GATE_RAMP_S * f64::from(OUTPUT_RATE))) as f32;
-                for y in &mut out[start..] {
+                for frame in out[start..].chunks_mut(if stereo { 2 } else { 1 }) {
                     self.gate += (target - self.gate).clamp(-step, step);
-                    *y *= self.gate;
+                    for y in frame {
+                        *y *= self.gate;
+                    }
                 }
             }
         }
