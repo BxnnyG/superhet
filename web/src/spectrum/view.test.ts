@@ -12,6 +12,64 @@ import {
 
 const device = deviceSpan(100e6, 2.4e6); // 98.8 .. 101.2 MHz
 
+/** What the daemon returns for a requested span: edges snapped outwards to a bin grid. */
+function snapOut(view: Span, grid: Span, binHz: number): Span {
+  const start = grid.startHz + Math.floor((view.startHz - grid.startHz) / binHz) * binHz;
+  const end = grid.startHz + Math.ceil((view.endHz - grid.startHz) / binHz) * binHz;
+  return { startHz: start, endHz: end };
+}
+
+const hzAt = (s: Span, frac: number) => s.startHz + frac * (s.endHz - s.startHz);
+
+describe("zoom anchor (regression: marker offset after zooming out)", () => {
+  it("anchors on the span that is on screen, not on the requested one", () => {
+    // Requested 10 kHz; the daemon answered with edges snapped to its 1171.875 Hz bins.
+    const requested = { startHz: 100_003_100, endHz: 100_013_100 };
+    const shown = snapOut(requested, device, 1171.875);
+    expect(shown.startHz).not.toBe(requested.startHz);
+    const under = hzAt(shown, 0.5); // what the pointer is over
+    const out = zoomSpan(requested, device, 0.5, 8, MIN_VIEW_SPAN_HZ, shown);
+    expect(hzAt(out, 0.5)).toBeCloseTo(under, 3);
+    // Without the shown span the anchor would be the centre of the request, up to a bin away.
+    expect(Math.abs(hzAt(requested, 0.5) - under)).toBeGreaterThan(100);
+  });
+
+  it("keeps the frequency under a moving pointer while frames lag behind", () => {
+    const vc = new ViewController({ apply: () => undefined, schedule: () => 1, cancel: () => 0 });
+    vc.setDevice(device);
+    vc.setShown(device); // the screen still shows the full band
+    const f0 = hzAt(device, 0.3);
+    vc.zoom(0.3, 0.1); // zoom in on what is under the pointer at 30 %
+    // The pointer then moves to 80 % before the zoomed frames arrive: the screen still shows the
+    // full band, so 80 % is a different frequency than 80 % of the requested span.
+    const f1 = hzAt(device, 0.8);
+    vc.zoom(0.8, 1);
+    const cur = vc.current();
+    expect(cur).not.toBeNull();
+    expect(hzAt(cur as Span, 0.8)).toBeCloseTo(f1, 3);
+    expect(f1).not.toBeCloseTo(f0, -3);
+  });
+
+  it("returns to the starting view when zooming in and out around the same pointer", () => {
+    const vc = new ViewController({ apply: () => undefined, schedule: () => 1, cancel: () => 0 });
+    vc.setDevice(device);
+    vc.setShown(device);
+    const marker = 100_700_000; // a pointer placed on a signal at 70 % of the band
+    const frac = (marker - device.startHz) / (device.endHz - device.startHz);
+    for (const factor of [0.25, 0.25, 0.25, 4, 4, 4]) {
+      vc.zoom(frac, factor);
+      const asked = vc.current() as Span;
+      // Frames arrive for every request, snapped to the bin grid of the narrow frames.
+      vc.setShown(snapOut(asked, device, 50));
+      // The pointer is still on the marker only if the marker stays at its screen fraction.
+      const shown = vc.shown() as Span;
+      expect(hzAt(shown, frac)).toBeGreaterThan(marker - 200);
+      expect(hzAt(shown, frac)).toBeLessThan(marker + 200);
+    }
+    expect(vc.zoomed).toBe(false);
+  });
+});
+
 describe("zoomSpan", () => {
   it("keeps the anchor frequency under the pointer", () => {
     const next = zoomSpan(device, device, 0.25, 0.5);

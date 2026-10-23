@@ -36,7 +36,12 @@ export function isFullSpan(view: Span, device: Span): boolean {
 
 /**
  * Scale the span width by `factor` (<1 zooms in) keeping the frequency at `anchorFrac`
- * (0..1 across the span) under the same screen position.
+ * (0..1 across the screen) under the same screen position.
+ *
+ * `shown` is the span the screen currently displays. It can differ from `view`, the span asked
+ * for last: frames lag the request, and the daemon snaps the edges outwards to its bins. The
+ * pointer fraction belongs to what is on screen, so the anchor frequency comes from `shown`
+ * while the width keeps scaling the requested `view` (successive wheel steps accumulate).
  */
 export function zoomSpan(
   view: Span,
@@ -44,10 +49,11 @@ export function zoomSpan(
   anchorFrac: number,
   factor: number,
   minSpan = MIN_VIEW_SPAN_HZ,
+  shown: Span = view,
 ): Span {
   const frac = Math.min(1, Math.max(0, anchorFrac));
   const width = spanWidth(view);
-  const anchorHz = view.startHz + frac * width;
+  const anchorHz = shown.startHz + frac * spanWidth(shown);
   const nextWidth = Math.min(
     spanWidth(device),
     Math.max(Math.min(minSpan, spanWidth(device)), width * factor),
@@ -87,6 +93,8 @@ export interface ViewControllerOptions {
 export class ViewController {
   private device: Span | null = null;
   private view: Span | null = null;
+  /** Span of the newest frame, i.e. what the screen maps pointer positions to. */
+  private shownSpan: Span | null = null;
   private dirty = false;
   private timer = 0;
   private lastApply = -Infinity;
@@ -111,6 +119,16 @@ export class ViewController {
     return this.view !== null;
   }
 
+  /** Tell the controller which span the screen shows now (the span of the newest frame). */
+  setShown(span: Span): void {
+    this.shownSpan = span;
+  }
+
+  /** The span on screen, or null before the first frame. */
+  shown(): Span | null {
+    return this.shownSpan;
+  }
+
   /**
    * Update the device span (confirmed tuning). A changed centre recentres a zoomed view on the
    * new centre; otherwise the view is only clamped into the new span.
@@ -132,7 +150,7 @@ export class ViewController {
     const device = this.device;
     const cur = this.current();
     if (!device || !cur) return;
-    this.assign(zoomSpan(cur, device, anchorFrac, factor));
+    this.assign(zoomSpan(cur, device, anchorFrac, factor, MIN_VIEW_SPAN_HZ, this.shownSpan ?? cur));
   }
 
   /** Pan relative to `base` (the span when the drag started). No effect when not zoomed. */
