@@ -428,7 +428,8 @@ async fn audio_ws_forwards_subscribed_vfos_only() {
         .expect("send");
     let ack = loop {
         match ws.next().await {
-            Some(Ok(Message::Text(t))) => break t.to_string(),
+            // RDS/tones state also arrives as text frames; wait for the acknowledgement itself.
+            Some(Ok(Message::Text(t))) if is_ack(&t) => break t.to_string(),
             Some(Ok(_)) => {}
             other => panic!("expected ack, got {other:?}"),
         }
@@ -473,7 +474,7 @@ async fn audio_ws_forwards_subscribed_vfos_only() {
         .expect("send");
     loop {
         match ws.next().await {
-            Some(Ok(Message::Text(_))) => break,
+            Some(Ok(Message::Text(t))) if is_ack(&t) => break,
             Some(Ok(_)) => {}
             other => panic!("expected ack, got {other:?}"),
         }
@@ -491,4 +492,8 @@ async fn audio_ws_forwards_subscribed_vfos_only() {
         }
     }
     assert!(two >= 10, "got {two} frames of VFO 2");
+}
+
+fn is_ack(text: &str) -> bool {
+    serde_json::from_str::<Value>(text).is_ok_and(|v| v["type"] == "ack")
 }
