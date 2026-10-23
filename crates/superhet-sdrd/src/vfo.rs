@@ -95,6 +95,8 @@ pub struct Vfo {
     pub deemphasis: Option<Deemphasis>,
     /// CW pitch override in Hz (CW only); `None` uses the default (700 Hz).
     pub cw_pitch_hz: Option<u32>,
+    /// Stereo decoding override (WFM only); `None` uses the mode default (on).
+    pub stereo: Option<bool>,
 }
 
 /// Tuning of the device a VFO is evaluated against.
@@ -146,6 +148,12 @@ impl Vfo {
             VfoMode::Usb | VfoMode::Lsb => 2.0 * (SSB_LOW_CUT_HZ + bandwidth),
             _ => bandwidth,
         }
+    }
+
+    /// Whether the VFO decodes stereo: WFM only, on unless switched off.
+    #[must_use]
+    pub fn stereo_enabled(&self) -> bool {
+        self.mode == VfoMode::Wfm && self.stereo.unwrap_or(true)
     }
 
     /// Effective channel bandwidth in Hz.
@@ -203,6 +211,7 @@ impl Vfo {
             squelch_dbfs: self.squelch_dbfs,
             deemphasis,
             cw_pitch_hz,
+            stereo: (self.mode == VfoMode::Wfm).then(|| self.stereo_enabled()),
             offset_hz: self.offset_hz(tuning.center_hz),
             status: self.status(tuning),
         }
@@ -220,6 +229,7 @@ pub struct VfoWire {
     deemphasis: Option<DeemphasisWire>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cw_pitch_hz: Option<u32>,
+    stereo: Option<bool>,
     offset_hz: f64,
     status: Status,
 }
@@ -239,6 +249,8 @@ pub struct VfoCreate {
     pub deemphasis: Option<Deemphasis>,
     /// CW pitch override in Hz.
     pub cw_pitch_hz: Option<u32>,
+    /// Stereo override (WFM only).
+    pub stereo: Option<bool>,
 }
 
 /// Validated `vfo.update` request; `Some(None)` means "reset to default / off".
@@ -258,6 +270,8 @@ pub struct VfoPatch {
     pub deemphasis: Option<Option<Deemphasis>>,
     /// New CW pitch override.
     pub cw_pitch_hz: Option<Option<u32>>,
+    /// New stereo override.
+    pub stereo: Option<Option<bool>>,
 }
 
 fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
@@ -278,6 +292,7 @@ struct CreateWire {
     squelch_dbfs: Option<f32>,
     deemphasis: Option<DeemphasisWire>,
     cw_pitch_hz: Option<u32>,
+    stereo: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -295,6 +310,8 @@ struct UpdateWire {
     deemphasis: Option<Option<DeemphasisWire>>,
     #[serde(default, deserialize_with = "present")]
     cw_pitch_hz: Option<Option<u32>>,
+    #[serde(default, deserialize_with = "present")]
+    stereo: Option<Option<bool>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -368,6 +385,14 @@ fn check_cw_pitch(mode: VfoMode, pitch: Option<u32>) -> Result<(), CtlError> {
     }
 }
 
+fn check_stereo(mode: VfoMode, stereo: Option<bool>) -> Result<(), CtlError> {
+    if mode != VfoMode::Wfm && stereo.is_some() {
+        Err(CtlError::invalid("stereo applies to wfm only"))
+    } else {
+        Ok(())
+    }
+}
+
 /// Parse and validate a `ctl.vfo.create` body.
 ///
 /// # Errors
@@ -382,12 +407,14 @@ pub fn parse_create(payload: &[u8]) -> Result<VfoCreate, CtlError> {
         squelch_dbfs: wire.squelch_dbfs,
         deemphasis: wire.deemphasis.map(Into::into),
         cw_pitch_hz: wire.cw_pitch_hz,
+        stereo: wire.stereo,
     };
     check_freq(request.freq_hz)?;
     check_bandwidth(request.bandwidth_hz)?;
     check_squelch(request.squelch_dbfs)?;
     check_deemphasis(request.mode, request.deemphasis)?;
     check_cw_pitch(request.mode, request.cw_pitch_hz)?;
+    check_stereo(request.mode, request.stereo)?;
     Ok(request)
 }
 
@@ -407,6 +434,7 @@ pub fn parse_update(payload: &[u8]) -> Result<VfoPatch, CtlError> {
         squelch_dbfs: wire.squelch_dbfs,
         deemphasis: wire.deemphasis.map(|d| d.map(Into::into)),
         cw_pitch_hz: wire.cw_pitch_hz,
+        stereo: wire.stereo,
     };
     if let Some(hz) = patch.freq_hz {
         check_freq(hz)?;
@@ -422,6 +450,7 @@ pub fn parse_update(payload: &[u8]) -> Result<VfoPatch, CtlError> {
         && patch.squelch_dbfs.is_none()
         && patch.deemphasis.is_none()
         && patch.cw_pitch_hz.is_none()
+        && patch.stereo.is_none()
     {
         return Err(CtlError::invalid("request changes nothing"));
     }
@@ -481,6 +510,7 @@ impl Vfo {
             squelch_dbfs: request.squelch_dbfs,
             deemphasis: request.deemphasis,
             cw_pitch_hz: request.cw_pitch_hz,
+            stereo: request.stereo,
         }
     }
 }
@@ -528,6 +558,7 @@ impl From<&profile::Vfo> for VfoCreate {
             squelch_dbfs: vfo.squelch_dbfs,
             deemphasis: vfo.deemphasis.map(deemphasis_of),
             cw_pitch_hz: vfo.cw_pitch_hz,
+            stereo: vfo.stereo,
         }
     }
 }
@@ -581,6 +612,7 @@ impl VfoRegistry {
             if mode != vfo.mode {
                 vfo.deemphasis = None;
                 vfo.cw_pitch_hz = None;
+                vfo.stereo = None;
             }
             vfo.mode = mode;
         }
@@ -598,6 +630,11 @@ impl VfoRegistry {
         }
         check_deemphasis(vfo.mode, vfo.deemphasis)?;
         check_cw_pitch(vfo.mode, vfo.cw_pitch_hz)?;
+        if let Some(st) = patch.stereo {
+            vfo.stereo = st;
+        }
+        check_deemphasis(vfo.mode, vfo.deemphasis)?;
+        check_stereo(vfo.mode, vfo.stereo)?;
         check_realisable(&vfo, sample_rate)?;
         self.vfos[index] = vfo.clone();
         self.revision += 1;
@@ -739,6 +776,7 @@ mod tests {
             squelch_dbfs: None,
             deemphasis: None,
             cw_pitch_hz: None,
+            stereo: None,
         }
     }
 
@@ -899,6 +937,7 @@ mod tests {
                     squelch_dbfs: Some(-60.0),
                     deemphasis: Some(Deemphasis::Us75),
                     cw_pitch_hz: None,
+                    stereo: None,
                 },
                 RATE,
             )
@@ -993,6 +1032,7 @@ mod tests {
             squelch_dbfs: None,
             deemphasis: None,
             cw_pitch_hz: None,
+            stereo: None,
         };
         // The usable half span is 435.2 kHz (85 % of 1.024 MS/s); NFM default 12.5 kHz leaves
         // 428.95 kHz of offset.
@@ -1038,12 +1078,14 @@ mod tests {
             squelch_dbfs: None,
             deemphasis: None,
             cw_pitch_hz: None,
+            stereo: None,
         };
         let value = serde_json::to_value(vfo.wire(T)).expect("json");
         assert_eq!(value["id"], 4);
         assert_eq!(value["mode"], "wfm");
         assert_eq!(value["bandwidth_hz"], 180_000);
         assert_eq!(value["deemphasis"], "50us");
+        assert_eq!(value["stereo"], true);
         assert!(value["squelch_dbfs"].is_null());
         assert_eq!(value["offset_hz"], 200_000.0);
         assert_eq!(value["status"], "active");
@@ -1057,6 +1099,55 @@ mod tests {
             ..vfo
         };
         assert!(serde_json::to_value(am.wire(T)).expect("json")["deemphasis"].is_null());
+        assert!(serde_json::to_value(am.wire(T)).expect("json")["stereo"].is_null());
+    }
+
+    #[test]
+    fn stereo_override_is_validated_updated_and_reset_with_the_mode() {
+        let create = parse_create(br#"{"v":1,"freq_hz":99500000,"mode":"wfm","stereo":false}"#)
+            .expect("create");
+        assert_eq!(create.stereo, Some(false));
+        for bad in [
+            r#"{"v":1,"freq_hz":1,"mode":"nfm","stereo":true}"#,
+            r#"{"v":1,"freq_hz":1,"mode":"am","stereo":false}"#,
+            r#"{"v":1,"freq_hz":1,"mode":"wfm","stereo":"yes"}"#,
+        ] {
+            assert!(parse_create(bad.as_bytes()).is_err(), "{bad}");
+        }
+
+        let mut reg = VfoRegistry::default();
+        let id = reg.create(create, RATE).expect("vfo").id;
+        let wire = |reg: &VfoRegistry| {
+            serde_json::to_value(reg.list()[0].wire(T)).expect("json")["stereo"].clone()
+        };
+        assert_eq!(wire(&reg), false);
+        let patch = |json: String| parse_update(json.as_bytes()).expect("patch");
+        // null resets to the default (on).
+        reg.update(
+            &patch(format!(r#"{{"v":1,"id":{id},"stereo":null}}"#)),
+            RATE,
+        )
+        .expect("reset");
+        assert_eq!(wire(&reg), true);
+        reg.update(
+            &patch(format!(r#"{{"v":1,"id":{id},"stereo":false}}"#)),
+            RATE,
+        )
+        .expect("off");
+        assert!(!reg.list()[0].stereo_enabled());
+        // Stereo does not apply to other modes, and leaving WFM drops the override.
+        let err = reg
+            .update(
+                &patch(format!(r#"{{"v":1,"id":{id},"mode":"nfm","stereo":true}}"#)),
+                RATE,
+            )
+            .expect_err("nfm stereo");
+        assert_eq!(err.code, ErrorCode::Invalid);
+        let v = reg
+            .update(&patch(format!(r#"{{"v":1,"id":{id},"mode":"nfm"}}"#)), RATE)
+            .expect("nfm");
+        assert_eq!(v.stereo, None);
+        assert!(!v.stereo_enabled());
     }
 
     #[test]

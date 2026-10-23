@@ -92,6 +92,7 @@ mod tests {
             squelch_dbfs: None,
             deemphasis: None,
             cw_pitch_hz: None,
+            stereo: None,
         }
     }
 

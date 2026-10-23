@@ -19,8 +19,9 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use superhet_bus::audio::{AudioFrame, FLAG_SQUELCH_OPEN, FRAME_SAMPLES};
+use superhet_bus::audio::{AudioFrame, FLAG_SQUELCH_OPEN, FLAG_STEREO, FRAME_SAMPLES};
 use superhet_bus::opus::Encoder;
+use superhet_bus::rds::RdsMessage;
 use superhet_device::IqBlock;
 use superhet_dsp::{Channel, Mode, OUTPUT_RATE};
 
@@ -34,8 +35,12 @@ const SETTLE_BLOCKS: usize = 1;
 const POLL: Duration = Duration::from_millis(100);
 /// Interval for reporting dropped IQ blocks.
 const DROP_REPORT: Duration = Duration::from_secs(5);
-/// Opus bitrate for WFM in bits per second.
+/// Opus bitrate for mono WFM in bits per second.
 const BITRATE_WFM: i32 = 64_000;
+/// Opus bitrate for stereo WFM in bits per second.
+const BITRATE_WFM_STEREO: i32 = 96_000;
+/// An unchanged non-empty RDS state is repeated this often, so late subscribers catch up.
+const RDS_REPEAT: Duration = Duration::from_secs(1);
 /// Opus bitrate for NFM and AM in bits per second.
 const BITRATE_NARROW: i32 = 24_000;
 /// Upper bound for one Opus packet (RFC 6716: 1275 bytes per frame).
@@ -77,14 +82,28 @@ pub struct AudioEngine {
 }
 
 impl AudioEngine {
-    /// Start the thread. `sink` receives `(vfo_id, encoded AudioFrame)`; it runs on the engine
-    /// thread and must never block.
+    /// Start the thread without RDS publishing, see [`Self::start_with_rds`].
     ///
     /// # Errors
     /// Fails if the thread cannot be spawned.
+    #[cfg(test)]
     pub fn start(
         vfos: Arc<VfoShared>,
         sink: impl FnMut(u32, Vec<u8>) + Send + 'static,
+    ) -> io::Result<Self> {
+        Self::start_with_rds(vfos, sink, |_, _| {})
+    }
+
+    /// Start the thread. `sink` receives `(vfo_id, encoded AudioFrame)`, `rds_sink` receives
+    /// `(vfo_id, RDS state JSON)` (see `superhet_bus::rds`); both run on the engine thread and
+    /// must never block.
+    ///
+    /// # Errors
+    /// Fails if the thread cannot be spawned.
+    pub fn start_with_rds(
+        vfos: Arc<VfoShared>,
+        sink: impl FnMut(u32, Vec<u8>) + Send + 'static,
+        rds_sink: impl FnMut(u32, Vec<u8>) + Send + 'static,
     ) -> io::Result<Self> {
         let (tx, rx) = mpsc::sync_channel(QUEUE_BLOCKS);
         let tap = IqTap {
@@ -97,7 +116,7 @@ impl AudioEngine {
             let tap = tap.clone();
             std::thread::Builder::new()
                 .name("sdrd-vfo".into())
-                .spawn(move || run(&rx, &vfos, &stop, &tap, sink))?
+                .spawn(move || run(&rx, &vfos, &stop, &tap, sink, rds_sink))?
         };
         Ok(Self {
             stop,
@@ -131,8 +150,9 @@ fn now_ns() -> u64 {
         .unwrap_or(0)
 }
 
-fn bitrate_for(mode: Mode) -> i32 {
+fn bitrate_for(mode: Mode, channels: usize) -> i32 {
     match mode {
+        Mode::Wfm { .. } if channels == 2 => BITRATE_WFM_STEREO,
         Mode::Wfm { .. } => BITRATE_WFM,
         Mode::Nfm { .. } | Mode::Am | Mode::Usb | Mode::Lsb | Mode::Cw { .. } => BITRATE_NARROW,
     }
@@ -153,7 +173,7 @@ struct Slot {
     built: Option<Built>,
     encoder: Option<Encoder>,
     bitrate: i32,
-    /// Audio not yet forming a full frame.
+    /// Audio not yet forming a full frame (interleaved if the encoder has two channels).
     pcm: Vec<f32>,
     scratch: Vec<f32>,
     seq: u32,
@@ -165,6 +185,15 @@ struct Slot {
     timeline: VecDeque<(u64, u64)>,
     power_dbfs: f32,
     squelch_open: bool,
+    /// The stereo pilot is locked (at the end of the last block).
+    stereo_locked: bool,
+    /// Last published RDS state `(revision, synced)`; the 1 s repeat timer.
+    rds_seen: (u64, bool),
+    rds_at: Instant,
+    /// A non-empty RDS state was published and has not been cleared since.
+    rds_active: bool,
+    /// The channel was replaced or removed: publish an empty RDS state.
+    rds_clear: bool,
 }
 
 impl Slot {
@@ -183,6 +212,11 @@ impl Slot {
             timeline: VecDeque::new(),
             power_dbfs: -200.0,
             squelch_open: true,
+            stereo_locked: false,
+            rds_seen: (0, false),
+            rds_at: Instant::now(),
+            rds_active: false,
+            rds_clear: false,
         }
     }
 
@@ -194,6 +228,7 @@ impl Slot {
     }
 
     fn deactivate(&mut self) {
+        self.rds_clear |= self.rds_active;
         self.channel = None;
         self.built = None;
         self.discard_audio();
@@ -227,6 +262,8 @@ impl Slot {
             }
             None => match Channel::new(cfg) {
                 Ok(channel) => {
+                    self.rds_clear |= self.rds_active;
+                    self.rds_seen = (0, false);
                     self.channel = Some(channel);
                     self.built = Some(built);
                     self.discard_audio();
@@ -238,17 +275,32 @@ impl Slot {
                 }
             },
         }
-        self.ensure_encoder(bitrate_for(cfg.mode));
+        let Some(channel) = self.channel.as_mut() else {
+            return;
+        };
+        channel.set_stereo(self.vfo.stereo_enabled());
+        let channels = channel.output_channels();
+        self.ensure_encoder(bitrate_for(cfg.mode, channels), channels);
     }
 
-    fn ensure_encoder(&mut self, bitrate: i32) {
+    /// Make sure the encoder has `channels` channels and the given bitrate.
+    fn ensure_encoder(&mut self, bitrate: i32, channels: usize) {
+        if self
+            .encoder
+            .as_ref()
+            .is_some_and(|e| e.channels() != channels)
+        {
+            // Mono/stereo switch: the stream format changes, start the encoder afresh.
+            self.encoder = None;
+            self.discard_audio();
+        }
         match &mut self.encoder {
             Some(encoder) => {
                 if bitrate != self.bitrate && encoder.set_bitrate(bitrate).is_ok() {
                     self.bitrate = bitrate;
                 }
             }
-            None => match Encoder::new(bitrate) {
+            None => match Encoder::with_channels(channels, bitrate) {
                 Ok(encoder) => {
                     self.encoder = Some(encoder);
                     self.bitrate = bitrate;
@@ -260,8 +312,58 @@ impl Slot {
         }
     }
 
+    /// Publish the RDS state when it changed, and repeat a non-empty one every second.
+    fn publish_rds(&mut self, rds_sink: &mut impl FnMut(u32, Vec<u8>)) {
+        let id = self.vfo.id;
+        let message = match self.channel.as_ref() {
+            Some(channel) => {
+                let seen = (channel.rds_revision(), channel.rds_synced());
+                let info = channel.rds_info();
+                let nonempty = seen.1 || info.is_some_and(|i| !i.is_empty());
+                let due = nonempty && self.rds_at.elapsed() >= RDS_REPEAT;
+                if !self.rds_clear && seen == self.rds_seen && !due {
+                    return;
+                }
+                self.rds_seen = seen;
+                let mut message = RdsMessage::empty(id);
+                if let Some(info) = info {
+                    message.synced = seen.1;
+                    message.pi = info.pi.map(|pi| format!("{pi:04X}"));
+                    message.pty = info.pty;
+                    message.tp = info.tp;
+                    message.ta = info.ta;
+                    message.ms = info.music;
+                    message.ps.clone_from(&info.ps);
+                    message.rt.clone_from(&info.rt);
+                }
+                message
+            }
+            None => {
+                if !self.rds_clear {
+                    return;
+                }
+                RdsMessage::empty(id)
+            }
+        };
+        self.rds_clear = false;
+        self.rds_active = !message.is_empty();
+        self.rds_at = Instant::now();
+        rds_sink(id, message.encode());
+    }
+
     /// Demodulate one block and emit every completed frame.
     fn process(
+        &mut self,
+        block: &IqBlock,
+        block_start_ns: u64,
+        sink: &mut impl FnMut(u32, Vec<u8>),
+        rds_sink: &mut impl FnMut(u32, Vec<u8>),
+    ) {
+        self.process_audio(block, block_start_ns, sink);
+        self.publish_rds(rds_sink);
+    }
+
+    fn process_audio(
         &mut self,
         block: &IqBlock,
         block_start_ns: u64,
@@ -270,20 +372,27 @@ impl Slot {
         let (Some(channel), Some(encoder)) = (self.channel.as_mut(), self.encoder.as_mut()) else {
             return;
         };
+        let channels = encoder.channels();
+        if channel.output_channels() != channels {
+            // The encoder follows on the next `configure`; do not feed it the wrong layout.
+            return;
+        }
         self.timeline.push_back((self.produced, block_start_ns));
         self.scratch.clear();
         let stats = channel.process(&block.samples, &mut self.scratch);
         self.power_dbfs = stats.power_dbfs;
         self.squelch_open = stats.squelch_open;
+        self.stereo_locked = channels == 2 && channel.stereo_locked();
         self.pcm
             .extend(self.scratch.iter().map(|s| s.clamp(-1.0, 1.0)));
-        self.produced += self.scratch.len() as u64;
+        self.produced += (self.scratch.len() / channels) as u64;
 
+        let frame_floats = FRAME_SAMPLES * channels;
         let mut packet = [0u8; MAX_PACKET];
         let mut used = 0;
-        while self.pcm.len() - used >= FRAME_SAMPLES {
-            let chunk = &self.pcm[used..used + FRAME_SAMPLES];
-            used += FRAME_SAMPLES;
+        while self.pcm.len() - used >= frame_floats {
+            let chunk = &self.pcm[used..used + frame_floats];
+            used += frame_floats;
             let len = match encoder.encode_float(chunk, &mut packet) {
                 Ok(len) => len,
                 Err(e) => {
@@ -294,13 +403,16 @@ impl Slot {
             };
             let pos = self.sample_pos;
             let capture_unix_ns = capture_ns(&mut self.timeline, pos);
+            let mut flags = 0;
+            if self.squelch_open {
+                flags |= FLAG_SQUELCH_OPEN;
+            }
+            if self.stereo_locked {
+                flags |= FLAG_STEREO;
+            }
             let frame = AudioFrame {
-                channels: 1,
-                flags: if self.squelch_open {
-                    FLAG_SQUELCH_OPEN
-                } else {
-                    0
-                },
+                channels: channels as u8,
+                flags,
                 sample_rate: OUTPUT_RATE,
                 vfo_id: self.vfo.id,
                 seq: self.seq,
@@ -347,6 +459,7 @@ fn run(
     stop: &AtomicBool,
     tap: &IqTap,
     mut sink: impl FnMut(u32, Vec<u8>),
+    mut rds_sink: impl FnMut(u32, Vec<u8>),
 ) {
     let mut slots: Vec<Slot> = Vec::new();
     let mut seen_generation = u64::MAX;
@@ -387,7 +500,7 @@ fn run(
                 block.samples.len() as u64 * 1_000_000_000 / u64::from(block.sample_rate.max(1));
             let block_start_ns = now_ns().saturating_sub(duration_ns);
             for slot in &mut slots {
-                slot.process(&block, block_start_ns, &mut sink);
+                slot.process(&block, block_start_ns, &mut sink, &mut rds_sink);
             }
         }
         if last_report.elapsed() >= DROP_REPORT {
@@ -409,6 +522,7 @@ mod tests {
     use num_complex::Complex32;
     use std::sync::mpsc::channel;
     use superhet_bus::opus::Decoder;
+    use superhet_dsp::testsig::{Content, Station};
 
     const RATE: u32 = 1_024_000;
     const CENTER: u64 = 100_000_000;
@@ -460,6 +574,7 @@ mod tests {
                         squelch_dbfs: None,
                         deemphasis: None,
                         cw_pitch_hz: None,
+                        stereo: None,
                     },
                     RATE,
                 )
@@ -589,6 +704,193 @@ mod tests {
         );
     }
 
+    /// IQ blocks of a synthetic stereo broadcast station at `offset_hz`.
+    fn station_blocks(station: &mut Station, content: Content, count: usize) -> Vec<Arc<IqBlock>> {
+        (0..count)
+            .map(|_| {
+                Arc::new(IqBlock {
+                    center_hz: CENTER,
+                    sample_rate: RATE,
+                    tuning_epoch: 0,
+                    samples: (0..BLOCK).map(|_| station.next(content)).collect(),
+                })
+            })
+            .collect()
+    }
+
+    fn wfm_vfo(shared: &VfoShared, stereo: Option<bool>) -> u32 {
+        shared
+            .with(|r| {
+                r.create(
+                    VfoCreate {
+                        freq_hz: CENTER + 100_000,
+                        mode: VfoMode::Wfm,
+                        bandwidth_hz: None,
+                        squelch_dbfs: None,
+                        deemphasis: None,
+                        cw_pitch_hz: None,
+                        stereo,
+                    },
+                    RATE,
+                )
+            })
+            .expect("create")
+            .id
+    }
+
+    const BROADCAST: Content = Content {
+        left: 0.5,
+        right: 0.0,
+        pilot: 0.1,
+        rds: 0.035,
+    };
+
+    #[test]
+    fn stereo_wfm_yields_two_channel_frames_that_keep_the_channels_apart() {
+        let shared = Arc::new(VfoShared::default());
+        let id = wfm_vfo(&shared, None);
+        let (tx, rx) = channel();
+        let engine = AudioEngine::start(Arc::clone(&shared), move |id, bytes| {
+            let _ = tx.send((id, bytes));
+        })
+        .expect("start");
+        let mut station = Station::new(RATE, 100_000.0, "SUPERHET", "Hello");
+        // 1.6 s of signal.
+        feed(&engine.tap(), &station_blocks(&mut station, BROADCAST, 400));
+        let frames = collect(&rx, Duration::from_millis(300));
+        drop(engine);
+
+        assert!(frames.len() >= 50, "got {} frames", frames.len());
+        let mut decoder = Decoder::with_channels(2).expect("decoder");
+        let mut separated = 0;
+        for (i, (vfo, frame)) in frames.iter().enumerate() {
+            assert_eq!(*vfo, id);
+            assert_eq!(frame.channels, 2);
+            assert_eq!(frame.sample_pos, (i * FRAME_SAMPLES) as u64);
+            let mut pcm = vec![0f32; 2 * FRAME_SAMPLES];
+            let n = decoder
+                .decode_float(&frame.payload, &mut pcm)
+                .expect("opus decode");
+            assert_eq!(n, FRAME_SAMPLES);
+            if i < frames.len() - 20 {
+                continue;
+            }
+            assert!(frame.stereo(), "pilot not flagged in frame {i}");
+            let power = |skip: usize| {
+                pcm.iter().skip(skip).step_by(2).map(|x| x * x).sum::<f32>() / n as f32
+            };
+            let (left, right) = (power(0), power(1));
+            if left > 0.01 && right < left / 100.0 {
+                separated += 1;
+            }
+        }
+        assert!(
+            separated >= 15,
+            "{separated} of the last 20 frames are stereo"
+        );
+    }
+
+    #[test]
+    fn stereo_off_gives_mono_frames_without_the_stereo_flag() {
+        let shared = Arc::new(VfoShared::default());
+        wfm_vfo(&shared, Some(false));
+        let (tx, rx) = channel();
+        let engine = AudioEngine::start(Arc::clone(&shared), move |id, bytes| {
+            let _ = tx.send((id, bytes));
+        })
+        .expect("start");
+        let mut station = Station::new(RATE, 100_000.0, "SUPERHET", "Hello");
+        feed(&engine.tap(), &station_blocks(&mut station, BROADCAST, 300));
+        let frames = collect(&rx, Duration::from_millis(300));
+        assert!(frames.len() >= 40, "got {} frames", frames.len());
+        assert!(frames.iter().all(|(_, f)| f.channels == 1 && !f.stereo()));
+        let mut decoder = Decoder::new().expect("decoder");
+        let mut pcm = vec![0f32; FRAME_SAMPLES];
+        let last = &frames.last().expect("frames").1;
+        assert_eq!(
+            decoder.decode_float(&last.payload, &mut pcm).expect("opus"),
+            FRAME_SAMPLES
+        );
+
+        // Switching stereo on at runtime changes the stream to two channels.
+        shared
+            .with(|r| {
+                r.update(
+                    &crate::vfo::VfoPatch {
+                        id: 1,
+                        freq_hz: None,
+                        mode: None,
+                        bandwidth_hz: None,
+                        squelch_dbfs: None,
+                        deemphasis: None,
+                        cw_pitch_hz: None,
+                        stereo: Some(Some(true)),
+                    },
+                    RATE,
+                )
+            })
+            .expect("update");
+        feed(&engine.tap(), &station_blocks(&mut station, BROADCAST, 300));
+        let frames = collect(&rx, Duration::from_millis(300));
+        assert!(
+            frames.iter().any(|(_, f)| f.channels == 2),
+            "no stereo frames"
+        );
+        assert!(frames.last().is_some_and(|(_, f)| f.channels == 2));
+    }
+
+    #[test]
+    fn rds_state_is_published_and_cleared_on_retune() {
+        let shared = Arc::new(VfoShared::default());
+        let id = wfm_vfo(&shared, None);
+        let (tx, _rx) = channel();
+        let (rds_tx, rds_rx) = channel();
+        let engine = AudioEngine::start_with_rds(
+            Arc::clone(&shared),
+            move |id, bytes| {
+                let _ = tx.send((id, bytes));
+            },
+            move |id, bytes| {
+                let _ = rds_tx.send((id, bytes));
+            },
+        )
+        .expect("start");
+        let tap = engine.tap();
+        let mut station = Station::new(RATE, 100_000.0, "SUPERHET", "Hello RDS world");
+        // 4.5 s of signal.
+        feed(&tap, &station_blocks(&mut station, BROADCAST, 1100));
+        let mut last = None;
+        while let Ok((vfo, bytes)) = rds_rx.recv_timeout(Duration::from_millis(300)) {
+            assert_eq!(vfo, id);
+            last = Some(RdsMessage::parse(&bytes).expect("valid rds message"));
+        }
+        let message = last.expect("rds messages");
+        assert_eq!(message.vfo, id);
+        assert!(message.synced);
+        assert_eq!(message.pi.as_deref(), Some("D3C2"));
+        assert_eq!(message.pty, Some(10));
+        assert_eq!(message.ps.as_deref(), Some("SUPERHET"));
+        assert_eq!(message.rt.as_deref(), Some("Hello RDS world"));
+
+        // A retune of the device clears the display.
+        let retuned: Vec<_> = (0..20)
+            .map(|_| {
+                Arc::new(IqBlock {
+                    center_hz: CENTER + 300_000,
+                    sample_rate: RATE,
+                    tuning_epoch: 1,
+                    samples: vec![Complex32::new(0.0, 0.0); BLOCK],
+                })
+            })
+            .collect();
+        feed(&tap, &retuned);
+        let mut after = None;
+        while let Ok((_, bytes)) = rds_rx.recv_timeout(Duration::from_millis(300)) {
+            after = Some(RdsMessage::parse(&bytes).expect("valid rds message"));
+        }
+        assert!(after.is_some_and(|m| m.is_empty()), "state not cleared");
+    }
+
     #[test]
     fn paused_vfo_makes_no_frames_and_retune_pauses_and_resumes() {
         let shared = Arc::new(VfoShared::default());
@@ -636,6 +938,7 @@ mod tests {
                         squelch_dbfs: Some(-3.0),
                         deemphasis: None,
                         cw_pitch_hz: None,
+                        stereo: None,
                     },
                     RATE,
                 )

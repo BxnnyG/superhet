@@ -27,6 +27,7 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 num-complex.workspace = true
+superhet-dsp = { workspace = true, features = ["testsig"] }
 tokio = { workspace = true, features = ["time", "test-util"] }
 tower.workspace = true
 http-body-util.workspace = true

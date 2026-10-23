@@ -1,5 +1,6 @@
 //! Minimal safe wrapper around the system libopus (BSD-3-Clause, dynamically linked) for what
-//! Superhet needs: a 48 kHz mono float encoder (audio application, VBR) and a matching decoder.
+//! Superhet needs: a 48 kHz mono or stereo float encoder (audio application, VBR) and a matching
+//! decoder. Stereo PCM is interleaved (`L R L R ...`).
 //!
 //! Hand-written FFI like `superhet-device`'s librtlsdr backend; the unsafe code is confined to
 //! this module. Enabled by the cargo feature `opus` (needs `libopus-dev` at build time).
@@ -95,9 +96,10 @@ fn check(code: c_int) -> Result<c_int, OpusError> {
 /// Sample rate of both coder types.
 pub const SAMPLE_RATE: i32 = 48_000;
 
-/// 48 kHz mono Opus encoder (application `audio`, VBR on).
+/// 48 kHz Opus encoder (application `audio`, VBR on), mono or stereo.
 pub struct Encoder {
     ptr: NonNull<ffi::OpusEncoder>,
+    channels: usize,
 }
 
 // SAFETY: the state is only reachable through `&mut self`/`&self` of the owning value; libopus
@@ -105,19 +107,28 @@ pub struct Encoder {
 unsafe impl Send for Encoder {}
 
 impl Encoder {
-    /// Create an encoder with the given bitrate in bits per second.
+    /// Create a mono encoder with the given bitrate in bits per second.
     ///
     /// # Errors
     /// Fails if libopus rejects the parameters or runs out of memory.
     pub fn new(bitrate: i32) -> Result<Self, OpusError> {
+        Self::with_channels(1, bitrate)
+    }
+
+    /// Create an encoder for 1 (mono) or 2 (interleaved stereo) channels.
+    ///
+    /// # Errors
+    /// Fails if libopus rejects the parameters (e.g. other channel counts) or runs out of memory.
+    pub fn with_channels(channels: usize, bitrate: i32) -> Result<Self, OpusError> {
+        let ch = c_int::try_from(channels).map_err(|_| OpusError::from_code(-1))?;
         let mut error: c_int = 0;
         // SAFETY: `error` is a valid out pointer; the returned state is checked for NULL.
         let raw = unsafe {
-            ffi::opus_encoder_create(SAMPLE_RATE, 1, ffi::OPUS_APPLICATION_AUDIO, &raw mut error)
+            ffi::opus_encoder_create(SAMPLE_RATE, ch, ffi::OPUS_APPLICATION_AUDIO, &raw mut error)
         };
         check(error)?;
         let ptr = NonNull::new(raw).ok_or_else(|| OpusError::from_code(-7))?;
-        let mut encoder = Self { ptr };
+        let mut encoder = Self { ptr, channels };
         encoder.set_vbr(true)?;
         encoder.set_bitrate(bitrate)?;
         Ok(encoder)
@@ -152,13 +163,23 @@ impl Encoder {
         self.ctl(ffi::OPUS_SET_COMPLEXITY_REQUEST, i32::from(complexity))
     }
 
-    /// Encode one frame (`pcm.len()` must be 120, 240, 480, 960, 1920 or 2880 samples) into
-    /// `out` and return the packet length.
+    /// Channel count the encoder was created with.
+    #[must_use]
+    pub fn channels(&self) -> usize {
+        self.channels
+    }
+
+    /// Encode one frame (`pcm.len() / channels` must be 120, 240, 480, 960, 1920 or 2880 samples
+    /// per channel; stereo PCM is interleaved) into `out` and return the packet length.
     ///
     /// # Errors
     /// Fails on an invalid frame size or a too small output buffer.
     pub fn encode_float(&mut self, pcm: &[f32], out: &mut [u8]) -> Result<usize, OpusError> {
-        let frame = c_int::try_from(pcm.len()).map_err(|_| OpusError::from_code(-1))?;
+        if pcm.len() % self.channels != 0 {
+            return Err(OpusError::from_code(-1));
+        }
+        let frame =
+            c_int::try_from(pcm.len() / self.channels).map_err(|_| OpusError::from_code(-1))?;
         let max = i32::try_from(out.len()).unwrap_or(i32::MAX);
         // SAFETY: `pcm` holds `frame` samples and `out` at least `max` bytes; the encoder is live.
         let n = check(unsafe {
@@ -181,36 +202,47 @@ impl Drop for Encoder {
     }
 }
 
-/// 48 kHz mono Opus decoder.
+/// 48 kHz Opus decoder, mono or stereo.
 pub struct Decoder {
     ptr: NonNull<ffi::OpusDecoder>,
+    channels: usize,
 }
 
 // SAFETY: see `Encoder`.
 unsafe impl Send for Decoder {}
 
 impl Decoder {
-    /// Create a decoder.
+    /// Create a mono decoder.
     ///
     /// # Errors
     /// Fails if libopus runs out of memory.
     pub fn new() -> Result<Self, OpusError> {
-        let mut error: c_int = 0;
-        // SAFETY: `error` is a valid out pointer; the returned state is checked for NULL.
-        let raw = unsafe { ffi::opus_decoder_create(SAMPLE_RATE, 1, &raw mut error) };
-        check(error)?;
-        let ptr = NonNull::new(raw).ok_or_else(|| OpusError::from_code(-7))?;
-        Ok(Self { ptr })
+        Self::with_channels(1)
     }
 
-    /// Decode one packet into `pcm` (which bounds the frame size) and return the number of
-    /// samples written.
+    /// Create a decoder for 1 (mono) or 2 (interleaved stereo) channels.
+    ///
+    /// # Errors
+    /// Fails if libopus rejects the channel count or runs out of memory.
+    pub fn with_channels(channels: usize) -> Result<Self, OpusError> {
+        let ch = c_int::try_from(channels).map_err(|_| OpusError::from_code(-1))?;
+        let mut error: c_int = 0;
+        // SAFETY: `error` is a valid out pointer; the returned state is checked for NULL.
+        let raw = unsafe { ffi::opus_decoder_create(SAMPLE_RATE, ch, &raw mut error) };
+        check(error)?;
+        let ptr = NonNull::new(raw).ok_or_else(|| OpusError::from_code(-7))?;
+        Ok(Self { ptr, channels })
+    }
+
+    /// Decode one packet into `pcm` (which bounds the frame size; stereo is interleaved) and
+    /// return the number of samples written per channel.
     ///
     /// # Errors
     /// Fails on a corrupt packet or a too small output buffer.
     pub fn decode_float(&mut self, packet: &[u8], pcm: &mut [f32]) -> Result<usize, OpusError> {
         let len = i32::try_from(packet.len()).map_err(|_| OpusError::from_code(-1))?;
-        let frame = c_int::try_from(pcm.len()).map_err(|_| OpusError::from_code(-1))?;
+        let frame =
+            c_int::try_from(pcm.len() / self.channels).map_err(|_| OpusError::from_code(-1))?;
         // SAFETY: `packet` has `len` bytes and `pcm` room for `frame` samples; the decoder is live.
         let n = check(unsafe {
             ffi::opus_decode_float(
@@ -267,6 +299,34 @@ mod tests {
         }
         // 0.5 amplitude sine → rms 0.354.
         assert!((rms - 0.354).abs() < 0.08, "rms {rms}");
+    }
+
+    #[test]
+    fn round_trips_a_stereo_signal_keeping_the_channels_apart() {
+        let mut encoder = Encoder::with_channels(2, 96_000).expect("encoder");
+        assert_eq!(encoder.channels(), 2);
+        let mut decoder = Decoder::with_channels(2).expect("decoder");
+        let mut packet = [0u8; 1500];
+        let mut pcm = vec![0f32; 1920];
+        let (mut left, mut right) = (0.0f32, 0.0f32);
+        for frame in 0..20 {
+            // 1 kHz in the left channel only.
+            let input: Vec<f32> = sine(960, frame * 960)
+                .into_iter()
+                .flat_map(|s| [s, 0.0])
+                .collect();
+            let n = encoder.encode_float(&input, &mut packet).expect("encode");
+            let decoded = decoder
+                .decode_float(&packet[..n], &mut pcm)
+                .expect("decode");
+            assert_eq!(decoded, 960);
+            left = pcm.iter().step_by(2).map(|x| x * x).sum::<f32>() / 960.0;
+            right = pcm.iter().skip(1).step_by(2).map(|x| x * x).sum::<f32>() / 960.0;
+        }
+        assert!(left.sqrt() > 0.25, "left rms {}", left.sqrt());
+        assert!(right.sqrt() < 0.03, "right rms {}", right.sqrt());
+        // An odd number of samples cannot be interleaved stereo.
+        assert!(encoder.encode_float(&[0.0; 961], &mut packet).is_err());
     }
 
     #[test]

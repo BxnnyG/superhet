@@ -61,20 +61,46 @@ pub fn spawn_audio_publisher(
     client: Client,
     device: &str,
 ) -> Result<impl FnMut(u32, Vec<u8>) + Send + 'static, superhet_bus::subjects::InvalidToken> {
+    spawn_vfo_publisher(client, device, "audio", AUDIO_QUEUE_FRAMES)
+}
+
+/// Start a publisher task for the RDS state of the VFOs of `device`; the sink takes
+/// `(vfo_id, JSON message)` and publishes on `sh.v1.dev.<dev>.rds.<vfo>`. Same drop behaviour as
+/// the audio sink; the small queue is plenty for a handful of messages per second.
+///
+/// # Errors
+/// Fails if `device` is not usable as a subject token.
+pub fn spawn_rds_publisher(
+    client: Client,
+    device: &str,
+) -> Result<impl FnMut(u32, Vec<u8>) + Send + 'static, superhet_bus::subjects::InvalidToken> {
+    spawn_vfo_publisher(client, device, "rds", RDS_QUEUE_MESSAGES)
+}
+
+/// Messages buffered between the VFO thread and the RDS publisher task.
+const RDS_QUEUE_MESSAGES: usize = 32;
+
+/// Shared implementation: `sh.v1.dev.<dev>.<kind>.<vfo>`.
+fn spawn_vfo_publisher(
+    client: Client,
+    device: &str,
+    kind: &'static str,
+    queue: usize,
+) -> Result<impl FnMut(u32, Vec<u8>) + Send + 'static, superhet_bus::subjects::InvalidToken> {
     // Validate the device token once; per-frame subjects only add a numeric token.
     superhet_bus::subjects::audio(device, "0")?;
     let device = device.to_owned();
     let status = client.clone();
-    let (tx, mut rx) = mpsc::channel::<(u32, Vec<u8>)>(AUDIO_QUEUE_FRAMES);
+    let (tx, mut rx) = mpsc::channel::<(u32, Vec<u8>)>(queue);
     let dropped = Arc::new(AtomicU64::new(0));
     tokio::spawn(async move {
         while let Some((vfo, frame)) = rx.recv().await {
             let subject = format!(
-                "{}.dev.{device}.audio.{vfo}",
+                "{}.dev.{device}.{kind}.{vfo}",
                 superhet_bus::subjects::PREFIX
             );
             if let Err(e) = client.publish(subject, frame.into()).await {
-                tracing::warn!(error = %e, "audio publish failed");
+                tracing::warn!(error = %e, kind, "publish failed");
             }
         }
     });
@@ -90,7 +116,7 @@ pub fn spawn_audio_publisher(
         };
         let n = dropped.fetch_add(1, Ordering::Relaxed) + 1;
         if n == 1 || n.is_multiple_of(250) {
-            tracing::warn!(total = n, reason, "dropping audio frames");
+            tracing::warn!(total = n, reason, kind, "dropping frames");
         }
     })
 }
