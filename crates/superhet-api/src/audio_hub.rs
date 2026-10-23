@@ -2,7 +2,8 @@
 //!
 //! Every stream (`sh.v1.dev.<dev>.audio.<vfo>`) has a forwarder task that validates the
 //! `AudioFrame` v1 messages and pushes the unchanged bytes into the bounded queue of each client
-//! subscribed to it. A queue that is full drops its oldest frame and counts it, so a slow client
+//! subscribed to it. The same task also follows the VFO's RDS state
+//! (`sh.v1.dev.<dev>.rds.<vfo>`, JSON) and queues each valid message as a text frame. A queue that is full drops its oldest frame and counts it, so a slow client
 //! loses audio but never delays the forwarder, the bus subscription or other clients. The bus
 //! subscription is created for the first client of a stream and dropped with the last one.
 
@@ -13,6 +14,7 @@ use std::sync::{Arc, Mutex as StdMutex, PoisonError};
 use axum::body::Bytes;
 use futures_util::StreamExt;
 use superhet_bus::audio::AudioFrame;
+use superhet_bus::rds::RdsMessage;
 use tokio::sync::{Mutex, Notify, oneshot};
 
 /// Frames buffered per client before the oldest are dropped (20 ms each, shared by all VFOs).
@@ -48,9 +50,28 @@ pub enum HubError {
     Subscribe(String),
 }
 
-/// Bounded frame queue of one client; drops the oldest frame when full.
+/// One message for a client: a binary audio frame or a text (JSON) message of a VFO.
+#[derive(Debug, Clone)]
+pub struct Queued {
+    /// VFO the message belongs to.
+    vfo: u32,
+    /// True for a text message (RDS state), false for a binary audio frame.
+    pub text: bool,
+    /// The bytes exactly as published.
+    pub data: Bytes,
+}
+
+impl std::ops::Deref for Queued {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        &self.data
+    }
+}
+
+/// Bounded message queue of one client; drops the oldest message when full.
 pub struct ClientQueue {
-    frames: StdMutex<VecDeque<Bytes>>,
+    frames: StdMutex<VecDeque<Queued>>,
     ready: Notify,
     capacity: usize,
     dropped: AtomicU64,
@@ -68,41 +89,58 @@ impl ClientQueue {
 
     /// Queue a frame, dropping (and counting) the oldest one if the queue is full. Never blocks.
     pub fn push(&self, frame: Bytes) {
+        // The VFO id sits at header bytes 12..16 (frames were validated before).
+        let vfo = frame
+            .get(12..16)
+            .and_then(|b| <[u8; 4]>::try_from(b).ok())
+            .map_or(0, u32::from_le_bytes);
+        self.enqueue(Queued {
+            vfo,
+            text: false,
+            data: frame,
+        });
+    }
+
+    /// Queue a text message of `vfo` like [`Self::push`].
+    pub fn push_text(&self, vfo: u32, text: Bytes) {
+        self.enqueue(Queued {
+            vfo,
+            text: true,
+            data: text,
+        });
+    }
+
+    fn enqueue(&self, item: Queued) {
         {
             let mut frames = self.frames.lock().unwrap_or_else(PoisonError::into_inner);
             if frames.len() >= self.capacity {
                 frames.pop_front();
                 self.dropped.fetch_add(1, Ordering::Relaxed);
             }
-            frames.push_back(frame);
+            frames.push_back(item);
         }
         // Stores a permit when nobody waits, so a push is never missed.
         self.ready.notify_one();
     }
 
-    /// Take the oldest queued frame without waiting.
-    pub fn try_pop(&self) -> Option<Bytes> {
+    /// Take the oldest queued message without waiting.
+    pub fn try_pop(&self) -> Option<Queued> {
         self.frames
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .pop_front()
     }
 
-    /// Discard queued frames whose `vfo_id` (header bytes 12..16) is not in `vfos`.
+    /// Discard queued messages whose VFO is not in `vfos`.
     fn retain_vfos(&self, vfos: &BTreeSet<u32>) {
         self.frames
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .retain(|frame| {
-                frame
-                    .get(12..16)
-                    .and_then(|b| <[u8; 4]>::try_from(b).ok())
-                    .is_some_and(|b| vfos.contains(&u32::from_le_bytes(b)))
-            });
+            .retain(|item| vfos.contains(&item.vfo));
     }
 
-    /// Wait for the next frame. Cancel safe.
-    pub async fn pop(&self) -> Bytes {
+    /// Wait for the next message. Cancel safe.
+    pub async fn pop(&self) -> Queued {
         loop {
             if let Some(frame) = self.try_pop() {
                 return frame;
@@ -179,7 +217,23 @@ impl AudioHub {
             .get(&(device.to_owned(), vfo))
             .map(|stream| Arc::clone(&stream.subscribers));
         if let Some(subscribers) = subscribers {
-            deliver(&subscribers, &Bytes::from(frame));
+            deliver(&subscribers, &Item::Audio(Bytes::from(frame)));
+        }
+    }
+
+    /// Inject an RDS message for a stream, going through the same validation as the bus path.
+    #[cfg(test)]
+    pub async fn publish_local_rds(&self, device: &str, vfo: u32, message: &[u8]) {
+        let subscribers = self
+            .streams
+            .lock()
+            .await
+            .get(&(device.to_owned(), vfo))
+            .map(|stream| Arc::clone(&stream.subscribers));
+        if let Some(subscribers) = subscribers
+            && let Some(item) = rds_item(message, vfo)
+        {
+            deliver(&subscribers, &item);
         }
     }
 
@@ -224,8 +278,18 @@ impl AudioHub {
                 .subscribe(subject)
                 .await
                 .map_err(|e| HubError::Subscribe(e.to_string()))?;
+            // RDS is a bonus: audio keeps working when only this subscription fails.
+            let rds = match superhet_bus::subjects::rds(&key.0, &key.1.to_string()) {
+                Ok(subject) => client
+                    .subscribe(subject)
+                    .await
+                    .inspect_err(|e| tracing::warn!(error = %e, "rds subscribe failed"))
+                    .ok(),
+                Err(_) => None,
+            };
             tokio::spawn(forward(
                 sub,
+                rds,
                 Arc::clone(&subscribers),
                 stopped,
                 Arc::clone(&self.streams),
@@ -262,17 +326,53 @@ impl AudioHub {
     }
 }
 
-/// Push a frame into every subscribed client queue.
-fn deliver(subscribers: &Subscribers, frame: &Bytes) {
+/// A validated message on its way to the client queues.
+enum Item {
+    Audio(Bytes),
+    Rds { vfo: u32, json: Bytes },
+}
+
+/// Validate an RDS message of the stream's VFO.
+fn rds_item(payload: &[u8], vfo: u32) -> Option<Item> {
+    match RdsMessage::parse(payload) {
+        Ok(message) if message.vfo == vfo => Some(Item::Rds {
+            vfo,
+            json: Bytes::copy_from_slice(payload),
+        }),
+        Ok(_) => {
+            tracing::debug!(vfo, "dropping rds message with foreign vfo id");
+            None
+        }
+        Err(err) => {
+            tracing::debug!(%err, vfo, "dropping invalid rds message");
+            None
+        }
+    }
+}
+
+/// Push a message into every subscribed client queue.
+fn deliver(subscribers: &Subscribers, item: &Item) {
     let subscribers = subscribers.lock().unwrap_or_else(PoisonError::into_inner);
     for (_, queue) in subscribers.iter() {
-        queue.push(frame.clone());
+        match item {
+            Item::Audio(frame) => queue.push(frame.clone()),
+            Item::Rds { vfo, json } => queue.push_text(*vfo, json.clone()),
+        }
+    }
+}
+
+/// Wait for the next message of an optional subscription; never ready when there is none.
+async fn next_rds(sub: &mut Option<async_nats::Subscriber>) -> Option<async_nats::Message> {
+    match sub {
+        Some(sub) => sub.next().await,
+        None => std::future::pending().await,
     }
 }
 
 /// Validate bus messages and fan them out until stopped (entry dropped) or the bus ends.
 async fn forward(
     mut sub: async_nats::Subscriber,
+    mut rds: Option<async_nats::Subscriber>,
     subscribers: Subscribers,
     mut stopped: oneshot::Receiver<()>,
     registry: Arc<Mutex<Streams>>,
@@ -284,9 +384,22 @@ async fn forward(
             msg = sub.next() => {
                 let Some(msg) = msg else { break };
                 match AudioFrame::decode(&msg.payload) {
-                    Ok(frame) if frame.vfo_id == key.1 => deliver(&subscribers, &msg.payload),
+                    Ok(frame) if frame.vfo_id == key.1 => {
+                        deliver(&subscribers, &Item::Audio(msg.payload));
+                    }
                     Ok(_) => tracing::debug!(device = key.0, vfo = key.1, "dropping audio frame with foreign vfo id"),
                     Err(err) => tracing::debug!(%err, device = key.0, vfo = key.1, "dropping undecodable audio frame"),
+                }
+            }
+            msg = next_rds(&mut rds) => {
+                match msg {
+                    Some(msg) => {
+                        if let Some(item) = rds_item(&msg.payload, key.1) {
+                            deliver(&subscribers, &item);
+                        }
+                    }
+                    // Only the RDS subscription ended: carry on with audio alone.
+                    None => rds = None,
                 }
             }
         }
