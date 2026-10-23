@@ -15,8 +15,8 @@ user back to login; the spectrum and audio sockets stop reconnecting until the n
 
 | Gesture                                           | Action                                                                                                        |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Wheel                                             | Zoom around the pointer                                                                                       |
-| Wheel over the selected VFO's passband            | Tune it by the current step (wheel up = higher)                                                               |
+| Wheel                                             | Zoom around the pointer, also over a VFO passband                                                             |
+| Shift+wheel                                       | Tune the selected VFO by the current step (wheel up = higher), also over its passband                         |
 | Ctrl+wheel                                        | Always zoom                                                                                                   |
 | Drag on empty spectrum or waterfall               | Pan a zoomed view (a press that moves 4 px or less is a click)                                                |
 | Shift-drag / middle-drag                          | Pan                                                                                                           |
@@ -42,8 +42,9 @@ bins instead of stretched pixels (about 9 Hz per bin at the 10 kHz minimum span,
 zoom and pan maths anchor on the span of the newest frame (`ViewController.setShown`), so the
 pointer stays on its frequency while zooming and a marker does not drift.
 
-Settings menu, "Mouse wheel": `Zoom` (default) as above; `Tune` makes the wheel tune the selected VFO
-everywhere on the spectrum (Ctrl+wheel still zooms). Stored in `localStorage`.
+Settings menu, "Mouse wheel": `Zoom` (default) as above; `Tune` makes the plain wheel tune the selected VFO
+everywhere on the spectrum (Ctrl+wheel still zooms). Stored in `localStorage` (`superhet.wheelMode.v2`;
+the unversioned value of earlier releases is ignored, so everyone starts on `Zoom`).
 
 ## Keyboard shortcuts
 

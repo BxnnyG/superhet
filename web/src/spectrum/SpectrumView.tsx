@@ -340,7 +340,7 @@ export function SpectrumView({
       <canvas
         ref={overlayRef}
         className="absolute inset-0 size-full cursor-crosshair touch-none"
-        aria-label="Spectrum: wheel zooms (or tunes over the selected VFO), drag pans, click moves the selected VFO or tunes the centre, Alt/Ctrl-click creates a VFO, drag a VFO to retune it, drag a passband edge to change its bandwidth, double-click resets zoom"
+        aria-label="Spectrum: wheel zooms (Shift+wheel tunes the selected VFO), drag pans, click moves the selected VFO or tunes the centre, Alt/Ctrl-click creates a VFO, drag a VFO to retune it, drag a passband edge to change its bandwidth, double-click resets zoom"
       />
     </div>
   );

@@ -91,8 +91,8 @@ export function SettingsMenu({ theme, onTheme, onShortcuts }: Props) {
             />
           </Field>
           <p className="text-xs text-fg-subtle">
-            Zoom: the wheel zooms, except over the active VFO where it tunes. Tune: it always tunes
-            the active VFO; Ctrl+wheel zooms. Saved in this browser.
+            Zoom: the wheel zooms everywhere, Shift+wheel tunes the active VFO. Tune: the wheel
+            tunes the active VFO; Ctrl+wheel zooms. Saved in this browser.
           </p>
           <Button
             variant="ghost"
