@@ -166,8 +166,16 @@ async fn serve_client(mut socket: WebSocket, mut session: Session) -> u64 {
                 // Pings are answered by the transport; binary input is not part of the protocol.
                 Some(Ok(_)) => {}
             },
-            frame = queue.pop() => {
-                if !send(&mut socket, Message::Binary(frame)).await {
+            item = queue.pop() => {
+                let message = if item.text {
+                    match String::from_utf8(item.data.to_vec()) {
+                        Ok(text) => Message::text(text),
+                        Err(_) => continue,
+                    }
+                } else {
+                    Message::Binary(item.data)
+                };
+                if !send(&mut socket, message).await {
                     break;
                 }
             }
@@ -353,6 +361,30 @@ mod tests {
             serde_json::json!({"v":1,"type":"ack","vfos":[]})
         );
         assert_eq!(server.hub.stream_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn rds_state_arrives_as_text_between_the_audio_frames() {
+        let server = start(AudioHub::local(), OriginPolicy::default()).await;
+        let mut client = connect(&server, "?dev=dev0", None).await.expect("connect");
+        subscribe(&mut client, r#"{"type":"subscribe","vfos":[1]}"#).await;
+        let rds = superhet_bus::rds::RdsMessage {
+            synced: true,
+            ps: Some("SUPERHET".into()),
+            ..superhet_bus::rds::RdsMessage::empty(1)
+        }
+        .encode();
+        server.hub.publish_local("dev0", 1, raw(1, 10)).await;
+        server.hub.publish_local_rds("dev0", 1, &rds).await;
+        // Invalid, or for another VFO: dropped.
+        server.hub.publish_local_rds("dev0", 1, b"nope").await;
+        let foreign = superhet_bus::rds::RdsMessage::empty(2).encode();
+        server.hub.publish_local_rds("dev0", 1, &foreign).await;
+        server.hub.publish_local("dev0", 1, raw(1, 11)).await;
+        assert_eq!(next_binary(&mut client).await, raw(1, 10));
+        let text = next_text(&mut client).await;
+        assert_eq!(text.as_bytes(), rds.as_slice());
+        assert_eq!(next_binary(&mut client).await, raw(1, 11));
     }
 
     #[tokio::test]
