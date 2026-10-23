@@ -68,6 +68,12 @@ describe("applyVfoPatch", () => {
     expect(v).toMatchObject({ freqHz: 5, bandwidthHz: 180_000, squelchDbfs: -50 });
     expect(applyVfoPatch(v, { squelchDbfs: null }).squelchDbfs).toBeNull();
   });
+
+  it("shows the new mode's default bandwidth right after a mode change", () => {
+    const v = applyVfoPatch(vfo(1), { mode: "usb", bandwidthHz: null });
+    expect(v).toMatchObject({ mode: "usb", bandwidthHz: 2_400 });
+    expect(applyVfoPatch(v, { mode: "cw", bandwidthHz: null }).bandwidthHz).toBe(500);
+  });
 });
 
 describe("VfoController", () => {

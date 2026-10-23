@@ -10,7 +10,9 @@
 //!    generally not an integer multiple of 48 kHz.
 //! 3. Channel filter (Kaiser FIR, passband = `bandwidth / 2`) at the channel rate; channel
 //!    power (dBFS) and squelch are measured here.
-//! 4. Demodulator ([`FmDemod`] / [`AmDemod`]).
+//! 4. Demodulator ([`FmDemod`] / [`AmDemod`] / [`SsbDemod`]). USB / LSB shift the wanted sideband
+//!    to DC before the channel filter (so the filter keeps only that sideband) and shift it back
+//!    in the product detector; CW filters around the carrier and shifts it to the BFO pitch.
 //! 5. Audio decimating FIR (low-pass at the audio bandwidth, integer factor towards 48 kHz),
 //!    DC block and de-emphasis for FM.
 //! 6. Arbitrary-ratio [`Resampler`] to exactly [`OUTPUT_RATE`], then the squelch gate.
@@ -20,7 +22,9 @@
 
 use num_complex::Complex32;
 
-use crate::demod::{AmDemod, DcBlock, Deemph, FmDemod, NFM_REF_DEVIATION_HZ, WFM_DEVIATION_HZ};
+use crate::demod::{
+    AgcTimes, AmDemod, DcBlock, Deemph, FmDemod, NFM_REF_DEVIATION_HZ, SsbDemod, WFM_DEVIATION_HZ,
+};
 use crate::fir::{DecimFir, design_lowpass};
 use crate::nco::Nco;
 use crate::resample::Resampler;
@@ -44,6 +48,15 @@ const SQUELCH_HANG_S: f64 = 0.1;
 const SQUELCH_WINDOW_S: f64 = 0.005;
 /// Gate fade time (avoids clicks when the squelch toggles).
 const GATE_RAMP_S: f64 = 0.005;
+/// Lower audio edge of the SSB passband in Hz (the part of the sideband next to the carrier that is
+/// cut off).
+pub const SSB_LOW_CUT_HZ: f64 = 300.0;
+/// Transition width of the SSB / CW channel filter.
+const SSB_TRANSITION_HZ: f64 = 250.0;
+/// Default CW pitch (BFO offset) in Hz.
+pub const CW_DEFAULT_PITCH_HZ: u32 = 700;
+/// Accepted CW pitch range in Hz.
+pub const CW_PITCH_RANGE_HZ: std::ops::RangeInclusive<u32> = 200..=2_000;
 /// Lowest power reported (avoids `-inf`).
 const POWER_FLOOR: f32 = 1e-20;
 
@@ -84,6 +97,16 @@ pub enum Mode {
     },
     /// Envelope AM with AGC.
     Am,
+    /// Upper sideband: passband `300 Hz ..= 300 Hz + bandwidth` above the VFO frequency.
+    Usb,
+    /// Lower sideband: passband `300 Hz ..= 300 Hz + bandwidth` below the VFO frequency.
+    Lsb,
+    /// CW: filter centred on the VFO frequency, a carrier there is heard as a tone at
+    /// `pitch_hz`.
+    Cw {
+        /// Tone frequency of a carrier exactly on the VFO frequency (default 700 Hz).
+        pitch_hz: u32,
+    },
 }
 
 impl Mode {
@@ -101,19 +124,39 @@ impl Mode {
         }
     }
 
-    /// Default channel bandwidth in Hz (WFM 180 kHz, NFM 12.5 kHz, AM 10 kHz).
+    /// CW with the default pitch.
+    pub fn cw() -> Self {
+        Self::Cw {
+            pitch_hz: CW_DEFAULT_PITCH_HZ,
+        }
+    }
+
+    /// Default channel bandwidth in Hz (WFM 180 kHz, NFM 12.5 kHz, AM 10 kHz, SSB 2.4 kHz,
+    /// CW 500 Hz). For USB / LSB the bandwidth is the width of the passband, which starts
+    /// 300 Hz away from the VFO frequency (default 300 Hz ..= 2.7 kHz).
     pub fn default_bandwidth_hz(self) -> u32 {
         match self {
             Self::Wfm { .. } => 180_000,
             Self::Nfm { .. } => 12_500,
             Self::Am => 10_000,
+            Self::Usb | Self::Lsb => 2_400,
+            Self::Cw { .. } => 500,
+        }
+    }
+
+    /// Smallest supported bandwidth in Hz.
+    fn min_bandwidth_hz(self) -> u32 {
+        match self {
+            Self::Wfm { .. } | Self::Nfm { .. } | Self::Am => 1_000,
+            Self::Usb | Self::Lsb => 300,
+            Self::Cw { .. } => 100,
         }
     }
 
     fn deemphasis(self) -> Deemphasis {
         match self {
             Self::Wfm { deemphasis } | Self::Nfm { deemphasis } => deemphasis,
-            Self::Am => Deemphasis::None,
+            Self::Am | Self::Usb | Self::Lsb | Self::Cw { .. } => Deemphasis::None,
         }
     }
 }
@@ -145,6 +188,9 @@ pub enum DspError {
     /// Bandwidth is below 1 kHz or too wide for the channel rate of the mode.
     #[error("bandwidth {0} Hz is not supported for this mode and input rate")]
     Bandwidth(u32),
+    /// CW pitch outside 200 Hz..=2 kHz.
+    #[error("CW pitch {0} Hz is outside 200..=2000 Hz")]
+    Pitch(u32),
 }
 
 /// Per-call measurements.
@@ -160,11 +206,14 @@ pub struct ChannelStats {
 enum Demod {
     Fm(FmDemod),
     Am(AmDemod),
+    Ssb(SsbDemod),
 }
 
 /// Everything that depends on mode, bandwidth and input rate.
 struct Chain {
     stages: Vec<DecimFir<Complex32>>,
+    /// Moves the wanted sideband to DC (USB / LSB).
+    pre_shift: Option<Nco>,
     channel_filter: DecimFir<Complex32>,
     channel_rate: f64,
     demod: Demod,
@@ -181,16 +230,31 @@ impl Chain {
         }
         let fs = f64::from(rate);
         let bw = f64::from(bandwidth_hz);
-        if bandwidth_hz < 1_000 {
+        if bandwidth_hz < mode.min_bandwidth_hz() {
             return Err(DspError::Bandwidth(bandwidth_hz));
         }
+        if let Mode::Cw { pitch_hz } = mode
+            && !CW_PITCH_RANGE_HZ.contains(&pitch_hz)
+        {
+            return Err(DspError::Pitch(pitch_hz));
+        }
+        // SSB: the decimation stages must pass the whole sideband up to the outer edge (they are
+        // symmetric around DC), the channel filter only the passband after it was shifted to DC.
+        let ssb_shift = match mode {
+            Mode::Usb => Some(SSB_LOW_CUT_HZ + bw / 2.0),
+            Mode::Lsb => Some(-(SSB_LOW_CUT_HZ + bw / 2.0)),
+            _ => None,
+        };
+        let stage_bw = ssb_shift.map_or(bw, |shift| 2.0 * (shift.abs() + bw / 2.0));
         let min_rate = match mode {
             Mode::Wfm { .. } => (1.25 * bw).max(240_000.0),
-            Mode::Nfm { .. } | Mode::Am => (2.5 * bw).max(24_000.0),
+            Mode::Nfm { .. } | Mode::Am | Mode::Usb | Mode::Lsb | Mode::Cw { .. } => {
+                (2.5 * stage_bw).max(24_000.0)
+            }
         };
         let d = pick_decimation(((fs / min_rate).floor() as usize).max(1));
         let rch = fs / d as f64;
-        if rch < 1.15 * bw {
+        if rch < 1.15 * stage_bw {
             return Err(DspError::Bandwidth(bandwidth_hz));
         }
 
@@ -198,11 +262,21 @@ impl Chain {
         let mut rate_k = fs;
         for m in stage_factors(d) {
             let out_rate = rate_k / m as f64;
-            let taps = design_lowpass(rate_k, bw / 2.0, out_rate - bw / 2.0, CHANNEL_ATTEN_DB);
+            let taps = design_lowpass(
+                rate_k,
+                stage_bw / 2.0,
+                out_rate - stage_bw / 2.0,
+                CHANNEL_ATTEN_DB,
+            );
             stages.push(DecimFir::new(taps, m));
             rate_k = out_rate;
         }
-        let fstop = (bw / 2.0 * 1.25).min(0.49 * rch);
+        let fstop = match mode {
+            Mode::Usb | Mode::Lsb => bw / 2.0 + SSB_TRANSITION_HZ,
+            Mode::Cw { .. } => (bw / 2.0 * 1.25).max(bw / 2.0 + 60.0),
+            _ => bw / 2.0 * 1.25,
+        }
+        .min(0.49 * rch);
         let channel_filter =
             DecimFir::new(design_lowpass(rch, bw / 2.0, fstop, CHANNEL_ATTEN_DB), 1);
 
@@ -221,6 +295,24 @@ impl Chain {
                 )
             }
             Mode::Am => (Demod::Am(AmDemod::new(rch)), 0.45 * bw, 0.55 * bw),
+            Mode::Usb | Mode::Lsb => {
+                let shift = ssb_shift.unwrap_or_default();
+                let hi = SSB_LOW_CUT_HZ + bw;
+                (
+                    Demod::Ssb(SsbDemod::new(rch, shift, AgcTimes::SSB)),
+                    hi,
+                    hi + 800.0,
+                )
+            }
+            Mode::Cw { pitch_hz } => {
+                let pitch = f64::from(pitch_hz);
+                let pass = pitch + bw / 2.0 + 100.0;
+                (
+                    Demod::Ssb(SsbDemod::new(rch, pitch, AgcTimes::CW)),
+                    pass,
+                    pass + 800.0,
+                )
+            }
         };
         let ma = ((rch / f64::from(OUTPUT_RATE)).floor() as usize).max(1);
         let audio_rate = rch / ma as f64;
@@ -232,6 +324,7 @@ impl Chain {
         let is_fm = matches!(mode, Mode::Wfm { .. } | Mode::Nfm { .. });
         Ok(Self {
             stages,
+            pre_shift: ssb_shift.map(|shift| Nco::new(shift, rch)),
             channel_filter,
             channel_rate: rch,
             demod,
@@ -253,6 +346,10 @@ impl Chain {
         match &mut self.demod {
             Demod::Fm(d) => d.reset(),
             Demod::Am(d) => d.reset(),
+            Demod::Ssb(d) => d.reset(),
+        }
+        if let Some(n) = &mut self.pre_shift {
+            n.reset();
         }
         self.audio_dec.reset();
         if let Some(d) = &mut self.dc_block {
@@ -499,6 +596,10 @@ impl Channel {
                 st.process(&self.buf_a, &mut self.buf_b);
                 std::mem::swap(&mut self.buf_a, &mut self.buf_b);
             }
+            if let Some(n) = &mut self.chain.pre_shift {
+                n.mix(&self.buf_a, &mut self.buf_b);
+                std::mem::swap(&mut self.buf_a, &mut self.buf_b);
+            }
             self.buf_b.clear();
             self.chain
                 .channel_filter
@@ -518,6 +619,7 @@ impl Channel {
             match &mut self.chain.demod {
                 Demod::Fm(d) => d.process(&self.buf_a, &mut self.audio_a),
                 Demod::Am(d) => d.process(&self.buf_a, &mut self.audio_a),
+                Demod::Ssb(d) => d.process(&self.buf_a, &mut self.audio_a),
             }
             self.audio_b.clear();
             self.chain
@@ -649,6 +751,188 @@ mod tests {
             assert!(snr > 30.0, "rate {rate}: snr {snr}");
             assert!((amp - 0.6).abs() < 0.05, "rate {rate}: amp {amp}");
         }
+    }
+
+    /// Hann-windowed amplitude of the component at `f_hz` (any frequency, sine amplitude).
+    fn amp_at(audio: &[f32], f_hz: f64) -> f64 {
+        let rate = f64::from(OUTPUT_RATE);
+        let n = audio.len();
+        let (mut a, mut b, mut w_sum) = (0.0, 0.0, 0.0);
+        for (i, &v) in audio.iter().enumerate() {
+            let w = 0.5 - 0.5 * (TAU * i as f64 / n as f64).cos();
+            let ph = TAU * f_hz * i as f64 / rate;
+            a += w * f64::from(v) * ph.cos();
+            b += w * f64::from(v) * ph.sin();
+            w_sum += w;
+        }
+        2.0 * a.hypot(b) / w_sum
+    }
+
+    /// Sum of complex tones `(offset_from_vfo_hz, amplitude)` around the VFO at `vfo_offset`.
+    fn tones(
+        rate: u32,
+        vfo_offset: f64,
+        parts: &'static [(f64, f64)],
+    ) -> impl Fn(usize) -> Complex32 {
+        move |i| {
+            let t = i as f64 / f64::from(rate);
+            let mut acc = Complex32::new(0.0, 0.0);
+            for &(df, amp) in parts {
+                let ph = TAU * (vfo_offset + df) * t;
+                acc += Complex32::new((amp * ph.cos()) as f32, (amp * ph.sin()) as f32);
+            }
+            acc
+        }
+    }
+
+    fn demod_tones(
+        rate: u32,
+        vfo_offset: f64,
+        mode: Mode,
+        bandwidth_hz: Option<u32>,
+        parts: &'static [(f64, f64)],
+    ) -> Vec<f32> {
+        let mut c = cfg(rate, vfo_offset, mode);
+        c.bandwidth_hz = bandwidth_hz;
+        let mut ch = Channel::new(c).expect("valid config");
+        let n = (f64::from(rate) * 0.8) as usize;
+        let mut out = Vec::new();
+        run(&mut ch, &tones(rate, vfo_offset, parts), 0, n, &mut out);
+        out.split_off(out.len() / 2)
+    }
+
+    fn db(ratio: f64) -> f64 {
+        20.0 * ratio.log10()
+    }
+
+    #[test]
+    fn usb_passes_upper_and_rejects_lower_sideband() {
+        for (rate, offset) in [(2_400_000, 150_000.0), (250_000, -20_000.0)] {
+            // Wanted +1 kHz; the unwanted tone sits in the mirrored sideband.
+            let audio = demod_tones(
+                rate,
+                offset,
+                Mode::Usb,
+                None,
+                &[(1000.0, 0.3), (-1500.0, 0.3)],
+            );
+            let wanted = amp_at(&audio, 1000.0);
+            let image = amp_at(&audio, 1500.0);
+            assert!(
+                (0.5..0.95).contains(&wanted),
+                "rate {rate}: wanted {wanted}"
+            );
+            assert!(db(wanted / image) > 40.0, "rate {rate}: image {image}");
+        }
+    }
+
+    #[test]
+    fn lsb_passes_lower_and_rejects_upper_sideband() {
+        for (rate, offset) in [(2_048_000, -100_000.0), (250_000, 0.0)] {
+            let audio = demod_tones(
+                rate,
+                offset,
+                Mode::Lsb,
+                None,
+                &[(-1000.0, 0.3), (1500.0, 0.3)],
+            );
+            let wanted = amp_at(&audio, 1000.0);
+            let image = amp_at(&audio, 1500.0);
+            assert!(
+                (0.5..0.95).contains(&wanted),
+                "rate {rate}: wanted {wanted}"
+            );
+            assert!(db(wanted / image) > 40.0, "rate {rate}: image {image}");
+        }
+        // The same signal is heard in USB at +1 kHz and suppressed in LSB.
+        let both: &'static [(f64, f64)] = &[(1000.0, 0.3), (-1500.0, 0.3)];
+        let usb = demod_tones(250_000, 0.0, Mode::Usb, None, both);
+        let lsb = demod_tones(250_000, 0.0, Mode::Lsb, None, both);
+        assert!(amp_at(&lsb, 1500.0) > 0.5);
+        assert!(amp_at(&usb, 1000.0) > 0.5);
+        assert!(db(amp_at(&usb, 1000.0) / amp_at(&lsb, 1000.0)) > 40.0);
+    }
+
+    #[test]
+    fn ssb_passband_edges_follow_the_bandwidth() {
+        let parts: &'static [(f64, f64)] = &[(1000.0, 0.3), (2000.0, 0.3), (3200.0, 0.3)];
+        // 1700 Hz wide passband: 300 Hz ..= 2000 Hz.
+        let audio = demod_tones(250_000, 0.0, Mode::Usb, Some(1700), parts);
+        assert!(amp_at(&audio, 1000.0) > 0.3);
+        assert!(db(amp_at(&audio, 1000.0) / amp_at(&audio, 3200.0)) > 40.0);
+        // The default 2400 Hz (300 Hz ..= 2700 Hz) passes 2 kHz and rejects 3.2 kHz.
+        let audio = demod_tones(250_000, 0.0, Mode::Usb, None, parts);
+        assert!(amp_at(&audio, 2000.0) > 0.2);
+        assert!(db(amp_at(&audio, 1000.0) / amp_at(&audio, 3200.0)) > 40.0);
+    }
+
+    #[test]
+    fn ssb_agc_levels_weak_and_strong_signals() {
+        let weak = demod_tones(250_000, 0.0, Mode::Usb, None, &[(1000.0, 0.005)]);
+        let strong = demod_tones(250_000, 0.0, Mode::Usb, None, &[(1000.0, 0.4)]);
+        let (w, s) = (amp_at(&weak, 1000.0), amp_at(&strong, 1000.0));
+        assert!(
+            (0.4..1.0).contains(&w) && (0.4..1.0).contains(&s),
+            "{w} {s}"
+        );
+        assert!(strong.iter().all(|v| v.abs() <= 1.0));
+    }
+
+    #[test]
+    fn cw_carrier_on_vfo_gives_pitch_tone() {
+        let carrier: &'static [(f64, f64)] = &[(0.0, 0.3)];
+        let audio = demod_tones(250_000, 20_000.0, Mode::cw(), None, carrier);
+        let tone = amp_at(&audio, 700.0);
+        assert!((0.5..0.95).contains(&tone), "tone {tone}");
+        assert!(db(tone / amp_at(&audio, 1400.0).max(1e-9)) > 30.0);
+
+        // Configurable pitch.
+        let audio = demod_tones(
+            2_400_000,
+            -300_000.0,
+            Mode::Cw { pitch_hz: 600 },
+            None,
+            carrier,
+        );
+        assert!(amp_at(&audio, 600.0) > 0.5);
+        assert!(amp_at(&audio, 700.0) < 0.05);
+    }
+
+    #[test]
+    fn cw_filter_is_narrow_and_follows_the_offset() {
+        // A carrier 100 Hz above the VFO lands 100 Hz above the pitch.
+        let audio = demod_tones(250_000, 0.0, Mode::cw(), None, &[(100.0, 0.3)]);
+        assert!(amp_at(&audio, 800.0) > 0.5);
+        // 1 kHz away is outside the 500 Hz filter; the carrier on the VFO dominates.
+        let audio = demod_tones(250_000, 0.0, Mode::cw(), None, &[(0.0, 0.3), (1000.0, 0.3)]);
+        assert!(db(amp_at(&audio, 700.0) / amp_at(&audio, 1700.0)) > 40.0);
+        // A 100 Hz wide filter is realisable and still passes the carrier.
+        let audio = demod_tones(250_000, 0.0, Mode::cw(), Some(100), &[(0.0, 0.3)]);
+        assert!(amp_at(&audio, 700.0) > 0.5);
+    }
+
+    #[test]
+    fn ssb_and_cw_parameters_are_validated() {
+        assert!(matches!(
+            Channel::new(ChannelConfig {
+                bandwidth_hz: Some(200),
+                ..cfg(250_000, 0.0, Mode::Usb)
+            }),
+            Err(DspError::Bandwidth(200))
+        ));
+        assert!(matches!(
+            Channel::new(cfg(250_000, 0.0, Mode::Cw { pitch_hz: 5000 })),
+            Err(DspError::Pitch(5000))
+        ));
+        assert!(matches!(
+            Channel::new(ChannelConfig {
+                bandwidth_hz: Some(50),
+                ..cfg(250_000, 0.0, Mode::cw())
+            }),
+            Err(DspError::Bandwidth(50))
+        ));
+        assert_eq!(Mode::Usb.default_bandwidth_hz(), 2_400);
+        assert_eq!(Mode::cw().default_bandwidth_hz(), 500);
     }
 
     #[test]

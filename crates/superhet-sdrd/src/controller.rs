@@ -435,6 +435,7 @@ impl Controller {
             bandwidth_hz: None,
             squelch_dbfs: None,
             deemphasis: None,
+            cw_pitch_hz: None,
         };
         match self.vfos.with(|r| {
             if r.list().is_empty() {
@@ -875,6 +876,7 @@ mod tests {
             bandwidth_hz: Some(900_000),
             squelch_dbfs: None,
             deemphasis: None,
+            cw_pitch_hz: None,
         }];
         let err = load(&c, &data).expect_err("invalid");
         assert_eq!(err.code, ErrorCode::Invalid);
@@ -902,6 +904,7 @@ mod tests {
                 bandwidth_hz: None,
                 squelch_dbfs: None,
                 deemphasis: None,
+                cw_pitch_hz: None,
             }],
             lock: true,
             ..ProfileData::from_state(&state(&c)).expect("snapshot")

@@ -13,8 +13,12 @@ import {
   type Rec,
 } from "../spectrum/api";
 
-export type VfoMode = "wfm" | "nfm" | "am";
-export const VFO_MODES: readonly VfoMode[] = ["wfm", "nfm", "am"];
+export type VfoMode = "wfm" | "nfm" | "am" | "usb" | "lsb" | "cw";
+export const VFO_MODES: readonly VfoMode[] = ["wfm", "nfm", "am", "usb", "lsb", "cw"];
+
+export function isVfoMode(v: unknown): v is VfoMode {
+  return VFO_MODES.some((m) => m === v);
+}
 
 export interface Vfo {
   id: number;
@@ -76,7 +80,7 @@ export function parseVfo(raw: unknown): Vfo {
   const { id, freq_hz, mode, bandwidth_hz, squelch_dbfs, deemphasis, offset_hz, status } = raw;
   if (typeof id !== "number" || !Number.isInteger(id) || id < 1) return bad("id");
   if (typeof freq_hz !== "number" || !Number.isFinite(freq_hz)) return bad("freq_hz");
-  if (mode !== "wfm" && mode !== "nfm" && mode !== "am") return bad("mode");
+  if (!isVfoMode(mode)) return bad("mode");
   if (typeof bandwidth_hz !== "number" || !Number.isFinite(bandwidth_hz))
     return bad("bandwidth_hz");
   if (

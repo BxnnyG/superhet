@@ -11,7 +11,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Deserializer, Serialize};
 use superhet_bus::profile;
-use superhet_dsp::{Channel, ChannelConfig, Deemphasis, Mode};
+use superhet_dsp::{
+    CW_DEFAULT_PITCH_HZ, CW_PITCH_RANGE_HZ, Channel, ChannelConfig, Deemphasis, Mode,
+    SSB_LOW_CUT_HZ,
+};
 
 use crate::control::{CtlError, ErrorCode, MAX_CENTER_HZ, VERSION};
 use crate::window;
@@ -19,7 +22,7 @@ use crate::window;
 /// Most VFOs one device can run.
 pub const MAX_VFOS: usize = 8;
 /// Accepted channel bandwidth in Hz (the channelizer applies its own, tighter limits).
-const BANDWIDTH_RANGE: std::ops::RangeInclusive<u32> = 1_000..=1_000_000;
+const BANDWIDTH_RANGE: std::ops::RangeInclusive<u32> = 100..=1_000_000;
 /// Accepted squelch threshold in dBFS.
 const SQUELCH_RANGE: std::ops::RangeInclusive<f32> = -200.0..=0.0;
 
@@ -33,6 +36,12 @@ pub enum VfoMode {
     Nfm,
     /// Envelope AM.
     Am,
+    /// Upper sideband.
+    Usb,
+    /// Lower sideband.
+    Lsb,
+    /// CW (Morse): a carrier on the VFO frequency is heard at the CW pitch.
+    Cw,
 }
 
 /// De-emphasis as spelled on the wire.
@@ -84,6 +93,8 @@ pub struct Vfo {
     pub squelch_dbfs: Option<f32>,
     /// De-emphasis override (WFM/NFM only); `None` uses the mode default.
     pub deemphasis: Option<Deemphasis>,
+    /// CW pitch override in Hz (CW only); `None` uses the default (700 Hz).
+    pub cw_pitch_hz: Option<u32>,
 }
 
 /// Tuning of the device a VFO is evaluated against.
@@ -117,6 +128,23 @@ impl Vfo {
                 deemphasis: self.deemphasis.unwrap_or(Deemphasis::None),
             },
             VfoMode::Am => Mode::Am,
+            VfoMode::Usb => Mode::Usb,
+            VfoMode::Lsb => Mode::Lsb,
+            VfoMode::Cw => Mode::Cw {
+                pitch_hz: self.cw_pitch_hz.unwrap_or(CW_DEFAULT_PITCH_HZ),
+            },
+        }
+    }
+
+    /// Width in Hz of the band around the VFO frequency the channelizer has to pass (for the
+    /// window check): SSB reaches `300 Hz + bandwidth` to one side, everything else is
+    /// symmetric.
+    #[must_use]
+    pub fn span_hz(&self) -> f64 {
+        let bandwidth = f64::from(self.bandwidth());
+        match self.mode {
+            VfoMode::Usb | VfoMode::Lsb => 2.0 * (SSB_LOW_CUT_HZ + bandwidth),
+            _ => bandwidth,
         }
     }
 
@@ -161,7 +189,11 @@ impl Vfo {
     pub fn wire(&self, tuning: Tuning) -> VfoWire {
         let deemphasis = match self.dsp_mode() {
             Mode::Wfm { deemphasis } | Mode::Nfm { deemphasis } => Some(deemphasis.into()),
-            Mode::Am => None,
+            Mode::Am | Mode::Usb | Mode::Lsb | Mode::Cw { .. } => None,
+        };
+        let cw_pitch_hz = match self.dsp_mode() {
+            Mode::Cw { pitch_hz } => Some(pitch_hz),
+            _ => None,
         };
         VfoWire {
             id: self.id,
@@ -170,6 +202,7 @@ impl Vfo {
             bandwidth_hz: self.bandwidth(),
             squelch_dbfs: self.squelch_dbfs,
             deemphasis,
+            cw_pitch_hz,
             offset_hz: self.offset_hz(tuning.center_hz),
             status: self.status(tuning),
         }
@@ -185,6 +218,8 @@ pub struct VfoWire {
     bandwidth_hz: u32,
     squelch_dbfs: Option<f32>,
     deemphasis: Option<DeemphasisWire>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cw_pitch_hz: Option<u32>,
     offset_hz: f64,
     status: Status,
 }
@@ -202,6 +237,8 @@ pub struct VfoCreate {
     pub squelch_dbfs: Option<f32>,
     /// De-emphasis override.
     pub deemphasis: Option<Deemphasis>,
+    /// CW pitch override in Hz.
+    pub cw_pitch_hz: Option<u32>,
 }
 
 /// Validated `vfo.update` request; `Some(None)` means "reset to default / off".
@@ -219,6 +256,8 @@ pub struct VfoPatch {
     pub squelch_dbfs: Option<Option<f32>>,
     /// New de-emphasis override.
     pub deemphasis: Option<Option<Deemphasis>>,
+    /// New CW pitch override.
+    pub cw_pitch_hz: Option<Option<u32>>,
 }
 
 fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
@@ -238,6 +277,7 @@ struct CreateWire {
     bandwidth_hz: Option<u32>,
     squelch_dbfs: Option<f32>,
     deemphasis: Option<DeemphasisWire>,
+    cw_pitch_hz: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -253,6 +293,8 @@ struct UpdateWire {
     squelch_dbfs: Option<Option<f32>>,
     #[serde(default, deserialize_with = "present")]
     deemphasis: Option<Option<DeemphasisWire>>,
+    #[serde(default, deserialize_with = "present")]
+    cw_pitch_hz: Option<Option<u32>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -307,10 +349,22 @@ fn check_squelch(squelch: Option<f32>) -> Result<(), CtlError> {
 }
 
 fn check_deemphasis(mode: VfoMode, deemphasis: Option<Deemphasis>) -> Result<(), CtlError> {
-    if mode == VfoMode::Am && deemphasis.is_some() {
-        Err(CtlError::invalid("deemphasis does not apply to am"))
+    if !matches!(mode, VfoMode::Wfm | VfoMode::Nfm) && deemphasis.is_some() {
+        Err(CtlError::invalid("deemphasis only applies to wfm and nfm"))
     } else {
         Ok(())
+    }
+}
+
+fn check_cw_pitch(mode: VfoMode, pitch: Option<u32>) -> Result<(), CtlError> {
+    match pitch {
+        Some(_) if mode != VfoMode::Cw => Err(CtlError::invalid("cw_pitch_hz only applies to cw")),
+        Some(hz) if !CW_PITCH_RANGE_HZ.contains(&hz) => Err(CtlError::invalid(format!(
+            "cw_pitch_hz {hz} outside {}..={}",
+            CW_PITCH_RANGE_HZ.start(),
+            CW_PITCH_RANGE_HZ.end()
+        ))),
+        _ => Ok(()),
     }
 }
 
@@ -327,11 +381,13 @@ pub fn parse_create(payload: &[u8]) -> Result<VfoCreate, CtlError> {
         bandwidth_hz: wire.bandwidth_hz,
         squelch_dbfs: wire.squelch_dbfs,
         deemphasis: wire.deemphasis.map(Into::into),
+        cw_pitch_hz: wire.cw_pitch_hz,
     };
     check_freq(request.freq_hz)?;
     check_bandwidth(request.bandwidth_hz)?;
     check_squelch(request.squelch_dbfs)?;
     check_deemphasis(request.mode, request.deemphasis)?;
+    check_cw_pitch(request.mode, request.cw_pitch_hz)?;
     Ok(request)
 }
 
@@ -350,17 +406,22 @@ pub fn parse_update(payload: &[u8]) -> Result<VfoPatch, CtlError> {
         bandwidth_hz: wire.bandwidth_hz,
         squelch_dbfs: wire.squelch_dbfs,
         deemphasis: wire.deemphasis.map(|d| d.map(Into::into)),
+        cw_pitch_hz: wire.cw_pitch_hz,
     };
     if let Some(hz) = patch.freq_hz {
         check_freq(hz)?;
     }
     check_bandwidth(patch.bandwidth_hz.flatten())?;
     check_squelch(patch.squelch_dbfs.flatten())?;
+    if let Some(pitch) = patch.cw_pitch_hz.flatten() {
+        check_cw_pitch(patch.mode.unwrap_or(VfoMode::Cw), Some(pitch))?;
+    }
     if patch.freq_hz.is_none()
         && patch.mode.is_none()
         && patch.bandwidth_hz.is_none()
         && patch.squelch_dbfs.is_none()
         && patch.deemphasis.is_none()
+        && patch.cw_pitch_hz.is_none()
     {
         return Err(CtlError::invalid("request changes nothing"));
     }
@@ -419,6 +480,7 @@ impl Vfo {
             bandwidth_hz: request.bandwidth_hz,
             squelch_dbfs: request.squelch_dbfs,
             deemphasis: request.deemphasis,
+            cw_pitch_hz: request.cw_pitch_hz,
         }
     }
 }
@@ -429,6 +491,9 @@ impl From<profile::Mode> for VfoMode {
             profile::Mode::Wfm => Self::Wfm,
             profile::Mode::Nfm => Self::Nfm,
             profile::Mode::Am => Self::Am,
+            profile::Mode::Usb => Self::Usb,
+            profile::Mode::Lsb => Self::Lsb,
+            profile::Mode::Cw => Self::Cw,
         }
     }
 }
@@ -439,6 +504,9 @@ impl From<VfoMode> for profile::Mode {
             VfoMode::Wfm => Self::Wfm,
             VfoMode::Nfm => Self::Nfm,
             VfoMode::Am => Self::Am,
+            VfoMode::Usb => Self::Usb,
+            VfoMode::Lsb => Self::Lsb,
+            VfoMode::Cw => Self::Cw,
         }
     }
 }
@@ -459,6 +527,7 @@ impl From<&profile::Vfo> for VfoCreate {
             bandwidth_hz: vfo.bandwidth_hz,
             squelch_dbfs: vfo.squelch_dbfs,
             deemphasis: vfo.deemphasis.map(deemphasis_of),
+            cw_pitch_hz: vfo.cw_pitch_hz,
         }
     }
 }
@@ -511,6 +580,7 @@ impl VfoRegistry {
         if let Some(mode) = patch.mode {
             if mode != vfo.mode {
                 vfo.deemphasis = None;
+                vfo.cw_pitch_hz = None;
             }
             vfo.mode = mode;
         }
@@ -523,7 +593,11 @@ impl VfoRegistry {
         if let Some(de) = patch.deemphasis {
             vfo.deemphasis = de;
         }
+        if let Some(pitch) = patch.cw_pitch_hz {
+            vfo.cw_pitch_hz = pitch;
+        }
         check_deemphasis(vfo.mode, vfo.deemphasis)?;
+        check_cw_pitch(vfo.mode, vfo.cw_pitch_hz)?;
         check_realisable(&vfo, sample_rate)?;
         self.vfos[index] = vfo.clone();
         self.revision += 1;
@@ -664,6 +738,7 @@ mod tests {
             bandwidth_hz: None,
             squelch_dbfs: None,
             deemphasis: None,
+            cw_pitch_hz: None,
         }
     }
 
@@ -686,6 +761,54 @@ mod tests {
     }
 
     #[test]
+    fn ssb_and_cw_vfos() {
+        let r = create(r#"{"v":1,"freq_hz":7100000,"mode":"usb"}"#).expect("usb");
+        assert_eq!(r.mode, VfoMode::Usb);
+        let r =
+            create(r#"{"v":1,"freq_hz":7030000,"mode":"cw","bandwidth_hz":200,"cw_pitch_hz":600}"#)
+                .expect("cw");
+        assert_eq!((r.bandwidth_hz, r.cw_pitch_hz), (Some(200), Some(600)));
+        for bad in [
+            r#"{"v":1,"freq_hz":1,"mode":"usb","cw_pitch_hz":600}"#,
+            r#"{"v":1,"freq_hz":1,"mode":"cw","cw_pitch_hz":50}"#,
+            r#"{"v":1,"freq_hz":1,"mode":"lsb","deemphasis":"50us"}"#,
+            r#"{"v":1,"freq_hz":1,"mode":"cw","bandwidth_hz":99}"#,
+        ] {
+            assert!(create(bad).is_err(), "{bad}");
+        }
+
+        let mut reg = VfoRegistry::default();
+        let id = reg
+            .create(
+                create(r#"{"v":1,"freq_hz":7030000,"mode":"cw"}"#).expect("cw"),
+                RATE,
+            )
+            .expect("created")
+            .id;
+        let wire = serde_json::to_value(reg.list()[0].wire(T)).expect("json");
+        assert_eq!(
+            (wire["bandwidth_hz"].as_u64(), wire["cw_pitch_hz"].as_u64()),
+            (Some(500), Some(700))
+        );
+        let patch = parse_update(format!(r#"{{"v":1,"id":{id},"cw_pitch_hz":650}}"#).as_bytes())
+            .expect("patch");
+        assert_eq!(
+            reg.update(&patch, RATE).expect("updated").cw_pitch_hz,
+            Some(650)
+        );
+        // Switching the mode drops the pitch override.
+        let patch =
+            parse_update(format!(r#"{{"v":1,"id":{id},"mode":"lsb"}}"#).as_bytes()).expect("patch");
+        let vfo = reg.update(&patch, RATE).expect("updated");
+        assert_eq!(
+            (vfo.mode, vfo.cw_pitch_hz, vfo.bandwidth()),
+            (VfoMode::Lsb, None, 2_400)
+        );
+        // The window check accounts for the one-sided SSB passband (300 Hz + bandwidth).
+        assert_eq!(vfo.span_hz(), 5_400.0);
+    }
+
+    #[test]
     fn rejects_invalid_create() {
         for bad in [
             "",
@@ -696,7 +819,7 @@ mod tests {
             r#"{"v":1,"freq_hz":1}"#,
             r#"{"v":1,"freq_hz":0,"mode":"am"}"#,
             r#"{"v":1,"freq_hz":2000000000000,"mode":"am"}"#,
-            r#"{"v":1,"freq_hz":1,"mode":"usb"}"#,
+            r#"{"v":1,"freq_hz":1,"mode":"dsb"}"#,
             r#"{"v":1,"freq_hz":1,"mode":"am","bandwidth_hz":10}"#,
             r#"{"v":1,"freq_hz":1,"mode":"am","bandwidth_hz":5000000}"#,
             r#"{"v":1,"freq_hz":1,"mode":"am","squelch_dbfs":5}"#,
@@ -775,6 +898,7 @@ mod tests {
                     bandwidth_hz: Some(150_000),
                     squelch_dbfs: Some(-60.0),
                     deemphasis: Some(Deemphasis::Us75),
+                    cw_pitch_hz: None,
                 },
                 RATE,
             )
@@ -868,6 +992,7 @@ mod tests {
             bandwidth_hz: bw,
             squelch_dbfs: None,
             deemphasis: None,
+            cw_pitch_hz: None,
         };
         // The usable half span is 435.2 kHz (85 % of 1.024 MS/s); NFM default 12.5 kHz leaves
         // 428.95 kHz of offset.
@@ -912,6 +1037,7 @@ mod tests {
             bandwidth_hz: None,
             squelch_dbfs: None,
             deemphasis: None,
+            cw_pitch_hz: None,
         };
         let value = serde_json::to_value(vfo.wire(T)).expect("json");
         assert_eq!(value["id"], 4);

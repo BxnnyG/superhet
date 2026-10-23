@@ -13,6 +13,7 @@ import {
   type VfoPatch,
   type VfoReply,
 } from "./api";
+import { DEFAULT_BANDWIDTH_HZ } from "./model";
 
 export interface VfoSnapshot {
   /** Confirmed VFOs with in-flight and pending changes applied. */
@@ -43,6 +44,9 @@ export function applyVfoPatch(vfo: Vfo, patch: VfoPatch): Vfo {
   if (patch.freqHz !== undefined) next.freqHz = patch.freqHz;
   if (patch.mode !== undefined) next.mode = patch.mode;
   if (patch.bandwidthHz != null) next.bandwidthHz = patch.bandwidthHz;
+  // A mode change that resets the bandwidth shows the new mode's default right away.
+  else if (patch.bandwidthHz === null && patch.mode !== undefined)
+    next.bandwidthHz = DEFAULT_BANDWIDTH_HZ[patch.mode];
   if (patch.squelchDbfs !== undefined) next.squelchDbfs = patch.squelchDbfs;
   return next;
 }

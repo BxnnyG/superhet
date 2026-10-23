@@ -45,15 +45,6 @@ export function runShortcut(action: ShortcutAction, ctx: ShortcutContext): boole
     }
     case "mode":
       if (!active) return false;
-      if (action.mode === null) {
-        toasts.push({
-          key: "mode-unsupported",
-          tone: "info",
-          title: `${action.label} is not available yet`,
-          body: "Only WFM, NFM and AM are implemented in the receiver so far.",
-        });
-        return true;
-      }
       // A mode change resets the bandwidth to the new mode's default, as in the dock.
       if (action.mode !== active.mode) {
         ctx.vfoCtl.update(active.id, { mode: action.mode, bandwidthHz: null });

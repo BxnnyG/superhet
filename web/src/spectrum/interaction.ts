@@ -42,7 +42,14 @@ import {
   previewLabel,
   type PreviewTarget,
 } from "./preview";
-import { MODE_LABEL, formatBandwidth, hitTestVfo, vfoColor, type Marker } from "../vfo/model";
+import {
+  MODE_LABEL,
+  formatBandwidth,
+  hitTestVfo,
+  passbandRange,
+  vfoColor,
+  type Marker,
+} from "../vfo/model";
 import {
   CLICK_SLOP_PX,
   VFO_GRAB_PX,
@@ -547,8 +554,9 @@ export class SpectrumInteraction {
       // Ghost of the passband the VFO would get at the landing frequency.
       const m = this.markers.find((v) => v.id === target.id);
       if (m) {
-        const x0 = xOf(hz - m.bandwidthHz / 2);
-        const x1 = xOf(hz + m.bandwidthHz / 2);
+        const range = passbandRange(m.mode, hz, m.bandwidthHz);
+        const x0 = xOf(range.loHz);
+        const x1 = xOf(range.hiHz);
         const color = vfoColor(m.id);
         ctx.globalAlpha = 0.12;
         ctx.fillStyle = color;
@@ -698,10 +706,11 @@ export class SpectrumInteraction {
       const selected = m.id === this.selectedId;
       const color = vfoColor(m.id);
       const freq = this.displayFreq(m, now);
-      const x0 = xOf(freq - m.bandwidthHz / 2);
-      const x1 = xOf(freq + m.bandwidthHz / 2);
+      const range = passbandRange(m.mode, freq, m.bandwidthHz);
+      const x0 = xOf(range.loHz);
+      const x1 = xOf(range.hiHz);
       const xc = xOf(freq);
-      if (x1 < left || x0 > canvas.width) continue;
+      if (Math.max(x1, xc) < left || Math.min(x0, xc) > canvas.width) continue;
       ctx.globalAlpha = m.paused ? 0.35 : 1;
       ctx.fillStyle = color;
       ctx.globalAlpha *= selected ? 0.28 : 0.15;

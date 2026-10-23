@@ -94,9 +94,9 @@ describe("SDR++ frequency manager", () => {
       tags: [],
     });
     expect(byName.ISS).toMatchObject({ mode: "nfm", tags: [] });
-    expect(byName["20m"]).toMatchObject({ mode: null, tags: ["Ham"], notes: "Mode: USB" });
+    expect(byName["20m"]).toMatchObject({ mode: "usb", tags: ["Ham"] });
     expect(r.skipped).toBe(1);
-    expect(r.unsupportedMode).toBe(1);
+    expect(r.unsupportedMode).toBe(0);
   });
 
   it("accepts a single exported list", () => {

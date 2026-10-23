@@ -134,7 +134,7 @@ fn now_ns() -> u64 {
 fn bitrate_for(mode: Mode) -> i32 {
     match mode {
         Mode::Wfm { .. } => BITRATE_WFM,
-        Mode::Nfm { .. } | Mode::Am => BITRATE_NARROW,
+        Mode::Nfm { .. } | Mode::Am | Mode::Usb | Mode::Lsb | Mode::Cw { .. } => BITRATE_NARROW,
     }
 }
 
@@ -459,6 +459,7 @@ mod tests {
                         bandwidth_hz: None,
                         squelch_dbfs: None,
                         deemphasis: None,
+                        cw_pitch_hz: None,
                     },
                     RATE,
                 )
@@ -473,6 +474,62 @@ mod tests {
             out.push((id, AudioFrame::decode(&bytes).expect("decode")));
         }
         out
+    }
+
+    /// IQ blocks holding an unmodulated carrier at `offset_hz`.
+    fn carrier_blocks(offset_hz: f64, count: usize) -> Vec<Arc<IqBlock>> {
+        let mut n = 0u64;
+        (0..count)
+            .map(|_| {
+                let samples = (0..BLOCK)
+                    .map(|_| {
+                        let ph = std::f64::consts::TAU * offset_hz * n as f64 / f64::from(RATE);
+                        n += 1;
+                        Complex32::new(0.3 * ph.cos() as f32, 0.3 * ph.sin() as f32)
+                    })
+                    .collect();
+                Arc::new(IqBlock {
+                    center_hz: CENTER,
+                    sample_rate: RATE,
+                    tuning_epoch: 0,
+                    samples,
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn cw_vfo_turns_a_carrier_into_the_pitch_tone() {
+        let shared = Arc::new(VfoShared::default());
+        let id = create(&shared, CENTER + 50_000, VfoMode::Cw);
+        let (tx, rx) = channel();
+        let engine = AudioEngine::start(Arc::clone(&shared), move |id, bytes| {
+            let _ = tx.send((id, bytes));
+        })
+        .expect("start");
+        feed(&engine.tap(), &carrier_blocks(50_000.0, 300));
+        let frames = collect(&rx, Duration::from_millis(300));
+        drop(engine);
+
+        assert!(frames.len() >= 50, "got {} frames", frames.len());
+        let mut decoder = Decoder::new().expect("decoder");
+        let mut pcm_all = Vec::new();
+        for (vfo, frame) in &frames {
+            assert_eq!(*vfo, id);
+            let mut pcm = vec![0f32; FRAME_SAMPLES];
+            let n = decoder
+                .decode_float(&frame.payload, &mut pcm)
+                .expect("opus decode");
+            pcm_all.extend_from_slice(&pcm[..n]);
+        }
+        // Skip the first half (filter / AGC settling): a 700 Hz tone has 1400 zero crossings
+        // per second.
+        let tail = &pcm_all[pcm_all.len() / 2..];
+        let rms = (tail.iter().map(|v| v * v).sum::<f32>() / tail.len() as f32).sqrt();
+        assert!(rms > 0.2, "rms {rms}");
+        let crossings = tail.windows(2).filter(|w| w[0] * w[1] < 0.0).count() as f32;
+        let hz = crossings / 2.0 / (tail.len() as f32 / 48_000.0);
+        assert!((650.0..750.0).contains(&hz), "pitch {hz}");
     }
 
     #[test]
@@ -578,6 +635,7 @@ mod tests {
                         // Signal is about -6 dBFS; this never opens.
                         squelch_dbfs: Some(-3.0),
                         deemphasis: None,
+                        cw_pitch_hz: None,
                     },
                     RATE,
                 )

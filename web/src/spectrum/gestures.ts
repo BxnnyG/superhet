@@ -3,7 +3,7 @@
 // interaction.ts; keeping the rules here makes them testable without a canvas.
 
 import type { VfoMode } from "../vfo/api";
-import { bandwidthLimits, type Marker } from "../vfo/model";
+import { SSB_LOW_CUT_HZ, bandwidthLimits, passbandRange, type Marker } from "../vfo/model";
 
 /** Distance in CSS pixels below which a press counts as a click, not a drag. */
 export const CLICK_SLOP_PX = 4;
@@ -20,43 +20,63 @@ export function exceedsSlop(dxPx: number, slopPx = CLICK_SLOP_PX): boolean {
 
 export type PassbandEdge = "lo" | "hi";
 
+/** Which side of the carrier a mode occupies: AM/FM/CW both, USB upper, LSB lower. */
+export type Sideband = "both" | "upper" | "lower";
+
+export function sidebandOf(mode: VfoMode): Sideband {
+  return mode === "usb" ? "upper" : mode === "lsb" ? "lower" : "both";
+}
+
 /**
- * Which edge of the (selected) VFO passband lies under `hz`, if any. Narrow passbands (edges
- * closer than the grab zone to the centre line) and the centre line itself keep the centre grab.
+ * Which edge of the (selected) VFO passband lies under `hz`, if any. Two-sided passbands offer
+ * both edges (the other one mirrors); USB / LSB only their outer edge, the inner one is the fixed
+ * low cut. Narrow passbands (edges closer than the grab zone to the centre line) and the centre
+ * line itself keep the centre grab.
  */
 export function hitPassbandEdge(m: Marker, hz: number, slopHz: number): PassbandEdge | null {
-  const half = m.bandwidthHz / 2;
-  if (half <= slopHz * 1.5 || Math.abs(hz - m.freqHz) <= slopHz) return null;
-  const lo = Math.abs(hz - (m.freqHz - half));
-  const hi = Math.abs(hz - (m.freqHz + half));
-  if (Math.min(lo, hi) > slopHz) return null;
-  return lo <= hi ? "lo" : "hi";
+  if (Math.abs(hz - m.freqHz) <= slopHz) return null;
+  const { loHz, hiHz } = passbandRange(m.mode, m.freqHz, m.bandwidthHz);
+  const side = sidebandOf(m.mode);
+  const candidates: PassbandEdge[] =
+    side === "upper" ? ["hi"] : side === "lower" ? ["lo"] : ["lo", "hi"];
+  let best: PassbandEdge | null = null;
+  let bestDist = Infinity;
+  for (const edge of candidates) {
+    const edgeHz = edge === "lo" ? loHz : hiHz;
+    // An edge that is too close to the centre line would swallow the centre grab.
+    if (Math.abs(edgeHz - m.freqHz) <= slopHz * 1.5) continue;
+    const dist = Math.abs(hz - edgeHz);
+    if (dist <= slopHz && dist < bestDist) {
+      best = edge;
+      bestDist = dist;
+    }
+  }
+  return best;
 }
 
 /** True when `hz` is inside the passband of `m` (or within `slopHz` of its centre line). */
 export function isOverPassband(m: Marker, hz: number, slopHz: number): boolean {
-  return Math.abs(hz - m.freqHz) <= Math.max(m.bandwidthHz / 2, slopHz);
+  const { loHz, hiHz } = passbandRange(m.mode, m.freqHz, m.bandwidthHz);
+  return (hz >= loHz && hz <= hiHz) || Math.abs(hz - m.freqHz) <= slopHz;
 }
-
-/** Which side of the carrier a mode occupies: AM/FM both, USB upper, LSB lower. */
-export type Sideband = "both" | "upper" | "lower";
 
 /**
  * Bandwidth after dragging an edge to `pointerHz`: twice the distance to the carrier for
- * two-sided modes (the other edge mirrors), the distance for single-sideband modes. Snapped to
+ * two-sided modes (the other edge mirrors); for USB / LSB the distance of the outer edge minus
+ * the fixed low cut (the passband is `SSB_LOW_CUT_HZ` .. `SSB_LOW_CUT_HZ + bandwidth`). Snapped to
  * 100 Hz and clamped to the limits of the bandwidth presets of the mode.
  */
 export function bandwidthFromEdge(
   mode: VfoMode,
   pointerHz: number,
   freqHz: number,
-  sideband: Sideband = "both",
+  sideband: Sideband = sidebandOf(mode),
 ): number {
   const offset =
     sideband === "upper"
-      ? pointerHz - freqHz
+      ? pointerHz - freqHz - SSB_LOW_CUT_HZ
       : sideband === "lower"
-        ? freqHz - pointerHz
+        ? freqHz - pointerHz - SSB_LOW_CUT_HZ
         : 2 * Math.abs(pointerHz - freqHz);
   const { min, max } = bandwidthLimits(mode);
   const snapped = Math.round(Math.max(0, offset) / BANDWIDTH_SNAP_HZ) * BANDWIDTH_SNAP_HZ;

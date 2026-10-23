@@ -38,7 +38,7 @@ describe("parsing", () => {
     });
   });
 
-  it.each([{ id: 0 }, { mode: "usb" }, { freq_hz: "x" }, { bandwidth_hz: null }])(
+  it.each([{ id: 0 }, { mode: "dsb" }, { freq_hz: "x" }, { bandwidth_hz: null }])(
     "rejects %j",
     (bad) => {
       expect(() => parseVfo({ ...raw, ...bad })).toThrow(ApiError);

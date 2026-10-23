@@ -30,7 +30,7 @@ pub fn bounds(tuning: Tuning) -> (i64, i64) {
 /// Whether the whole channel of `vfo` lies inside the usable window.
 #[must_use]
 pub fn fits(vfo: &Vfo, tuning: Tuning) -> bool {
-    vfo.offset_hz(tuning.center_hz).abs() + f64::from(vfo.bandwidth()) / 2.0
+    vfo.offset_hz(tuning.center_hz).abs() + vfo.span_hz() / 2.0
         <= usable_hz(tuning.sample_rate) / 2.0
 }
 
@@ -47,7 +47,7 @@ pub fn retune_center(active: &Vfo, others: &[Vfo], tuning: Tuning) -> Option<u64
         return None;
     }
     let usable = usable_hz(tuning.sample_rate);
-    let half_bw = f64::from(active.bandwidth()) / 2.0;
+    let half_bw = active.span_hz() / 2.0;
     if half_bw * 2.0 > usable {
         return None;
     }
@@ -60,7 +60,7 @@ pub fn retune_center(active: &Vfo, others: &[Vfo], tuning: Tuning) -> Option<u64
     };
     let (mut low, mut high) = (freq - half_bw, freq + half_bw);
     for other in others.iter().filter(|o| fits(o, tuning)) {
-        let half = f64::from(other.bandwidth()) / 2.0;
+        let half = other.span_hz() / 2.0;
         low = low.min(other.freq_hz as f64 - half);
         high = high.max(other.freq_hz as f64 + half);
     }
@@ -91,6 +91,7 @@ mod tests {
             bandwidth_hz: Some(10_000),
             squelch_dbfs: None,
             deemphasis: None,
+            cw_pitch_hz: None,
         }
     }
 
