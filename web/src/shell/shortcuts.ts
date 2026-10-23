@@ -149,6 +149,8 @@ export const SHORTCUT_GROUPS: readonly {
     items: [
       { keys: ["+", "−"], label: "Zoom in / out" },
       { keys: ["0"], label: "Reset zoom" },
+      { keys: ["Wheel"], label: "Zoom around the pointer (also over a VFO)" },
+      { keys: ["Shift", "Wheel"], label: "Tune the active VFO by one step per notch" },
       { keys: ["?"], label: "Show this list" },
     ],
   },

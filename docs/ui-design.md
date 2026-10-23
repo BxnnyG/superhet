@@ -63,8 +63,8 @@ dark values again under `prefers-color-scheme: dark` unless `data-theme="light"`
    - Direct controls (`spectrum/gestures.ts`, `spectrum/interaction.ts`): the active VFO's passband
      edges are drag handles (`ew-resize`; symmetric bandwidth snapped to 100 Hz, clamped to the ends of
      the mode's bandwidth presets; a chip shows the new bandwidth while dragging; single-sideband
-     modes are prepared in the math). The wheel tunes by the current step over the active passband
-     (or everywhere with Settings, "Mouse wheel: Tune"), elsewhere it zooms; Ctrl+wheel always zooms.
+     modes are prepared in the math). The wheel zooms everywhere (also over a passband); Shift+wheel tunes by the current step
+     (or the plain wheel does with Settings, "Mouse wheel: Tune"); Ctrl+wheel always zooms.
      A plain drag on empty spectrum/waterfall pans a zoomed view (4 px threshold, so clicks still
      tune); the frequency axis is a pan handle that never grabs a VFO. Cursors: `ew-resize` on an
      edge, `grab` on a VFO or the zoomed axis, `grabbing` while panning or dragging.

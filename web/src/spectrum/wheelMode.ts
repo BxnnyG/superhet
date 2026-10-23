@@ -3,7 +3,9 @@
 
 import type { WheelMode } from "./gestures";
 
-const KEY = "superhet.wheelMode";
+// v2: the default became "zoom" everywhere (also over a VFO passband); the unversioned key from
+// earlier releases is ignored so everybody starts on the new default once.
+const KEY = "superhet.wheelMode.v2";
 const listeners = new Set<() => void>();
 let current: WheelMode | null = null;
 

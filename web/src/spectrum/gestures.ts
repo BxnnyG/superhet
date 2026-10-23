@@ -87,17 +87,18 @@ export type WheelMode = "zoom" | "tune";
 export type WheelAction = "zoom" | "tune";
 
 /**
- * What the wheel does: Ctrl always zooms; otherwise it tunes the active VFO when the setting says
- * so or the pointer is over its passband, and zooms elsewhere.
+ * What the wheel does: with no VFO it zooms; Ctrl always zooms; Shift always tunes the active VFO
+ * (also over its passband); a plain wheel follows the setting (default: zoom everywhere, even over
+ * a wide passband).
  */
 export function wheelAction(opts: {
   ctrlKey: boolean;
+  shiftKey: boolean;
   setting: WheelMode;
   hasVfo: boolean;
-  overPassband: boolean;
 }): WheelAction {
   if (opts.ctrlKey || !opts.hasVfo) return "zoom";
-  return opts.setting === "tune" || opts.overPassband ? "tune" : "zoom";
+  return opts.shiftKey || opts.setting === "tune" ? "tune" : "zoom";
 }
 
 /** Turns wheel pixels into whole tuning steps; the remainder carries over, a reversal resets it. */

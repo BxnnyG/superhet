@@ -1,5 +1,5 @@
 // Pointer interaction and hover cursor on an overlay canvas above the spectrum and waterfall.
-// Wheel zooms the view (or tunes the selected VFO over its passband / in "wheel tunes" mode),
+// Wheel zooms the view (Shift+wheel, or the "wheel tunes" setting, tunes the selected VFO),
 // plain, shift or middle drag pans a zoomed view, double-click resets the zoom.
 // Plain click: moves the selected VFO there, or tunes the device centre when none is selected.
 // Click on a VFO selects it, dragging a VFO retunes it, dragging an edge of the selected VFO's
@@ -57,7 +57,6 @@ import {
   bandwidthFromEdge,
   exceedsSlop,
   hitPassbandEdge,
-  isOverPassband,
   wheelAction,
   type PassbandEdge,
   type WheelMode,
@@ -100,9 +99,13 @@ export interface InteractionOptions {
   axis?: () => { top: number; bottom: number } | null;
 }
 
-export function wheelDelta(e: Pick<WheelEvent, "deltaY" | "deltaMode">): number {
+export function wheelDelta(
+  e: Pick<WheelEvent, "deltaX" | "deltaY" | "deltaMode"> & Partial<Pick<WheelEvent, "shiftKey">>,
+): number {
+  // Browsers on Linux/Windows turn Shift+wheel into a horizontal scroll (deltaX only).
+  const d = e.shiftKey && e.deltaY === 0 ? e.deltaX : e.deltaY;
   // Lines and pages are converted to approximate pixels.
-  return e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+  return e.deltaMode === 1 ? d * 33 : e.deltaMode === 2 ? d * 400 : d;
 }
 
 interface Drag {
@@ -258,16 +261,11 @@ export class SpectrumInteraction {
     if (frac === null) return;
     e.preventDefault();
     const sel = this.markers.find((m) => m.id === this.selectedId);
-    const hz = this.hzAt(e.clientX);
     const action = wheelAction({
       ctrlKey: e.ctrlKey,
+      shiftKey: e.shiftKey,
       setting: this.o.getWheelMode(),
       hasVfo: sel !== undefined,
-      overPassband:
-        sel !== undefined &&
-        hz !== null &&
-        !this.onAxis(e.clientY) &&
-        isOverPassband(sel, hz, this.slopHz()),
     });
     if (action === "tune" && sel) {
       const steps = this.wheelSteps.add(wheelDelta(e));

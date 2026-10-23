@@ -91,22 +91,22 @@ describe("bandwidth from an edge drag", () => {
 });
 
 describe("wheel routing", () => {
-  const base = { ctrlKey: false, setting: "zoom" as const, hasVfo: true, overPassband: false };
-  it("zooms by default and tunes over the passband of the active VFO", () => {
+  const base = { ctrlKey: false, shiftKey: false, setting: "zoom" as const, hasVfo: true };
+  it("zooms by default", () => {
     expect(wheelAction(base)).toBe("zoom");
-    expect(wheelAction({ ...base, overPassband: true })).toBe("tune");
   });
-  it("tunes everywhere in tune mode", () => {
+  it("Shift tunes the active VFO", () => {
+    expect(wheelAction({ ...base, shiftKey: true })).toBe("tune");
+  });
+  it("tunes with a plain wheel in tune mode", () => {
     expect(wheelAction({ ...base, setting: "tune" })).toBe("tune");
   });
   it("Ctrl always zooms", () => {
-    expect(wheelAction({ ...base, ctrlKey: true, overPassband: true })).toBe("zoom");
+    expect(wheelAction({ ...base, ctrlKey: true, shiftKey: true })).toBe("zoom");
     expect(wheelAction({ ...base, ctrlKey: true, setting: "tune" })).toBe("zoom");
   });
   it("zooms when there is no VFO to tune", () => {
-    expect(wheelAction({ ...base, hasVfo: false, setting: "tune", overPassband: true })).toBe(
-      "zoom",
-    );
+    expect(wheelAction({ ...base, hasVfo: false, shiftKey: true, setting: "tune" })).toBe("zoom");
   });
 });
 

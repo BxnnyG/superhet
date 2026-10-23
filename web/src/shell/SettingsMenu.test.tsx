@@ -14,11 +14,11 @@ it("switches the mouse wheel between zoom and tune and remembers it", () => {
   expect(getWheelMode()).toBe("zoom");
   fireEvent.click(screen.getByRole("radio", { name: "Tune" }));
   expect(getWheelMode()).toBe("tune");
-  expect(window.localStorage.getItem("superhet.wheelMode")).toBe("tune");
+  expect(window.localStorage.getItem("superhet.wheelMode.v2")).toBe("tune");
   resetWheelModeCache();
   expect(getWheelMode()).toBe("tune");
   setWheelMode("zoom");
-  expect(window.localStorage.getItem("superhet.wheelMode")).toBe("zoom");
+  expect(window.localStorage.getItem("superhet.wheelMode.v2")).toBe("zoom");
 });
 
 it("opens the keyboard shortcuts from the menu", () => {

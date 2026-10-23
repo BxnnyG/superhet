@@ -183,15 +183,36 @@ describe("passband edge drag", () => {
 });
 
 describe("wheel routing", () => {
-  it("zooms away from the VFO and tunes over its passband", () => {
+  it("zooms everywhere, also over the passband of the active VFO", () => {
     const { canvas, calls, view, it: ia } = setup();
     wheel(canvas, 100, -100);
     expect(view.zoomed).toBe(true);
+    ia.destroy();
+    const s = setup();
+    s.canvas.dispatchEvent(new WheelEvent("wheel", { clientX: 520, clientY: 100, deltaY: -100 }));
+    wheel(s.canvas, 520, -100);
+    expect(s.view.zoomed).toBe(true);
+    expect(s.calls.step).not.toHaveBeenCalled();
     expect(calls.step).not.toHaveBeenCalled();
-    wheel(canvas, 520, -100);
+    s.it.destroy();
+  });
+
+  it("Shift+wheel tunes the active VFO, also away from its passband", () => {
+    const { canvas, calls, view, it: ia } = setup();
+    wheel(canvas, 520, -100, { shiftKey: true });
     expect(calls.step).toHaveBeenLastCalledWith(1, 1);
-    wheel(canvas, 520, 100);
+    wheel(canvas, 520, 100, { shiftKey: true });
     expect(calls.step).toHaveBeenLastCalledWith(1, -1);
+    wheel(canvas, 100, -100, { shiftKey: true });
+    expect(calls.step).toHaveBeenLastCalledWith(1, 1);
+    expect(view.zoomed).toBe(false);
+    ia.destroy();
+  });
+
+  it("Shift+wheel works when the browser reports it as a horizontal delta", () => {
+    const { canvas, calls, it: ia } = setup();
+    wheel(canvas, 520, 0, { shiftKey: true, deltaX: -100 });
+    expect(calls.step).toHaveBeenLastCalledWith(1, 1);
     ia.destroy();
   });
 
@@ -214,7 +235,7 @@ describe("wheel routing", () => {
     ia.destroy();
   });
 
-  it("zooms over the axis even above the passband", () => {
+  it("zooms over the axis", () => {
     const { canvas, calls, view, it: ia } = setup();
     canvas.dispatchEvent(
       new WheelEvent("wheel", { clientX: 520, clientY: 290, deltaY: -100, cancelable: true }),
