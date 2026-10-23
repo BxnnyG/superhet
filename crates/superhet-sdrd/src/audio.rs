@@ -22,6 +22,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use superhet_bus::audio::{AudioFrame, FLAG_SQUELCH_OPEN, FLAG_STEREO, FRAME_SAMPLES};
 use superhet_bus::opus::Encoder;
 use superhet_bus::rds::RdsMessage;
+use superhet_bus::tones::TonesMessage;
 use superhet_device::IqBlock;
 use superhet_dsp::{Channel, Mode, OUTPUT_RATE};
 
@@ -41,6 +42,8 @@ const BITRATE_WFM: i32 = 64_000;
 const BITRATE_WFM_STEREO: i32 = 96_000;
 /// An unchanged non-empty RDS state is repeated this often, so late subscribers catch up.
 const RDS_REPEAT: Duration = Duration::from_secs(1);
+/// An unchanged non-empty tone state is repeated this often, so late subscribers catch up.
+const TONES_REPEAT: Duration = Duration::from_secs(1);
 /// Opus bitrate for NFM and AM in bits per second.
 const BITRATE_NARROW: i32 = 24_000;
 /// Upper bound for one Opus packet (RFC 6716: 1275 bytes per frame).
@@ -82,7 +85,7 @@ pub struct AudioEngine {
 }
 
 impl AudioEngine {
-    /// Start the thread without RDS publishing, see [`Self::start_with_rds`].
+    /// Start the thread without RDS and tone publishing, see [`Self::start_with_sinks`].
     ///
     /// # Errors
     /// Fails if the thread cannot be spawned.
@@ -91,19 +94,34 @@ impl AudioEngine {
         vfos: Arc<VfoShared>,
         sink: impl FnMut(u32, Vec<u8>) + Send + 'static,
     ) -> io::Result<Self> {
-        Self::start_with_rds(vfos, sink, |_, _| {})
+        Self::start_with_sinks(vfos, sink, |_, _| {}, |_, _| {})
     }
 
-    /// Start the thread. `sink` receives `(vfo_id, encoded AudioFrame)`, `rds_sink` receives
-    /// `(vfo_id, RDS state JSON)` (see `superhet_bus::rds`); both run on the engine thread and
-    /// must never block.
+    /// Start the thread without tone publishing, see [`Self::start_with_sinks`].
     ///
     /// # Errors
     /// Fails if the thread cannot be spawned.
+    #[cfg(test)]
     pub fn start_with_rds(
         vfos: Arc<VfoShared>,
         sink: impl FnMut(u32, Vec<u8>) + Send + 'static,
         rds_sink: impl FnMut(u32, Vec<u8>) + Send + 'static,
+    ) -> io::Result<Self> {
+        Self::start_with_sinks(vfos, sink, rds_sink, |_, _| {})
+    }
+
+    /// Start the thread. `sink` receives `(vfo_id, encoded AudioFrame)`, `rds_sink` receives
+    /// `(vfo_id, RDS state JSON)` (see `superhet_bus::rds`) and `tones_sink` receives
+    /// `(vfo_id, tone state JSON)` (see `superhet_bus::tones`); all run on the engine thread and
+    /// must never block.
+    ///
+    /// # Errors
+    /// Fails if the thread cannot be spawned.
+    pub fn start_with_sinks(
+        vfos: Arc<VfoShared>,
+        sink: impl FnMut(u32, Vec<u8>) + Send + 'static,
+        rds_sink: impl FnMut(u32, Vec<u8>) + Send + 'static,
+        tones_sink: impl FnMut(u32, Vec<u8>) + Send + 'static,
     ) -> io::Result<Self> {
         let (tx, rx) = mpsc::sync_channel(QUEUE_BLOCKS);
         let tap = IqTap {
@@ -116,7 +134,7 @@ impl AudioEngine {
             let tap = tap.clone();
             std::thread::Builder::new()
                 .name("sdrd-vfo".into())
-                .spawn(move || run(&rx, &vfos, &stop, &tap, sink, rds_sink))?
+                .spawn(move || run(&rx, &vfos, &stop, &tap, sink, rds_sink, tones_sink))?
         };
         Ok(Self {
             stop,
@@ -194,6 +212,13 @@ struct Slot {
     rds_active: bool,
     /// The channel was replaced or removed: publish an empty RDS state.
     rds_clear: bool,
+    /// Last published tone state `(ctcss in 0.1 Hz steps, digit count)`; the 1 s repeat timer.
+    tones_seen: (Option<u32>, u64),
+    tones_at: Instant,
+    /// A non-empty tone state was published and has not been cleared since.
+    tones_active: bool,
+    /// The channel was replaced, removed or lost its detector: publish an empty tone state.
+    tones_clear: bool,
 }
 
 impl Slot {
@@ -217,6 +242,10 @@ impl Slot {
             rds_at: Instant::now(),
             rds_active: false,
             rds_clear: false,
+            tones_seen: (None, 0),
+            tones_at: Instant::now(),
+            tones_active: false,
+            tones_clear: false,
         }
     }
 
@@ -229,6 +258,7 @@ impl Slot {
 
     fn deactivate(&mut self) {
         self.rds_clear |= self.rds_active;
+        self.tones_clear |= self.tones_active;
         self.channel = None;
         self.built = None;
         self.discard_audio();
@@ -264,6 +294,8 @@ impl Slot {
                 Ok(channel) => {
                     self.rds_clear |= self.rds_active;
                     self.rds_seen = (0, false);
+                    self.tones_clear |= self.tones_active;
+                    self.tones_seen = (None, 0);
                     self.channel = Some(channel);
                     self.built = Some(built);
                     self.discard_audio();
@@ -279,6 +311,8 @@ impl Slot {
             return;
         };
         channel.set_stereo(self.vfo.stereo_enabled());
+        channel.set_tones(self.vfo.tones_enabled());
+        channel.set_tone_squelch(self.vfo.tone_squelch_hz);
         let channels = channel.output_channels();
         self.ensure_encoder(bitrate_for(cfg.mode, channels), channels);
     }
@@ -351,16 +385,56 @@ impl Slot {
         rds_sink(id, message.encode());
     }
 
+    /// Publish the tone state when it changed, and repeat a non-empty one every second.
+    fn publish_tones(&mut self, tones_sink: &mut impl FnMut(u32, Vec<u8>)) {
+        let id = self.vfo.id;
+        let message = match self.channel.as_ref().and_then(Channel::tones) {
+            Some(tones) => {
+                let ctcss = tones.ctcss_hz();
+                let seen = (
+                    ctcss.map(|hz| (hz * 10.0).round() as u32),
+                    tones.dtmf_count(),
+                );
+                let nonempty = seen.0.is_some() || seen.1 > 0;
+                let due = nonempty && self.tones_at.elapsed() >= TONES_REPEAT;
+                if !self.tones_clear && seen == self.tones_seen && !due {
+                    return;
+                }
+                self.tones_seen = seen;
+                let mut message = TonesMessage::empty(id);
+                message.ctcss_hz = ctcss;
+                message.dtmf_count = seen.1;
+                message.dtmf_tail = tones.dtmf_tail().to_owned();
+                message
+            }
+            None => {
+                if !self.tones_clear && !self.tones_active {
+                    return;
+                }
+                self.tones_seen = (None, 0);
+                TonesMessage::empty(id)
+            }
+        };
+        self.tones_clear = false;
+        self.tones_active = !message.is_empty();
+        self.tones_at = Instant::now();
+        tones_sink(id, message.encode());
+    }
+
     /// Demodulate one block and emit every completed frame.
     fn process(
         &mut self,
         block: &IqBlock,
         block_start_ns: u64,
-        sink: &mut impl FnMut(u32, Vec<u8>),
-        rds_sink: &mut impl FnMut(u32, Vec<u8>),
+        sinks: &mut Sinks<
+            impl FnMut(u32, Vec<u8>),
+            impl FnMut(u32, Vec<u8>),
+            impl FnMut(u32, Vec<u8>),
+        >,
     ) {
-        self.process_audio(block, block_start_ns, sink);
-        self.publish_rds(rds_sink);
+        self.process_audio(block, block_start_ns, &mut sinks.audio);
+        self.publish_rds(&mut sinks.rds);
+        self.publish_tones(&mut sinks.tones);
     }
 
     fn process_audio(
@@ -453,14 +527,27 @@ fn sync_slots(slots: &mut Vec<Slot>, vfos: &[Vfo]) {
     }
 }
 
+/// The three outputs of the engine thread.
+struct Sinks<A, R, T> {
+    audio: A,
+    rds: R,
+    tones: T,
+}
+
 fn run(
     rx: &Receiver<Arc<IqBlock>>,
     shared: &VfoShared,
     stop: &AtomicBool,
     tap: &IqTap,
-    mut sink: impl FnMut(u32, Vec<u8>),
-    mut rds_sink: impl FnMut(u32, Vec<u8>),
+    sink: impl FnMut(u32, Vec<u8>),
+    rds_sink: impl FnMut(u32, Vec<u8>),
+    tones_sink: impl FnMut(u32, Vec<u8>),
 ) {
+    let mut sinks = Sinks {
+        audio: sink,
+        rds: rds_sink,
+        tones: tones_sink,
+    };
     let mut slots: Vec<Slot> = Vec::new();
     let mut seen_generation = u64::MAX;
     let mut tuned: Option<(Tuning, u64)> = None;
@@ -500,7 +587,7 @@ fn run(
                 block.samples.len() as u64 * 1_000_000_000 / u64::from(block.sample_rate.max(1));
             let block_start_ns = now_ns().saturating_sub(duration_ns);
             for slot in &mut slots {
-                slot.process(&block, block_start_ns, &mut sink, &mut rds_sink);
+                slot.process(&block, block_start_ns, &mut sinks);
             }
         }
         if last_report.elapsed() >= DROP_REPORT {
@@ -575,6 +662,8 @@ mod tests {
                         deemphasis: None,
                         cw_pitch_hz: None,
                         stereo: None,
+                        tones: None,
+                        tone_squelch_hz: None,
                     },
                     RATE,
                 )
@@ -730,6 +819,8 @@ mod tests {
                         deemphasis: None,
                         cw_pitch_hz: None,
                         stereo,
+                        tones: None,
+                        tone_squelch_hz: None,
                     },
                     RATE,
                 )
@@ -825,6 +916,8 @@ mod tests {
                         deemphasis: None,
                         cw_pitch_hz: None,
                         stereo: Some(Some(true)),
+                        tones: None,
+                        tone_squelch_hz: None,
                     },
                     RATE,
                 )
@@ -891,6 +984,135 @@ mod tests {
         assert!(after.is_some_and(|m| m.is_empty()), "state not cleared");
     }
 
+    /// IQ blocks of an NFM carrier at DC carrying a 100 Hz CTCSS tone and the DTMF digit "7"
+    /// (852 + 1209 Hz) between 1.0 s and 1.1 s.
+    fn tone_blocks(count: usize) -> Vec<Arc<IqBlock>> {
+        let tau = std::f64::consts::TAU;
+        let mut phase = 0.0f64;
+        let mut n = 0u64;
+        (0..count)
+            .map(|_| {
+                let samples = (0..BLOCK)
+                    .map(|_| {
+                        let t = n as f64 / f64::from(RATE);
+                        n += 1;
+                        let mut audio = 0.15 * (tau * 100.0 * t).sin();
+                        if (1.0..1.1).contains(&t) {
+                            audio += 0.2 * ((tau * 852.0 * t).sin() + (tau * 1209.0 * t).sin());
+                        }
+                        phase += tau * 5_000.0 * audio / f64::from(RATE);
+                        Complex32::new(0.5 * phase.cos() as f32, 0.5 * phase.sin() as f32)
+                    })
+                    .collect();
+                Arc::new(IqBlock {
+                    center_hz: CENTER,
+                    sample_rate: RATE,
+                    tuning_epoch: 0,
+                    samples,
+                })
+            })
+            .collect()
+    }
+
+    fn tone_vfo(shared: &VfoShared, tones: Option<bool>) -> u32 {
+        shared
+            .with(|r| {
+                r.create(
+                    VfoCreate {
+                        freq_hz: CENTER,
+                        mode: VfoMode::Nfm,
+                        bandwidth_hz: None,
+                        squelch_dbfs: None,
+                        deemphasis: None,
+                        cw_pitch_hz: None,
+                        stereo: None,
+                        tones,
+                        tone_squelch_hz: None,
+                    },
+                    RATE,
+                )
+            })
+            .expect("create")
+            .id
+    }
+
+    fn drain_tones(rx: &mpsc::Receiver<(u32, Vec<u8>)>) -> Vec<TonesMessage> {
+        let mut out = Vec::new();
+        while let Ok((_, bytes)) = rx.recv_timeout(Duration::from_millis(300)) {
+            out.push(TonesMessage::parse(&bytes).expect("valid tones message"));
+        }
+        out
+    }
+
+    #[test]
+    fn tone_state_is_published_and_cleared_on_retune_and_silent_when_off() {
+        let shared = Arc::new(VfoShared::default());
+        let id = tone_vfo(&shared, None);
+        let (tx, _rx) = channel();
+        let (tones_tx, tones_rx) = channel();
+        let engine = AudioEngine::start_with_sinks(
+            Arc::clone(&shared),
+            move |id, bytes| {
+                let _ = tx.send((id, bytes));
+            },
+            |_, _| {},
+            move |id, bytes| {
+                let _ = tones_tx.send((id, bytes));
+            },
+        )
+        .expect("start");
+        let tap = engine.tap();
+        // 2.5 s of signal.
+        feed(&tap, &tone_blocks(625));
+        let messages = drain_tones(&tones_rx);
+        let last = messages.last().expect("tone messages");
+        assert_eq!(last.vfo, id);
+        assert_eq!(last.ctcss_hz, Some(100.0));
+        assert_eq!((last.dtmf_count, last.dtmf_tail.as_str()), (1, "7"));
+        // The tone locks first (state change), the digit follows.
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.dtmf_count == 0 && m.ctcss_hz == Some(100.0)),
+            "tone not published before the digit"
+        );
+
+        // A retune of the device clears the display.
+        let retuned: Vec<_> = (0..20)
+            .map(|_| {
+                Arc::new(IqBlock {
+                    center_hz: CENTER + 300_000,
+                    sample_rate: RATE,
+                    tuning_epoch: 1,
+                    samples: vec![Complex32::new(0.0, 0.0); BLOCK],
+                })
+            })
+            .collect();
+        feed(&tap, &retuned);
+        let after = drain_tones(&tones_rx);
+        assert!(
+            after.last().is_some_and(TonesMessage::is_empty),
+            "not cleared"
+        );
+        drop(engine);
+
+        // Switched off: nothing is published at all.
+        let shared = Arc::new(VfoShared::default());
+        tone_vfo(&shared, Some(false));
+        let (tones_tx, tones_rx) = channel();
+        let engine = AudioEngine::start_with_sinks(
+            shared,
+            |_, _| {},
+            |_, _| {},
+            move |id, bytes| {
+                let _ = tones_tx.send((id, bytes));
+            },
+        )
+        .expect("start");
+        feed(&engine.tap(), &tone_blocks(300));
+        assert!(drain_tones(&tones_rx).is_empty());
+    }
+
     #[test]
     fn paused_vfo_makes_no_frames_and_retune_pauses_and_resumes() {
         let shared = Arc::new(VfoShared::default());
@@ -939,6 +1161,8 @@ mod tests {
                         deemphasis: None,
                         cw_pitch_hz: None,
                         stereo: None,
+                        tones: None,
+                        tone_squelch_hz: None,
                     },
                     RATE,
                 )

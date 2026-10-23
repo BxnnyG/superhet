@@ -37,6 +37,7 @@ import {
 import { RdsPanel } from "./RdsPanel";
 import { SMeter } from "./SMeter";
 import { StereoControl } from "./StereoControl";
+import { TonesPanel } from "./TonesPanel";
 
 const DEFAULT_BW = "default";
 
@@ -182,6 +183,16 @@ export function ReceiverDock({
       {active?.mode === "wfm" && (
         <div className="border-t border-border">
           <RdsPanel rds={audioSnap.rds[active.id]} deemphasis={active.deemphasis} />
+        </div>
+      )}
+      {(active?.mode === "nfm" || active?.mode === "am") && (
+        <div className="border-t border-border">
+          <TonesPanel
+            vfo={active}
+            tones={audioSnap.tones[active.id]}
+            audio={audio}
+            onUpdate={onUpdate}
+          />
         </div>
       )}
     </section>

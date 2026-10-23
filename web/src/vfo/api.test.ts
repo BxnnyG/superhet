@@ -30,10 +30,16 @@ describe("parsing", () => {
       squelchDbfs: null,
       deemphasis: "50us",
       stereo: null,
+      tones: null,
+      toneSquelchHz: null,
       offsetHz: 0,
       status: "active",
     });
     expect(parseVfo({ ...raw, stereo: false }).stereo).toBe(false);
+    expect(parseVfo({ ...raw, tones: true, tone_squelch_hz: 88.5 })).toMatchObject({
+      tones: true,
+      toneSquelchHz: 88.5,
+    });
     expect(parseVfo({ ...raw, squelch_dbfs: -70, status: "paused" })).toMatchObject({
       squelchDbfs: -70,
       status: "paused",
@@ -91,6 +97,11 @@ describe("bodies", () => {
       squelch_dbfs: null,
     });
     expect(patchBody({ freqHz: 5 })).toEqual({ v: 1, freq_hz: 5 });
+    expect(patchBody({ tones: false, toneSquelchHz: null })).toEqual({
+      v: 1,
+      tones: false,
+      tone_squelch_hz: null,
+    });
   });
 });
 

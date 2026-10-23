@@ -388,6 +388,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tone_state_arrives_as_text_and_foreign_or_invalid_ones_are_dropped() {
+        let server = start(AudioHub::local(), OriginPolicy::default()).await;
+        let mut client = connect(&server, "?dev=dev0", None).await.expect("connect");
+        subscribe(&mut client, r#"{"type":"subscribe","vfos":[1]}"#).await;
+        let tones = superhet_bus::tones::TonesMessage {
+            ctcss_hz: Some(88.5),
+            dtmf_count: 2,
+            dtmf_tail: "4A".into(),
+            ..superhet_bus::tones::TonesMessage::empty(1)
+        }
+        .encode();
+        server.hub.publish_local_tones("dev0", 1, b"nope").await;
+        let foreign = superhet_bus::tones::TonesMessage::empty(2).encode();
+        server.hub.publish_local_tones("dev0", 1, &foreign).await;
+        server.hub.publish_local_tones("dev0", 1, &tones).await;
+        server.hub.publish_local("dev0", 1, raw(1, 12)).await;
+        let text = next_text(&mut client).await;
+        assert_eq!(text.as_bytes(), tones.as_slice());
+        assert_eq!(next_binary(&mut client).await, raw(1, 12));
+    }
+
+    #[tokio::test]
     async fn invalid_messages_get_an_error_and_keep_the_connection() {
         let server = start(AudioHub::local(), OriginPolicy::default()).await;
         let mut client = connect(&server, "?dev=dev0", None).await.expect("connect");

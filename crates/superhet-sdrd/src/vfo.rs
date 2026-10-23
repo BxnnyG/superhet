@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use superhet_bus::profile;
 use superhet_dsp::{
     CW_DEFAULT_PITCH_HZ, CW_PITCH_RANGE_HZ, Channel, ChannelConfig, Deemphasis, Mode,
-    SSB_LOW_CUT_HZ,
+    SSB_LOW_CUT_HZ, canonical_ctcss,
 };
 
 use crate::control::{CtlError, ErrorCode, MAX_CENTER_HZ, VERSION};
@@ -97,6 +97,11 @@ pub struct Vfo {
     pub cw_pitch_hz: Option<u32>,
     /// Stereo decoding override (WFM only); `None` uses the mode default (on).
     pub stereo: Option<bool>,
+    /// CTCSS / DTMF detection override (NFM and AM only); `None` uses the mode default (on for
+    /// NFM, off for AM).
+    pub tones: Option<bool>,
+    /// CTCSS tone squelch (NFM and AM only, a standard tone); `None` = off.
+    pub tone_squelch_hz: Option<f32>,
 }
 
 /// Tuning of the device a VFO is evaluated against.
@@ -156,6 +161,17 @@ impl Vfo {
         self.mode == VfoMode::Wfm && self.stereo.unwrap_or(true)
     }
 
+    /// Whether the VFO detects CTCSS tones and DTMF digits: NFM (default on) and AM (default
+    /// off) only.
+    #[must_use]
+    pub fn tones_enabled(&self) -> bool {
+        match self.mode {
+            VfoMode::Nfm => self.tones.unwrap_or(true),
+            VfoMode::Am => self.tones.unwrap_or(false),
+            _ => false,
+        }
+    }
+
     /// Effective channel bandwidth in Hz.
     #[must_use]
     pub fn bandwidth(&self) -> u32 {
@@ -212,6 +228,8 @@ impl Vfo {
             deemphasis,
             cw_pitch_hz,
             stereo: (self.mode == VfoMode::Wfm).then(|| self.stereo_enabled()),
+            tones: matches!(self.mode, VfoMode::Nfm | VfoMode::Am).then(|| self.tones_enabled()),
+            tone_squelch_hz: self.tone_squelch_hz,
             offset_hz: self.offset_hz(tuning.center_hz),
             status: self.status(tuning),
         }
@@ -230,6 +248,8 @@ pub struct VfoWire {
     #[serde(skip_serializing_if = "Option::is_none")]
     cw_pitch_hz: Option<u32>,
     stereo: Option<bool>,
+    tones: Option<bool>,
+    tone_squelch_hz: Option<f32>,
     offset_hz: f64,
     status: Status,
 }
@@ -251,6 +271,10 @@ pub struct VfoCreate {
     pub cw_pitch_hz: Option<u32>,
     /// Stereo override (WFM only).
     pub stereo: Option<bool>,
+    /// Tone detection override (NFM and AM only).
+    pub tones: Option<bool>,
+    /// CTCSS tone squelch (NFM and AM only).
+    pub tone_squelch_hz: Option<f32>,
 }
 
 /// Validated `vfo.update` request; `Some(None)` means "reset to default / off".
@@ -272,6 +296,10 @@ pub struct VfoPatch {
     pub cw_pitch_hz: Option<Option<u32>>,
     /// New stereo override.
     pub stereo: Option<Option<bool>>,
+    /// New tone detection override.
+    pub tones: Option<Option<bool>>,
+    /// New CTCSS tone squelch.
+    pub tone_squelch_hz: Option<Option<f32>>,
 }
 
 fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
@@ -293,6 +321,8 @@ struct CreateWire {
     deemphasis: Option<DeemphasisWire>,
     cw_pitch_hz: Option<u32>,
     stereo: Option<bool>,
+    tones: Option<bool>,
+    tone_squelch_hz: Option<f32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -312,6 +342,10 @@ struct UpdateWire {
     cw_pitch_hz: Option<Option<u32>>,
     #[serde(default, deserialize_with = "present")]
     stereo: Option<Option<bool>>,
+    #[serde(default, deserialize_with = "present")]
+    tones: Option<Option<bool>>,
+    #[serde(default, deserialize_with = "present")]
+    tone_squelch_hz: Option<Option<f32>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -393,6 +427,38 @@ fn check_stereo(mode: VfoMode, stereo: Option<bool>) -> Result<(), CtlError> {
     }
 }
 
+/// Reject tone settings the mode or the settings themselves cannot honour.
+fn check_tones(vfo: &Vfo) -> Result<(), CtlError> {
+    if !matches!(vfo.mode, VfoMode::Nfm | VfoMode::Am)
+        && (vfo.tones.is_some() || vfo.tone_squelch_hz.is_some())
+    {
+        return Err(CtlError::invalid(
+            "tones and tone_squelch_hz apply to nfm and am only",
+        ));
+    }
+    if let Some(hz) = vfo.tone_squelch_hz {
+        if canonical_ctcss(hz) != Some(hz) {
+            return Err(CtlError::invalid(format!(
+                "tone_squelch_hz {hz} is not a standard CTCSS tone"
+            )));
+        }
+        if !vfo.tones_enabled() {
+            return Err(CtlError::invalid("tone_squelch_hz needs tones enabled"));
+        }
+    }
+    Ok(())
+}
+
+/// Snap a requested tone squelch to the standard tone it names.
+fn snap_tone(hz: Option<f32>) -> Result<Option<f32>, CtlError> {
+    hz.map(|hz| {
+        canonical_ctcss(hz).ok_or_else(|| {
+            CtlError::invalid(format!("tone_squelch_hz {hz} is not a standard CTCSS tone"))
+        })
+    })
+    .transpose()
+}
+
 /// Parse and validate a `ctl.vfo.create` body.
 ///
 /// # Errors
@@ -408,6 +474,8 @@ pub fn parse_create(payload: &[u8]) -> Result<VfoCreate, CtlError> {
         deemphasis: wire.deemphasis.map(Into::into),
         cw_pitch_hz: wire.cw_pitch_hz,
         stereo: wire.stereo,
+        tones: wire.tones,
+        tone_squelch_hz: snap_tone(wire.tone_squelch_hz)?,
     };
     check_freq(request.freq_hz)?;
     check_bandwidth(request.bandwidth_hz)?;
@@ -435,6 +503,8 @@ pub fn parse_update(payload: &[u8]) -> Result<VfoPatch, CtlError> {
         deemphasis: wire.deemphasis.map(|d| d.map(Into::into)),
         cw_pitch_hz: wire.cw_pitch_hz,
         stereo: wire.stereo,
+        tones: wire.tones,
+        tone_squelch_hz: wire.tone_squelch_hz.map(snap_tone).transpose()?,
     };
     if let Some(hz) = patch.freq_hz {
         check_freq(hz)?;
@@ -451,6 +521,8 @@ pub fn parse_update(payload: &[u8]) -> Result<VfoPatch, CtlError> {
         && patch.deemphasis.is_none()
         && patch.cw_pitch_hz.is_none()
         && patch.stereo.is_none()
+        && patch.tones.is_none()
+        && patch.tone_squelch_hz.is_none()
     {
         return Err(CtlError::invalid("request changes nothing"));
     }
@@ -478,6 +550,7 @@ pub struct VfoRegistry {
 /// Reject a VFO the channelizer cannot realise at this sample rate (bandwidth too wide or too
 /// narrow for the mode, unsupported rate).
 fn check_realisable(vfo: &Vfo, sample_rate: u32) -> Result<(), CtlError> {
+    check_tones(vfo)?;
     Channel::new(ChannelConfig {
         input_rate: sample_rate,
         offset_hz: 0.0,
@@ -511,6 +584,8 @@ impl Vfo {
             deemphasis: request.deemphasis,
             cw_pitch_hz: request.cw_pitch_hz,
             stereo: request.stereo,
+            tones: request.tones,
+            tone_squelch_hz: request.tone_squelch_hz,
         }
     }
 }
@@ -559,6 +634,8 @@ impl From<&profile::Vfo> for VfoCreate {
             deemphasis: vfo.deemphasis.map(deemphasis_of),
             cw_pitch_hz: vfo.cw_pitch_hz,
             stereo: vfo.stereo,
+            tones: vfo.tones,
+            tone_squelch_hz: vfo.tone_squelch_hz,
         }
     }
 }
@@ -613,6 +690,8 @@ impl VfoRegistry {
                 vfo.deemphasis = None;
                 vfo.cw_pitch_hz = None;
                 vfo.stereo = None;
+                vfo.tones = None;
+                vfo.tone_squelch_hz = None;
             }
             vfo.mode = mode;
         }
@@ -632,6 +711,12 @@ impl VfoRegistry {
         check_cw_pitch(vfo.mode, vfo.cw_pitch_hz)?;
         if let Some(st) = patch.stereo {
             vfo.stereo = st;
+        }
+        if let Some(t) = patch.tones {
+            vfo.tones = t;
+        }
+        if let Some(t) = patch.tone_squelch_hz {
+            vfo.tone_squelch_hz = t;
         }
         check_deemphasis(vfo.mode, vfo.deemphasis)?;
         check_stereo(vfo.mode, vfo.stereo)?;
@@ -777,6 +862,8 @@ mod tests {
             deemphasis: None,
             cw_pitch_hz: None,
             stereo: None,
+            tones: None,
+            tone_squelch_hz: None,
         }
     }
 
@@ -938,6 +1025,8 @@ mod tests {
                     deemphasis: Some(Deemphasis::Us75),
                     cw_pitch_hz: None,
                     stereo: None,
+                    tones: None,
+                    tone_squelch_hz: None,
                 },
                 RATE,
             )
@@ -1033,6 +1122,8 @@ mod tests {
             deemphasis: None,
             cw_pitch_hz: None,
             stereo: None,
+            tones: None,
+            tone_squelch_hz: None,
         };
         // The usable half span is 435.2 kHz (85 % of 1.024 MS/s); NFM default 12.5 kHz leaves
         // 428.95 kHz of offset.
@@ -1079,6 +1170,8 @@ mod tests {
             deemphasis: None,
             cw_pitch_hz: None,
             stereo: None,
+            tones: None,
+            tone_squelch_hz: None,
         };
         let value = serde_json::to_value(vfo.wire(T)).expect("json");
         assert_eq!(value["id"], 4);
@@ -1148,6 +1241,88 @@ mod tests {
             .expect("nfm");
         assert_eq!(v.stereo, None);
         assert!(!v.stereo_enabled());
+    }
+
+    #[test]
+    fn tone_settings_are_validated_defaulted_and_reset_with_the_mode() {
+        let create =
+            parse_create(br#"{"v":1,"freq_hz":446006250,"mode":"nfm","tone_squelch_hz":88.5}"#)
+                .expect("create");
+        assert_eq!(create.tone_squelch_hz, Some(88.5));
+        // A value close to a standard tone snaps to it; others are refused.
+        let snapped = parse_create(br#"{"v":1,"freq_hz":1,"mode":"nfm","tone_squelch_hz":88.52}"#)
+            .expect("snap");
+        assert_eq!(snapped.tone_squelch_hz, Some(88.5));
+        for bad in [
+            r#"{"v":1,"freq_hz":1,"mode":"nfm","tone_squelch_hz":90.0}"#,
+            r#"{"v":1,"freq_hz":1,"mode":"nfm","tone_squelch_hz":"88.5"}"#,
+        ] {
+            assert!(parse_create(bad.as_bytes()).is_err(), "{bad}");
+        }
+        let mut reg = VfoRegistry::default();
+        // Other modes have no tones; a squelch needs the detector.
+        for bad in [
+            r#"{"v":1,"freq_hz":99500000,"mode":"wfm","tones":true}"#,
+            r#"{"v":1,"freq_hz":7100000,"mode":"usb","tone_squelch_hz":88.5}"#,
+            r#"{"v":1,"freq_hz":446006250,"mode":"nfm","tones":false,"tone_squelch_hz":88.5}"#,
+            r#"{"v":1,"freq_hz":446006250,"mode":"am","tone_squelch_hz":88.5}"#,
+        ] {
+            let request = parse_create(bad.as_bytes()).expect("parses");
+            assert_eq!(
+                reg.create(request, RATE).expect_err(bad).code,
+                ErrorCode::Invalid,
+                "{bad}"
+            );
+        }
+        let id = reg.create(create, RATE).expect("vfo").id;
+        let wire = |reg: &VfoRegistry| serde_json::to_value(reg.list()[0].wire(T)).expect("json");
+        assert_eq!(wire(&reg)["tones"], true);
+        assert_eq!(wire(&reg)["tone_squelch_hz"], 88.5);
+
+        let patch = |json: String| parse_update(json.as_bytes()).expect("patch");
+        // Switching the detector off needs the squelch to go too.
+        let err = reg
+            .update(
+                &patch(format!(r#"{{"v":1,"id":{id},"tones":false}}"#)),
+                RATE,
+            )
+            .expect_err("squelch without tones");
+        assert_eq!(err.code, ErrorCode::Invalid);
+        reg.update(
+            &patch(format!(
+                r#"{{"v":1,"id":{id},"tones":false,"tone_squelch_hz":null}}"#
+            )),
+            RATE,
+        )
+        .expect("off");
+        assert!(!reg.list()[0].tones_enabled());
+        assert_eq!(wire(&reg)["tones"], false);
+        // null resets to the default (on for NFM).
+        reg.update(&patch(format!(r#"{{"v":1,"id":{id},"tones":null}}"#)), RATE)
+            .expect("reset");
+        assert!(reg.list()[0].tones_enabled());
+        // AM defaults to off, leaving NFM/AM drops the settings.
+        reg.update(
+            &patch(format!(r#"{{"v":1,"id":{id},"tone_squelch_hz":100.0}}"#)),
+            RATE,
+        )
+        .expect("squelch");
+        let am = reg
+            .update(&patch(format!(r#"{{"v":1,"id":{id},"mode":"am"}}"#)), RATE)
+            .expect("am");
+        assert_eq!(
+            (am.tones, am.tone_squelch_hz, am.tones_enabled()),
+            (None, None, false)
+        );
+        let wfm = reg
+            .update(&patch(format!(r#"{{"v":1,"id":{id},"mode":"wfm"}}"#)), RATE)
+            .expect("wfm");
+        assert!(!wfm.tones_enabled());
+        assert!(wire(&reg)["tones"].is_null());
+        assert!(
+            parse_update(format!(r#"{{"v":1,"id":{id}}}"#).as_bytes()).is_err(),
+            "empty patch"
+        );
     }
 
     #[test]

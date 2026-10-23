@@ -10,6 +10,7 @@ import { DEFAULT_TARGET_MS } from "./jitter";
 import { loadSilent, saveSilent } from "./listen";
 import { isEmptyRds, sameRds, type RdsState } from "./rds";
 import { AudioSocket, normalizeVfoIds } from "./socket";
+import { applyTones, isEmptyTones, sameTones, type ToneState, type TonesMessage } from "./tones";
 
 export const DEFAULT_VOLUME = 0.8;
 
@@ -32,10 +33,16 @@ export interface AudioSnapshot {
   levels: Readonly<Record<number, VfoLevel>>;
   /** Latest RDS state of the VFOs that have any. */
   rds: Readonly<Record<number, RdsState>>;
+  /** CTCSS tone and DTMF digits of the NFM / AM VFOs that have any. */
+  tones: Readonly<Record<number, ToneState>>;
 }
 
 function withoutRds(rds: Record<number, RdsState>, id: number): Record<number, RdsState> {
   return Object.fromEntries(Object.entries(rds).filter(([key]) => Number(key) !== id));
+}
+
+function withoutVfo<T>(map: Record<number, T>, id: number): Record<number, T> {
+  return Object.fromEntries(Object.entries(map).filter(([key]) => Number(key) !== id));
 }
 
 export interface Meter {
@@ -66,6 +73,7 @@ export class AudioController {
     { powerDbfs: number; squelchOpen: boolean; stereo: boolean; at: number }
   >();
   private rds: Record<number, RdsState> = {};
+  private tones: Record<number, ToneState> = {};
   private readonly frequencies = new Map<number, number>();
   private readonly history = new Map<number, { powerDbfs: number; at: number }[]>();
   private levels: Record<number, VfoLevel> = {};
@@ -94,12 +102,14 @@ export class AudioController {
       targetMs: DEFAULT_TARGET_MS,
       levels: this.levels,
       rds: this.rds,
+      tones: this.tones,
     };
     this.socket = new AudioSocket({
       device: opts.device,
       createSocket: opts.createSocket,
       onFrame: (f) => this.onFrame(f),
       onRds: (id, state) => this.onRds(id, state),
+      onTones: (msg) => this.onTones(msg),
       onStatus: (socket) => this.publish({ socket }),
       onError: (m) => this.setError(m),
     });
@@ -122,7 +132,8 @@ export class AudioController {
     this.meters.clear();
     this.history.clear();
     this.rds = {};
-    this.publish({ enabled: false, starting: false, rds: this.rds });
+    this.tones = {};
+    this.publish({ enabled: false, starting: false, rds: this.rds, tones: this.tones });
   }
 
   /**
@@ -180,6 +191,12 @@ export class AudioController {
         Object.entries(this.rds).filter(([id]) => subscribed.has(Number(id))),
       );
       this.publish({ rds: this.rds });
+    }
+    if (Object.keys(this.tones).some((id) => !subscribed.has(Number(id)))) {
+      this.tones = Object.fromEntries(
+        Object.entries(this.tones).filter(([id]) => subscribed.has(Number(id))),
+      );
+      this.publish({ tones: this.tones });
     }
     const levels: Record<number, VfoLevel> = {};
     for (const id of known) {
@@ -291,16 +308,47 @@ export class AudioController {
     this.publish({ rds: this.rds });
   }
 
+  private onTones(msg: TonesMessage): void {
+    const id = msg.vfo;
+    if (!this.subscribed.has(id)) return;
+    const cur = this.tones[id];
+    if (isEmptyTones(msg)) {
+      if (!cur) return;
+      this.tones = withoutVfo(this.tones, id);
+    } else {
+      const next = applyTones(cur, msg);
+      if (cur && sameTones(cur, next)) return;
+      this.tones = { ...this.tones, [id]: next };
+    }
+    this.publish({ tones: this.tones });
+  }
+
+  /** Forget the DTMF digits shown for a VFO (the daemon keeps counting; nothing comes back). */
+  clearDigits(id: number): void {
+    const cur = this.tones[id];
+    if (!cur || cur.digits === "") return;
+    this.tones = { ...this.tones, [id]: { ...cur, digits: "" } };
+    this.publish({ tones: this.tones });
+  }
+
   /**
    * Tell the controller where a VFO is tuned. A retune by more than 5 kHz means another station:
-   * its RDS data is dropped at once instead of waiting for the daemon's clear message.
+   * its RDS and tone data are dropped at once instead of waiting for the daemon's clear message.
    */
   noteFrequency(id: number, freqHz: number): void {
     const prev = this.frequencies.get(id);
     this.frequencies.set(id, freqHz);
-    if (prev === undefined || Math.abs(prev - freqHz) <= 5000 || !this.rds[id]) return;
-    this.rds = withoutRds(this.rds, id);
-    this.publish({ rds: this.rds });
+    if (prev === undefined || Math.abs(prev - freqHz) <= 5000) return;
+    const change: Partial<AudioSnapshot> = {};
+    if (this.rds[id]) {
+      this.rds = withoutRds(this.rds, id);
+      change.rds = this.rds;
+    }
+    if (this.tones[id]) {
+      this.tones = withoutVfo(this.tones, id);
+      change.tones = this.tones;
+    }
+    if (change.rds || change.tones) this.publish(change);
   }
 
   private setError(error: string): void {

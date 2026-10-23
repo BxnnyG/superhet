@@ -31,6 +31,10 @@ export interface Vfo {
   deemphasis: string | null;
   /** Stereo decoding on/off; null for modes without stereo (everything but WFM). */
   stereo?: boolean | null;
+  /** CTCSS / DTMF detection on/off; null for modes without it (everything but NFM and AM). */
+  tones?: boolean | null;
+  /** CTCSS tone squelch in Hz; null = off. */
+  toneSquelchHz?: number | null;
   offsetHz: number;
   status: "active" | "paused";
 }
@@ -50,6 +54,10 @@ export interface VfoPatch {
   squelchDbfs?: number | null;
   /** WFM only; `null` resets to the default (on). */
   stereo?: boolean | null;
+  /** NFM and AM only; `null` resets to the default (on for NFM, off for AM). */
+  tones?: boolean | null;
+  /** NFM and AM only, one of the standard CTCSS tones; `null` switches the tone squelch off. */
+  toneSquelchHz?: number | null;
 }
 
 /**
@@ -81,8 +89,19 @@ function bad(what: string): never {
 
 export function parseVfo(raw: unknown): Vfo {
   if (!isRec(raw)) return bad("not an object");
-  const { id, freq_hz, mode, bandwidth_hz, squelch_dbfs, deemphasis, stereo, offset_hz, status } =
-    raw;
+  const {
+    id,
+    freq_hz,
+    mode,
+    bandwidth_hz,
+    squelch_dbfs,
+    deemphasis,
+    stereo,
+    tones,
+    tone_squelch_hz,
+    offset_hz,
+    status,
+  } = raw;
   if (typeof id !== "number" || !Number.isInteger(id) || id < 1) return bad("id");
   if (typeof freq_hz !== "number" || !Number.isFinite(freq_hz)) return bad("freq_hz");
   if (!isVfoMode(mode)) return bad("mode");
@@ -103,6 +122,11 @@ export function parseVfo(raw: unknown): Vfo {
     squelchDbfs: typeof squelch_dbfs === "number" ? squelch_dbfs : null,
     deemphasis: typeof deemphasis === "string" ? deemphasis : null,
     stereo: typeof stereo === "boolean" ? stereo : null,
+    tones: typeof tones === "boolean" ? tones : null,
+    toneSquelchHz:
+      typeof tone_squelch_hz === "number" && Number.isFinite(tone_squelch_hz)
+        ? tone_squelch_hz
+        : null,
     offsetHz: typeof offset_hz === "number" ? offset_hz : 0,
     status: status === "paused" ? "paused" : "active",
   };
@@ -164,6 +188,8 @@ export function patchBody(patch: VfoPatch): Rec {
   if (patch.bandwidthHz !== undefined) body.bandwidth_hz = patch.bandwidthHz;
   if (patch.squelchDbfs !== undefined) body.squelch_dbfs = patch.squelchDbfs;
   if (patch.stereo !== undefined) body.stereo = patch.stereo;
+  if (patch.tones !== undefined) body.tones = patch.tones;
+  if (patch.toneSquelchHz !== undefined) body.tone_squelch_hz = patch.toneSquelchHz;
   return body;
 }
 

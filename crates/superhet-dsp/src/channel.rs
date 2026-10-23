@@ -23,6 +23,10 @@
 //! fades to mono. The 57 kHz RDS subcarrier is mixed to DC with the tripled pilot phase and fed
 //! to an [`RdsDecoder`]. Stereo output is opt-in ([`Channel::set_stereo`]); RDS is always decoded.
 //!
+//! NFM and AM channels can run a [`ToneDetector`] (CTCSS and DTMF, [`Channel::set_tones`]) on the
+//! 48 kHz audio before the squelch gate; a CTCSS tone squelch ([`Channel::set_tone_squelch`])
+//! additionally keeps the gate shut until that tone is present.
+//!
 //! Changing mode, bandwidth or input rate rebuilds the filter chain (state is cleared; the NCO
 //! phase and squelch settings are kept). Changing the offset is glitch-free.
 
@@ -35,6 +39,7 @@ use crate::fir::{DecimFir, design_lowpass};
 use crate::nco::Nco;
 use crate::rds::{RdsDecoder, RdsInfo};
 use crate::resample::Resampler;
+use crate::tones::{ToneDetector, canonical_ctcss};
 use crate::wfm::StereoMpx;
 
 /// Audio output sample rate in Hz.
@@ -497,6 +502,11 @@ pub struct Channel {
     gate: f32,
     last_power_dbfs: f32,
     stereo: bool,
+    /// Tone detection requested; runs only for NFM and AM.
+    tones_wanted: bool,
+    tones: Option<ToneDetector>,
+    /// CTCSS tone (one of the standard tones) that must be present for the gate to open.
+    tone_squelch: Option<f32>,
     buf_a: Vec<Complex32>,
     buf_b: Vec<Complex32>,
     audio_a: Vec<f32>,
@@ -539,6 +549,9 @@ impl Channel {
             chain,
             cfg,
             stereo: false,
+            tones_wanted: false,
+            tones: None,
+            tone_squelch: None,
             buf_a: Vec::new(),
             buf_b: Vec::new(),
             audio_a: Vec::new(),
@@ -571,6 +584,11 @@ impl Channel {
             w.mpx.reset();
             w.rds.reset();
             w.blend = 0.0;
+        }
+        if (offset_hz - self.cfg.offset_hz).abs() > STATION_CHANGE_HZ
+            && let Some(t) = &mut self.tones
+        {
+            t.reset();
         }
         self.cfg.offset_hz = offset_hz;
         self.nco
@@ -606,6 +624,46 @@ impl Channel {
         self.chain.wfm.as_ref().is_some_and(|w| w.mpx.locked())
     }
 
+    /// Enables or disables CTCSS / DTMF detection. Effective for NFM and AM only (other modes
+    /// ignore it); it follows mode changes. Disabling discards the detected digits.
+    pub fn set_tones(&mut self, enabled: bool) {
+        self.tones_wanted = enabled;
+        self.sync_tones();
+    }
+
+    fn sync_tones(&mut self) {
+        let supported = matches!(self.cfg.mode, Mode::Nfm { .. } | Mode::Am);
+        match (self.tones_wanted && supported, self.tones.is_some()) {
+            (true, false) => self.tones = Some(ToneDetector::new()),
+            (false, true) => self.tones = None,
+            _ => {}
+        }
+    }
+
+    /// Tone squelch: the audio gate opens only while this CTCSS tone (a standard tone, see
+    /// [`canonical_ctcss`]; other values are ignored) is detected, in addition to the power squelch.
+    /// Has no effect while tone detection is off. The detector needs about 0.6 s to lock, so
+    /// the start of a transmission is cut off.
+    pub fn set_tone_squelch(&mut self, tone_hz: Option<f32>) {
+        self.tone_squelch = tone_hz.and_then(canonical_ctcss);
+    }
+
+    /// The tone detector, if running (NFM / AM with [`Self::set_tones`]).
+    #[must_use]
+    pub fn tones(&self) -> Option<&ToneDetector> {
+        self.tones.as_ref()
+    }
+
+    /// True while audio passes the gate: the power squelch is open and, with a tone squelch set
+    /// on a running detector, its tone is present.
+    fn audio_open(&self) -> bool {
+        self.squelch.open
+            && match (self.tone_squelch, &self.tones) {
+                (Some(want), Some(t)) => t.ctcss_hz() == Some(want),
+                _ => true,
+            }
+    }
+
     /// RDS data decoded so far (WFM only).
     #[must_use]
     pub fn rds_info(&self) -> Option<&RdsInfo> {
@@ -633,6 +691,10 @@ impl Channel {
         self.nco
             .set_offset(cfg.offset_hz, f64::from(cfg.input_rate));
         self.cfg = cfg;
+        self.sync_tones();
+        if let Some(t) = &mut self.tones {
+            t.reset();
+        }
         self.reset_squelch_timing();
         Ok(())
     }
@@ -681,6 +743,9 @@ impl Channel {
         self.reset_squelch_timing();
         self.gate = if self.squelch.open { 1.0 } else { 0.0 };
         self.last_power_dbfs = -200.0;
+        if let Some(t) = &mut self.tones {
+            t.reset();
+        }
     }
 
     fn squelch_update(&mut self, sum: f64, count: usize) {
@@ -804,7 +869,14 @@ impl Channel {
                 _ => self.chain.resampler.process(&self.audio_b, out),
             }
 
-            let target = if self.squelch.open { 1.0 } else { 0.0 };
+            if let Some(t) = &mut self.tones {
+                if self.squelch.open {
+                    t.process(&out[start..]);
+                } else {
+                    t.idle();
+                }
+            }
+            let target = if self.audio_open() { 1.0 } else { 0.0 };
             if self.gate != target || target == 0.0 {
                 let step = (1.0 / (GATE_RAMP_S * f64::from(OUTPUT_RATE))) as f32;
                 for frame in out[start..].chunks_mut(if stereo { 2 } else { 1 }) {
@@ -820,7 +892,7 @@ impl Channel {
         }
         ChannelStats {
             power_dbfs: self.last_power_dbfs,
-            squelch_open: self.squelch.open,
+            squelch_open: self.audio_open(),
         }
     }
 }
@@ -1369,5 +1441,95 @@ mod tests {
                 sig / wall
             );
         }
+    }
+
+    /// NFM carrier at DC modulated by `audio(t)` (1.0 = 5 kHz deviation), plus a little noise.
+    fn fm_modulated(rate: u32, secs: f64, audio: impl Fn(f64) -> f64) -> Vec<Complex32> {
+        let n = (f64::from(rate) * secs) as usize;
+        let mut phase = 0.0f64;
+        let mut seed = 0x1234_5678_9ABC_DEF1u64;
+        (0..n)
+            .map(|i| {
+                phase += TAU * 5_000.0 * audio(i as f64 / f64::from(rate)) / f64::from(rate);
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                let noise = ((seed >> 11) as f64 / (1u64 << 52) as f64 - 1.0) * 0.003;
+                Complex32::new((phase.cos() + noise) as f32, (phase.sin() - noise) as f32)
+            })
+            .collect()
+    }
+
+    fn rms(x: &[f32]) -> f32 {
+        (x.iter().map(|v| v * v).sum::<f32>() / x.len().max(1) as f32).sqrt()
+    }
+
+    #[test]
+    fn nfm_channel_reports_ctcss_and_dtmf_and_gates_on_the_tone() {
+        let rate = 240_000;
+        // 88.5 Hz sub-tone at 15 % deviation, a 1 kHz "voice" and two DTMF digits ("4" at 1.2 s,
+        // "9" at 1.6 s, 80 ms each).
+        let dtmf = |t: f64, row: f64, col: f64, start: f64| {
+            if (start..start + 0.08).contains(&t) {
+                0.18 * ((TAU * row * t).sin() + (TAU * col * t).sin())
+            } else {
+                0.0
+            }
+        };
+        let signal = fm_modulated(rate, 2.4, |t| {
+            0.15 * (TAU * 88.5 * t).sin()
+                + 0.2 * (TAU * 1000.0 * t).sin() * if t < 1.1 { 1.0 } else { 0.0 }
+                + dtmf(t, 770.0, 1209.0, 1.2)
+                + dtmf(t, 852.0, 1477.0, 1.6)
+        });
+        let run_with = |squelch_tone: Option<f32>| {
+            let mut ch = Channel::new(cfg(rate, 0.0, Mode::nfm())).expect("valid config");
+            ch.set_tones(true);
+            ch.set_tone_squelch(squelch_tone);
+            let mut out = Vec::new();
+            let mut open = Vec::new();
+            for block in signal.chunks(4_800) {
+                let before = out.len();
+                let stats = ch.process(block, &mut out);
+                open.push((before, stats.squelch_open));
+            }
+            (ch, out, open)
+        };
+
+        let (ch, ..) = run_with(None);
+        let tones = ch.tones().expect("detector runs for nfm");
+        assert_eq!(tones.ctcss_hz(), Some(88.5));
+        assert_eq!(tones.dtmf_tail(), "49");
+
+        // Matching tone squelch: closed at first, open once the tone locked, audible then.
+        let (ch, out, open) = run_with(Some(88.5));
+        assert!(!open[0].1 && open.last().is_some_and(|o| o.1));
+        let early = &out[480..9_600]; // after the gate ramp, well before the lock
+        assert!(rms(early) < 1e-3, "audio leaks before the lock");
+        let tail = &out[out.len() / 2 - 4_800..out.len() / 2];
+        assert!(rms(tail) > 0.05, "no audio with the tone present");
+        assert_eq!(ch.tones().map(ToneDetector::dtmf_count), Some(2));
+
+        // Another tone never opens the gate.
+        let (_, out, open) = run_with(Some(100.0));
+        assert!(open.iter().all(|o| !o.1));
+        assert!(rms(&out[480..]) < 1e-3);
+    }
+
+    #[test]
+    fn tone_detection_follows_mode_and_switch() {
+        let mut ch = Channel::new(cfg(240_000, 0.0, Mode::wfm())).expect("valid config");
+        ch.set_tones(true);
+        assert!(ch.tones().is_none(), "wfm has no tone detector");
+        ch.set_mode(Mode::nfm()).expect("mode");
+        assert!(ch.tones().is_some());
+        ch.set_mode(Mode::Am).expect("mode");
+        assert!(ch.tones().is_some());
+        ch.set_mode(Mode::Usb).expect("mode");
+        assert!(ch.tones().is_none());
+        ch.set_mode(Mode::nfm()).expect("mode");
+        assert!(ch.tones().is_some(), "the request survives mode changes");
+        ch.set_tones(false);
+        assert!(ch.tones().is_none());
     }
 }

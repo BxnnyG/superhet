@@ -38,6 +38,7 @@ const audioSnap = {
   starting: false,
   unsupported: null,
   rds: {},
+  tones: {},
 } as unknown as AudioSnapshot;
 
 beforeEach(() => {

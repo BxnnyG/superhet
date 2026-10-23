@@ -93,6 +93,8 @@ mod tests {
             deemphasis: None,
             cw_pitch_hz: None,
             stereo: None,
+            tones: None,
+            tone_squelch_hz: None,
         }
     }
 

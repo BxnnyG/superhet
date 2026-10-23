@@ -3,7 +3,8 @@
 //! Every stream (`sh.v1.dev.<dev>.audio.<vfo>`) has a forwarder task that validates the
 //! `AudioFrame` v1 messages and pushes the unchanged bytes into the bounded queue of each client
 //! subscribed to it. The same task also follows the VFO's RDS state
-//! (`sh.v1.dev.<dev>.rds.<vfo>`, JSON) and queues each valid message as a text frame. A queue that is full drops its oldest frame and counts it, so a slow client
+//! (`sh.v1.dev.<dev>.rds.<vfo>`, JSON) and tone state (`sh.v1.dev.<dev>.tones.<vfo>`, JSON) and
+//! queues each valid message as a text frame. A queue that is full drops its oldest frame and counts it, so a slow client
 //! loses audio but never delays the forwarder, the bus subscription or other clients. The bus
 //! subscription is created for the first client of a stream and dropped with the last one.
 
@@ -15,6 +16,7 @@ use axum::body::Bytes;
 use futures_util::StreamExt;
 use superhet_bus::audio::AudioFrame;
 use superhet_bus::rds::RdsMessage;
+use superhet_bus::tones::TonesMessage;
 use tokio::sync::{Mutex, Notify, oneshot};
 
 /// Frames buffered per client before the oldest are dropped (20 ms each, shared by all VFOs).
@@ -55,7 +57,7 @@ pub enum HubError {
 pub struct Queued {
     /// VFO the message belongs to.
     vfo: u32,
-    /// True for a text message (RDS state), false for a binary audio frame.
+    /// True for a text message (RDS or tone state), false for a binary audio frame.
     pub text: bool,
     /// The bytes exactly as published.
     pub data: Bytes,
@@ -221,6 +223,22 @@ impl AudioHub {
         }
     }
 
+    /// Inject a tones message for a stream, going through the same validation as the bus path.
+    #[cfg(test)]
+    pub async fn publish_local_tones(&self, device: &str, vfo: u32, message: &[u8]) {
+        let subscribers = self
+            .streams
+            .lock()
+            .await
+            .get(&(device.to_owned(), vfo))
+            .map(|stream| Arc::clone(&stream.subscribers));
+        if let Some(subscribers) = subscribers
+            && let Some(item) = tones_item(message, vfo)
+        {
+            deliver(&subscribers, &item);
+        }
+    }
+
     /// Inject an RDS message for a stream, going through the same validation as the bus path.
     #[cfg(test)]
     pub async fn publish_local_rds(&self, device: &str, vfo: u32, message: &[u8]) {
@@ -287,9 +305,18 @@ impl AudioHub {
                     .ok(),
                 Err(_) => None,
             };
+            let tones = match superhet_bus::subjects::tones(&key.0, &key.1.to_string()) {
+                Ok(subject) => client
+                    .subscribe(subject)
+                    .await
+                    .inspect_err(|e| tracing::warn!(error = %e, "tones subscribe failed"))
+                    .ok(),
+                Err(_) => None,
+            };
             tokio::spawn(forward(
                 sub,
                 rds,
+                tones,
                 Arc::clone(&subscribers),
                 stopped,
                 Arc::clone(&self.streams),
@@ -329,13 +356,17 @@ impl AudioHub {
 /// A validated message on its way to the client queues.
 enum Item {
     Audio(Bytes),
-    Rds { vfo: u32, json: Bytes },
+    /// A JSON state message (RDS or tones) for the text channel of the audio socket.
+    Text {
+        vfo: u32,
+        json: Bytes,
+    },
 }
 
 /// Validate an RDS message of the stream's VFO.
 fn rds_item(payload: &[u8], vfo: u32) -> Option<Item> {
     match RdsMessage::parse(payload) {
-        Ok(message) if message.vfo == vfo => Some(Item::Rds {
+        Ok(message) if message.vfo == vfo => Some(Item::Text {
             vfo,
             json: Bytes::copy_from_slice(payload),
         }),
@@ -350,19 +381,37 @@ fn rds_item(payload: &[u8], vfo: u32) -> Option<Item> {
     }
 }
 
+/// Validate a tone message of the stream's VFO.
+fn tones_item(payload: &[u8], vfo: u32) -> Option<Item> {
+    match TonesMessage::parse(payload) {
+        Ok(message) if message.vfo == vfo => Some(Item::Text {
+            vfo,
+            json: Bytes::copy_from_slice(payload),
+        }),
+        Ok(_) => {
+            tracing::debug!(vfo, "dropping tones message with foreign vfo id");
+            None
+        }
+        Err(err) => {
+            tracing::debug!(%err, vfo, "dropping invalid tones message");
+            None
+        }
+    }
+}
+
 /// Push a message into every subscribed client queue.
 fn deliver(subscribers: &Subscribers, item: &Item) {
     let subscribers = subscribers.lock().unwrap_or_else(PoisonError::into_inner);
     for (_, queue) in subscribers.iter() {
         match item {
             Item::Audio(frame) => queue.push(frame.clone()),
-            Item::Rds { vfo, json } => queue.push_text(*vfo, json.clone()),
+            Item::Text { vfo, json } => queue.push_text(*vfo, json.clone()),
         }
     }
 }
 
 /// Wait for the next message of an optional subscription; never ready when there is none.
-async fn next_rds(sub: &mut Option<async_nats::Subscriber>) -> Option<async_nats::Message> {
+async fn next_message(sub: &mut Option<async_nats::Subscriber>) -> Option<async_nats::Message> {
     match sub {
         Some(sub) => sub.next().await,
         None => std::future::pending().await,
@@ -373,6 +422,7 @@ async fn next_rds(sub: &mut Option<async_nats::Subscriber>) -> Option<async_nats
 async fn forward(
     mut sub: async_nats::Subscriber,
     mut rds: Option<async_nats::Subscriber>,
+    mut tones: Option<async_nats::Subscriber>,
     subscribers: Subscribers,
     mut stopped: oneshot::Receiver<()>,
     registry: Arc<Mutex<Streams>>,
@@ -391,15 +441,26 @@ async fn forward(
                     Err(err) => tracing::debug!(%err, device = key.0, vfo = key.1, "dropping undecodable audio frame"),
                 }
             }
-            msg = next_rds(&mut rds) => {
+            msg = next_message(&mut rds) => {
                 match msg {
                     Some(msg) => {
                         if let Some(item) = rds_item(&msg.payload, key.1) {
                             deliver(&subscribers, &item);
                         }
                     }
-                    // Only the RDS subscription ended: carry on with audio alone.
+                    // Only the RDS subscription ended: carry on without it.
                     None => rds = None,
+                }
+            }
+            msg = next_message(&mut tones) => {
+                match msg {
+                    Some(msg) => {
+                        if let Some(item) = tones_item(&msg.payload, key.1) {
+                            deliver(&subscribers, &item);
+                        }
+                    }
+                    // Only the tones subscription ended: carry on without it.
+                    None => tones = None,
                 }
             }
         }

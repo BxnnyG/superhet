@@ -86,6 +86,46 @@ plugin). The decoded state is published as JSON on core NATS (lossy, like audio)
 - Messages are limited to 2048 bytes; the API discards messages that are malformed, have another
   `v`/`type`, or whose `vfo` differs from the subject.
 
+## Tone state
+
+An NFM or AM VFO with tone detection on (default on for NFM, off for AM, per-VFO switch) runs a
+native CTCSS and DTMF detector on its 48 kHz audio (`superhet-dsp::tones`; taken before the
+squelch gate so the sub-audible band is intact). The result is published as JSON on core NATS
+(lossy), subject `sh.v1.dev.<dev>.tones.<vfo_id>`; the daemon needs publish permission on
+`sh.v1.dev.*.tones.>` (`deploy/nats/nats.conf`). Reference: `crates/superhet-bus/src/tones.rs`.
+
+`{"v":1,"type":"tones","vfo":3,"ctcss_hz":88.5,"dtmf_count":6,"dtmf_tail":"123*45"}`
+
+- One message is the complete state. `ctcss_hz` is the sub-tone currently locked (one of the 50
+  standard tones, 67.0 to 254.1 Hz) or `null`. `dtmf_count` counts the digits detected since the
+  channel (re)started and `dtmf_tail` holds the last 32 of them (`0-9`, `A-D`, `*`, `#`, oldest
+  first). A client appends the last `dtmf_count - previous count` characters of the tail to its
+  own digit string; a lost or repeated message therefore cannot corrupt it, and a count that went
+  backwards means a restart. If more digits arrived than the tail holds, the oldest are lost.
+- Published on every change (a locked/released tone, a new digit) and repeated once a second
+  while a tone is locked or digits exist. An **empty state** (`ctcss_hz:null`, `dtmf_count:0`) is
+  published when the data goes away: retune of the VFO or the device (more than 5 kHz), mode or
+  bandwidth change, tone detection switched off. Consumers clear their display on it.
+- Detection. CTCSS: 50 Hann-windowed Goertzel filters over 0.5 s every 125 ms on audio decimated
+  to 2 kHz; the strongest tone must stand 10.8 dB above the mean of the tones more than 6.5 Hz
+  away, above -48 dBFS, and stationary over both window halves (rejects a gliding voice pitch).
+  It locks after two consecutive hits (about 0.6 s after the tone starts) and is released after
+  five misses. Tones 2.3 Hz apart (67.0/69.3, 159.8/162.2) are told apart; a tone between two
+  standard ones locks to the nearer one or to none. DTMF: Goertzel filters for the eight
+  frequencies plus the second harmonics of the rows on audio decimated to 8 kHz, a 25.6 ms
+  window every 8 ms. A window is a digit when both tones are above -34 dBFS, carry 70 % of the
+  window energy, stand 10 dB above the rest of their group, the twist is within +4 dB / -8 dB
+  (ITU-T Q.24) and the row tone's second harmonic is 10 dB down (talk-off guard). A digit needs
+  three consecutive windows (tones of at least about 42 ms) and is reported once; a repeat of
+  the same digit needs a pause of at least about 34 ms, a different digit follows without one.
+  Detection only runs while the power squelch is open; a closed squelch resets the filters (not
+  the digit history).
+- Limits. A sustained music note on a CTCSS frequency (bass, organ) looks like the tone, as in
+  any hardware decoder; CTCSS is a transmitter-side convention for NFM, so this does not matter
+  on its intended use. DCS (digital coded squelch) is not detected.
+- Messages are limited to 1024 bytes; the API discards messages that are malformed, have another
+  `v`/`type`, or whose `vfo` differs from the subject.
+
 ## WebSocket (superhet-api)
 
 Endpoint: `GET /api/v1/ws/audio?dev=<device-id>` on **superhet-api** (port 8073). Connection rules
@@ -107,6 +147,8 @@ rejected. VFOs need not exist yet: frames flow once the daemon publishes them.
 - Text, `{"v":1,"type":"rds",...}`: the RDS state of a subscribed WFM VFO (above), forwarded
   byte for byte. It shares the queue with the audio frames (so it can be dropped under load; the
   repeat fixes that within a second) and is never sent for a VFO that is not in the set.
+- Text, `{"v":1,"type":"tones",...}`: the tone state of a subscribed NFM / AM VFO (above), with
+  the same rules as the RDS state.
 - Binary: one `AudioFrame` v1 (above) per message, **byte for byte as published**; the frame
   carries its `vfo_id`. Only subscribed VFOs are forwarded, and no frame of a VFO that was
   dropped from the set follows its acknowledgement. Frames that fail validation (length, magic,

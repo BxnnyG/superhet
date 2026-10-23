@@ -33,6 +33,8 @@ phase (plugins, recording) first.
 | Per-VFO volume and stereo pan (left/right split for two VFOs) | next | P1 polish |
 | WFM stereo (pilot PLL, automatic mono fallback, per-VFO switch, ST lamp) | done (next alpha) | P1 crit. 4 |
 | RDS (PS, RadioText, PI, PTY, TP/TA) | done (next alpha) | native in `superhet-dsp::rds`, not the redsea plugin; clock time, AF list, EON, RT+ still open |
+| DTMF digit detection per NFM/AM VFO (Goertzel, Q.24 twist and duration, talk-off guard; digit string with copy/clear) | done (next alpha) | native in `superhet-dsp::tones` |
+| CTCSS sub-tone detection (50 standard tones) and tone squelch | done (next alpha) | tone squelch costs about 0.6 s of every transmission start; DCS detection, tone removal from the audio and DTMF/CTCSS for SSB/WFM still open |
 | USB/LSB/CW demodulators (one-sided SSB passband with edge drag, CW pitch) | done (alpha.5) | P1 crit. 4 |
 | Noise reduction / notch filter | later | P1 polish |
 
