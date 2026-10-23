@@ -90,7 +90,7 @@ impl Baseband {
         Self { bits, fs, n: 0 }
     }
 
-    pub fn next(&mut self) -> f64 {
+    pub fn sample(&mut self) -> f64 {
         let t = self.n as f64 / self.fs * BIT_RATE_HZ;
         self.n += 1;
         let k = t.floor();
@@ -158,7 +158,7 @@ impl Station {
         let l = c.left * (TAU * 1_000.0 * t).sin();
         let r = c.right * (TAU * 3_000.0 * t).sin();
         let w = TAU * PILOT_HZ * t;
-        let rds_bit = self.rds.next();
+        let rds_bit = self.rds.sample();
         // The RDS data sits at an arbitrary fixed phase relative to the third pilot harmonic.
         let mpx = 0.9 * ((l + r) / 2.0 + (l - r) / 2.0 * (2.0 * w).sin())
             + c.pilot * w.sin()

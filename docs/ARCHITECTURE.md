@@ -86,7 +86,8 @@ Concurrency inside sdrd: tokio for I/O; DSP runs on dedicated OS threads (device
 | `sh.v1.dev.<dev>.spectrum` | pub/sub | sdrd → api (quantised FFT frames, full band) |
 | `sh.v1.dev.<dev>.spectrum.zoom` | pub/sub | sdrd → api (frames of the leased zoom slice, same format; ADR-0009) |
 | `sh.v1.dev.<dev>.ctl.spectrum.zoom` | publish | api → sdrd (lease a zoom slice or release it; repeated every 3 s) |
-| `sh.v1.dev.<dev>.audio.<stream>` | pub/sub (core NATS, lossy) | sdrd / pluginhost → api, recorder (binary `AudioFrame` v1 with one Opus packet each, see `docs/protocol-audio.md`; `<stream>` is the VFO id for device VFOs) |
+| `sh.v1.dev.<dev>.audio.<stream>` | pub/sub (core NATS, lossy) | sdrd / pluginhost → api, recorder (binary `AudioFrame` v1 with one Opus packet each, mono or stereo, see `docs/protocol-audio.md`; `<stream>` is the VFO id for device VFOs) |
+| `sh.v1.dev.<dev>.rds.<vfo>` | pub/sub (core NATS, lossy) | sdrd → api (JSON RDS state of a WFM VFO, repeated every second; api forwards it as a text frame on the audio WebSocket; `docs/protocol-audio.md`) |
 | `sh.v1.events.<plugin>.<type>` | JetStream `EVENTS` | pluginhost → worker (persist), api (live) |
 | `sh.v1.lookup.<key>` | request/reply | api/worker → worker lookup service |
 | `sh.v1.plugin.<id>.ctl` | request/reply | api → pluginhost |

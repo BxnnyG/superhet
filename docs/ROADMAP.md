@@ -26,11 +26,11 @@ Acceptance criteria:
 
 ## P2 – Plugin system and first plugins
 
-Scope: plugin contract v1 (manifest, simple + framed transport), plugin host + supervisor, install from local path, plugin management UI, decoder states in the UI, exclusive claims. Plugins: POCSAG/FLEX (multimon-ng), APRS (direwolf), rtl_433, ADS-B (readsb, exclusive), RDS (redsea).
+Scope: plugin contract v1 (manifest, simple + framed transport), plugin host + supervisor, install from local path, plugin management UI, decoder states in the UI, exclusive claims. Plugins: POCSAG/FLEX (multimon-ng), APRS (direwolf), rtl_433, ADS-B (readsb, exclusive). (RDS moved forward: it is decoded natively in the daemon since the stereo/RDS alpha, ADR-0010.)
 
 Acceptance criteria:
 1. Contract documented in `docs/plugin-contract.md` with JSON Schemas; a reference plugin in `plugins/example-echo` passes the contract test suite (`cargo test -p superhet-plugin-protocol`).
-2. Each of the five plugins decodes a committed reference recording (SigMF) in CI to the expected events (golden-file test).
+2. Each of the four plugins decodes a committed reference recording (SigMF) in CI to the expected events (golden-file test).
 3. Live: APRS packets on 144.800 MHz and rtl_433 sensors appear in the UI within 2 s of reception.
 4. ADS-B profile claims the device, pauses all other decoders (visible state), and restores the previous state on release (integration test).
 5. Killing a plugin process restarts it with backoff; after 5 crashes in 5 min the instance enters `Error` (test).

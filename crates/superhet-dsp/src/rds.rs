@@ -855,7 +855,7 @@ mod tests {
         let total = (fs * 3.5) as usize;
         let block: Vec<Complex32> = (0..total)
             .map(|_| {
-                let s = gen_.next() as f32 * 0.02;
+                let s = gen_.sample() as f32 * 0.02;
                 Complex32::new(s, 0.0) * rot + Complex32::new(noise(), noise()) * 0.02
             })
             .collect();

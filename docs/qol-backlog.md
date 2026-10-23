@@ -31,7 +31,8 @@ phase (plugins, recording) first.
 | Squelch Auto (noise floor of the last 3 s + margin) | done (alpha.3) | P1 |
 | Default VFO on a fresh install | done (alpha.3) | P1 |
 | Per-VFO volume and stereo pan (left/right split for two VFOs) | next | P1 polish |
-| WFM stereo + RDS (station name, radio text) | next | P1 crit. 4 / RDS decoder in P2 (redsea) |
+| WFM stereo (pilot PLL, automatic mono fallback, per-VFO switch, ST lamp) | done (next alpha) | P1 crit. 4 |
+| RDS (PS, RadioText, PI, PTY, TP/TA) | done (next alpha) | native in `superhet-dsp::rds`, not the redsea plugin; clock time, AF list, EON, RT+ still open |
 | USB/LSB/CW demodulators (one-sided SSB passband with edge drag, CW pitch) | done (alpha.5) | P1 crit. 4 |
 | Noise reduction / notch filter | later | P1 polish |
 
@@ -50,7 +51,7 @@ phase (plugins, recording) first.
 
 | Item | Status | Phase / notes |
 | --- | --- | --- |
-| RDS | next | see above |
+| RDS | done (next alpha) | see above; the P2 redsea plugin is no longer needed |
 | DAB/DAB+ | later | Full OFDM receiver over ~1.5 MHz; best as a decoder plugin wrapping welle.io or dablin (GPL, separate process) in P2+. |
 | POCSAG, APRS, rtl_433, ADS-B | later | P2 plugins |
 | DMR/TETRA etc. | later | P3 (own equipment only, see README legal notice) |
