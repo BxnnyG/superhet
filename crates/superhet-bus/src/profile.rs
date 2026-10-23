@@ -96,6 +96,12 @@ pub struct Vfo {
     /// Stereo decoding (WFM only); absent/`null` = mode default (on).
     #[serde(default)]
     pub stereo: Option<bool>,
+    /// CTCSS / DTMF detection (NFM and AM only); absent/`null` = mode default (on for NFM).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tones: Option<bool>,
+    /// CTCSS tone squelch in Hz (NFM and AM only); absent/`null` = off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tone_squelch_hz: Option<f32>,
 }
 
 /// The preset itself.
@@ -210,6 +216,13 @@ impl ProfileData {
             if vfo.mode != Mode::Wfm && vfo.stereo.is_some() {
                 return Err("stereo applies to wfm only".into());
             }
+            let narrow = matches!(vfo.mode, Mode::Nfm | Mode::Am);
+            if !narrow && (vfo.tones.is_some() || vfo.tone_squelch_hz.is_some()) {
+                return Err("tones and tone_squelch_hz apply to nfm and am only".into());
+            }
+            if vfo.tones == Some(false) && vfo.tone_squelch_hz.is_some() {
+                return Err("tone_squelch_hz needs tones enabled".into());
+            }
         }
         if self.decoders.len() > MAX_DECODERS || self.decoders.iter().any(|d| !d.is_object()) {
             return Err(format!(
@@ -240,6 +253,10 @@ impl ProfileData {
             #[serde(default)]
             cw_pitch_hz: Option<u32>,
             stereo: Option<bool>,
+            #[serde(default)]
+            tones: Option<bool>,
+            #[serde(default)]
+            tone_squelch_hz: Option<f32>,
         }
         #[derive(Deserialize)]
         struct StateLock {
@@ -283,6 +300,8 @@ impl ProfileData {
                     deemphasis: v.deemphasis,
                     cw_pitch_hz: v.cw_pitch_hz,
                     stereo: v.stereo,
+                    tones: v.tones,
+                    tone_squelch_hz: v.tone_squelch_hz,
                 })
                 .collect(),
             lock: state.locks.iter().any(|l| l.kind == "user"),
@@ -312,6 +331,19 @@ mod tests {
         assert_eq!(data.vfos[2].stereo, Some(false));
         let again = ProfileData::parse(&serde_json::to_vec(&data).expect("json")).expect("valid");
         assert_eq!(data, again);
+    }
+
+    #[test]
+    fn tone_settings_round_trip_and_stay_out_of_the_way_when_unset() {
+        let json = br#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[
+            {"freq_hz":5,"mode":"nfm","tones":true,"tone_squelch_hz":88.5},
+            {"freq_hz":6,"mode":"am"}]}"#;
+        let data = ProfileData::parse(json).expect("valid");
+        assert_eq!(data.vfos[0].tones, Some(true));
+        assert_eq!(data.vfos[0].tone_squelch_hz, Some(88.5));
+        let text = String::from_utf8(serde_json::to_vec(&data).expect("json")).expect("utf8");
+        assert_eq!(text.matches("tone_squelch_hz").count(), 1);
+        assert_eq!(ProfileData::parse(text.as_bytes()), Ok(data));
     }
 
     #[test]
@@ -346,6 +378,9 @@ mod tests {
             r#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[{"freq_hz":5,"mode":"cw","cw_pitch_hz":100}]}"#,
             r#"{"v":1,"center_hz":1,"sample_rate":2,"decoders":[1]}"#,
             r#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[{"freq_hz":5,"mode":"nfm","stereo":true}]}"#,
+            r#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[{"freq_hz":5,"mode":"wfm","tones":true}]}"#,
+            r#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[{"freq_hz":5,"mode":"usb","tone_squelch_hz":88.5}]}"#,
+            r#"{"v":1,"center_hz":1,"sample_rate":2,"vfos":[{"freq_hz":5,"mode":"nfm","tones":false,"tone_squelch_hz":88.5}]}"#,
         ] {
             assert!(ProfileData::parse(bad.as_bytes()).is_err(), "{bad}");
         }

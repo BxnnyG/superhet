@@ -437,6 +437,8 @@ impl Controller {
             deemphasis: None,
             cw_pitch_hz: None,
             stereo: None,
+            tones: None,
+            tone_squelch_hz: None,
         };
         match self.vfos.with(|r| {
             if r.list().is_empty() {
@@ -879,6 +881,8 @@ mod tests {
             deemphasis: None,
             cw_pitch_hz: None,
             stereo: None,
+            tones: None,
+            tone_squelch_hz: None,
         }];
         let err = load(&c, &data).expect_err("invalid");
         assert_eq!(err.code, ErrorCode::Invalid);
@@ -908,6 +912,8 @@ mod tests {
                 deemphasis: None,
                 cw_pitch_hz: None,
                 stereo: None,
+                tones: None,
+                tone_squelch_hz: None,
             }],
             lock: true,
             ..ProfileData::from_state(&state(&c)).expect("snapshot")

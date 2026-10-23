@@ -17,6 +17,8 @@ pub const ALL_SPECTRUM: &str = "sh.v1.dev.*.spectrum";
 pub const ALL_AUDIO: &str = "sh.v1.dev.*.audio.>";
 /// Wildcard matching the RDS state of every VFO of every device.
 pub const ALL_RDS: &str = "sh.v1.dev.*.rds.>";
+/// Wildcard matching the tone state (CTCSS, DTMF) of every VFO of every device.
+pub const ALL_TONES: &str = "sh.v1.dev.*.tones.>";
 /// Wildcard matching every plugin event.
 pub const ALL_EVENTS: &str = "sh.v1.events.>";
 /// Wildcard matching every lookup request.
@@ -184,6 +186,16 @@ pub fn rds(device: &str, vfo: &str) -> Result<String, InvalidToken> {
     Ok(format!("{PREFIX}.dev.{device}.rds.{vfo}"))
 }
 
+/// Tone state subject of a VFO: `sh.v1.dev.<dev>.tones.<vfo>`.
+///
+/// # Errors
+/// Fails if a token is invalid.
+pub fn tones(device: &str, vfo: &str) -> Result<String, InvalidToken> {
+    check(device)?;
+    check(vfo)?;
+    Ok(format!("{PREFIX}.dev.{device}.tones.{vfo}"))
+}
+
 /// Plugin event subject: `sh.v1.events.<plugin>.<type>`.
 ///
 /// # Errors
@@ -242,6 +254,8 @@ mod tests {
         );
         assert_eq!(rds("rtl0", "3").as_deref(), Ok("sh.v1.dev.rtl0.rds.3"));
         assert!(rds("rtl0", "3.4").is_err());
+        assert_eq!(tones("rtl0", "3").as_deref(), Ok("sh.v1.dev.rtl0.tones.3"));
+        assert!(tones("rtl0", "*").is_err());
         assert_eq!(
             ctl_vfo("rtl0", "create").as_deref(),
             Ok("sh.v1.dev.rtl0.ctl.vfo.create")

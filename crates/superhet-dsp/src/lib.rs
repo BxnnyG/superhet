@@ -8,6 +8,7 @@
 //!   Pure DSP: no I/O, no threads.
 //! - [`wfm`]: 19 kHz pilot PLL (stereo carrier, lock detection) of the broadcast-FM multiplex.
 //! - [`rds`]: RDS receiver (57 kHz subcarrier to PS, RadioText, PI, PTY).
+//! - [`tones`]: CTCSS sub-tone and DTMF digit detection on NFM / AM audio.
 
 pub mod channel;
 pub mod demod;
@@ -18,6 +19,7 @@ pub mod resample;
 pub mod spectrum;
 #[cfg(any(test, feature = "testsig"))]
 pub mod testsig;
+pub mod tones;
 pub mod wfm;
 pub mod zoom;
 
@@ -27,6 +29,7 @@ pub use channel::{
 };
 pub use rds::RdsInfo;
 pub use spectrum::{SpectrumConfig, SpectrumError, SpectrumProcessor};
+pub use tones::{CTCSS_TONES_HZ, DTMF_TAIL_LEN, ToneDetector, canonical_ctcss};
 pub use zoom::{ZoomConfig, ZoomError, ZoomSpectrum, shift_for_span};
 
 #[cfg(test)]

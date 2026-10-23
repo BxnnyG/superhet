@@ -8,6 +8,7 @@
 //! - `sh.v1.dev.<dev>.spectrum.zoom` – zoom spectrum frames (narrow slice, real resolution)
 //! - `sh.v1.dev.<dev>.audio.<stream>` – demodulated audio streams
 //! - `sh.v1.dev.<dev>.rds.<vfo>` – decoded RDS state of a WFM VFO (JSON, see [`rds`])
+//! - `sh.v1.dev.<dev>.tones.<vfo>` – CTCSS tone and DTMF digits of an NFM / AM VFO (JSON, see [`tones`])
 //! - `sh.v1.events.<plugin>.<type>` – plugin events
 //! - `sh.v1.lookup.<key>` – lookup requests
 //! - `sh.v1.plugin.<id>.ctl` – plugin control
@@ -20,6 +21,7 @@ pub mod profile;
 pub mod rds;
 pub mod spectrum;
 pub mod subjects;
+pub mod tones;
 pub mod zoom;
 
 pub use config::{Auth, BusConfig, ConfigError};

@@ -199,6 +199,56 @@ it("a retune clears the RDS state at once, a fine tuning step does not", () => {
   expect(audio.getSnapshot().rds[1]).toBeUndefined();
 });
 
+const tonesMsg = (vfo: number, extra: Record<string, unknown> = {}) => ({
+  v: 1,
+  type: "tones",
+  vfo,
+  ctcss_hz: 88.5,
+  dtmf_count: 0,
+  dtmf_tail: "",
+  ...extra,
+});
+
+it("accumulates DTMF digits from the running count and lets the user clear them", () => {
+  const { audio, text } = setup();
+  audio.setVfos([1, 2]);
+  text(tonesMsg(1, { dtmf_count: 2, dtmf_tail: "12" }));
+  expect(audio.getSnapshot().tones[1]).toEqual({ ctcssHz: 88.5, digits: "12", count: 2 });
+  const listener = vi.fn();
+  audio.subscribe(listener);
+  // A repeat of the same state does not notify.
+  text(tonesMsg(1, { dtmf_count: 2, dtmf_tail: "12" }));
+  expect(listener).not.toHaveBeenCalled();
+  text(tonesMsg(1, { dtmf_count: 3, dtmf_tail: "123" }));
+  expect(audio.getSnapshot().tones[1]?.digits).toBe("123");
+  audio.clearDigits(1);
+  expect(audio.getSnapshot().tones[1]?.digits).toBe("");
+  text(tonesMsg(1, { dtmf_count: 3, dtmf_tail: "123" }));
+  expect(audio.getSnapshot().tones[1]?.digits).toBe("");
+  text(tonesMsg(1, { dtmf_count: 4, dtmf_tail: "1234" }));
+  expect(audio.getSnapshot().tones[1]?.digits).toBe("4");
+  // VFOs we do not follow are ignored, and an unsubscribed VFO loses its state.
+  text(tonesMsg(5));
+  expect(audio.getSnapshot().tones[5]).toBeUndefined();
+  text(tonesMsg(2));
+  audio.setVfos([1]);
+  expect(audio.getSnapshot().tones[2]).toBeUndefined();
+});
+
+it("an empty tone state or a retune clears the tone display", () => {
+  const { audio, text } = setup();
+  audio.setVfos([1]);
+  audio.noteFrequency(1, 446_006_250);
+  text(tonesMsg(1));
+  audio.noteFrequency(1, 446_007_000);
+  expect(audio.getSnapshot().tones[1]).toBeDefined();
+  text(tonesMsg(1, { ctcss_hz: null }));
+  expect(audio.getSnapshot().tones[1]).toBeUndefined();
+  text(tonesMsg(1));
+  audio.noteFrequency(1, 446_100_000);
+  expect(audio.getSnapshot().tones[1]).toBeUndefined();
+});
+
 it("exposes the stereo lock of the latest frame", () => {
   const { audio, feed, frame } = setup();
   audio.setVfos([1]);

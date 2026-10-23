@@ -4,6 +4,7 @@
 import { isSessionLost, verifySession } from "../auth/session";
 import { decodeAudioFrame, type AudioFrame } from "./frame";
 import { parseRds, type RdsState } from "./rds";
+import { parseTones, type TonesMessage } from "./tones";
 import { backoffDelay, type SocketStatus } from "../spectrum/socket";
 
 /** The server accepts at most 8 distinct VFO ids per socket. */
@@ -14,6 +15,8 @@ export interface AudioSocketOptions {
   onFrame: (frame: AudioFrame) => void;
   /** Complete RDS state of a VFO (an empty state clears the display). */
   onRds?: (vfo: number, state: RdsState) => void;
+  /** Tone state of a VFO (CTCSS, DTMF); an empty one clears the display. */
+  onTones?: (msg: TonesMessage) => void;
   onStatus?: (status: SocketStatus) => void;
   onError?: (message: string) => void;
   /** Override for tests. */
@@ -129,6 +132,11 @@ export class AudioSocket {
       const rds = parseRds(msg);
       if (rds) {
         this.opts.onRds?.(rds.vfo, rds.state);
+        return;
+      }
+      const tones = parseTones(msg);
+      if (tones) {
+        this.opts.onTones?.(tones);
         return;
       }
       if (

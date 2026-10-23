@@ -117,7 +117,7 @@ or stereo, 20 ms frames, VBR; 64 kbit/s mono WFM, 96 kbit/s stereo WFM, 24 kbit/
 VFOs per device.
 
 VFO object (in `vfos` and in replies):
-`{"id","freq_hz","mode":"wfm"|"nfm"|"am"|"usb"|"lsb"|"cw","bandwidth_hz","squelch_dbfs":null|number,"deemphasis":"none"|"50us"|"75us"|null,"stereo":true|false|null,"cw_pitch_hz"?:number,"offset_hz","status":"active"|"paused"}`
+`{"id","freq_hz","mode":"wfm"|"nfm"|"am"|"usb"|"lsb"|"cw","bandwidth_hz","squelch_dbfs":null|number,"deemphasis":"none"|"50us"|"75us"|null,"stereo":true|false|null,"tones":true|false|null,"tone_squelch_hz":null|number,"cw_pitch_hz"?:number,"offset_hz","status":"active"|"paused"}`
 
 - `id` is assigned by the daemon (starting at 1, increasing, not reused while the daemon runs).
 - `bandwidth_hz` is the effective value (mode default: WFM 180 kHz, NFM 12.5 kHz, AM 10 kHz,
@@ -126,7 +126,9 @@ VFO object (in `vfos` and in replies):
   the opposite sideband are rejected (> 40 dB, tested). For CW it is the width of the filter centred on
   `freq_hz`. `deemphasis` is the effective value (WFM 50 us, NFM none) and `null` for the other
   modes. `stereo` is the effective stereo setting of a WFM VFO (default `true`) and `null` for the
-  other modes; see "WFM stereo and RDS" below. `cw_pitch_hz` is present for CW only (effective value, default 700): a carrier exactly
+  other modes; see "WFM stereo and RDS" below. `tones` is the effective tone detection setting of an
+  NFM (default `true`) or AM (default `false`) VFO and `null` for the other modes; `tone_squelch_hz` is
+  the CTCSS tone squelch or `null`; see "CTCSS and DTMF" below. `cw_pitch_hz` is present for CW only (effective value, default 700): a carrier exactly
   on `freq_hz` is heard as a tone of this frequency, one 100 Hz above as pitch + 100 Hz.
 - USB/LSB/CW audio goes through a peak AGC with fast attack (2-3 ms), a hang time (250 ms SSB,
   100 ms CW) and a slow decay (400 ms SSB, 200 ms CW); the squelch measures the power after the
@@ -143,15 +145,16 @@ Requests (request/reply, JSON, `v` required, unknown fields rejected). Success r
 shape as `ctl.tune`. VFO requests are not coalesced.
 
 - `sh.v1.dev.<dev>.ctl.vfo.create`: `{"v":1,"freq_hz":..,"mode":"wfm"|"nfm"|"am"|"usb"|"lsb"|"cw","bandwidth_hz"?:..,
-  "squelch_dbfs"?:..,"deemphasis"?:..,"cw_pitch_hz"?:..,"stereo"?:..}`. `freq_hz` 1..1 THz, `bandwidth_hz`
+  "squelch_dbfs"?:..,"deemphasis"?:..,"cw_pitch_hz"?:..,"stereo"?:..,"tones"?:..,"tone_squelch_hz"?:..}`. `freq_hz` 1..1 THz, `bandwidth_hz`
   100..1000000 (and realisable for the mode at the device's sample rate: at least 1000 for
   WFM/NFM/AM, 300 for USB/LSB, 100 for CW), `squelch_dbfs` -200..0 (absent or `null` = off),
   `deemphasis` only for WFM/NFM, `cw_pitch_hz` 200..2000 only for CW, `stereo` (boolean) only for
-  WFM. A VFO outside the passband is created `paused`.
+  WFM, `tones` (boolean) and `tone_squelch_hz` (one of the 50 standard CTCSS tones, see below) only for
+  NFM/AM. A VFO outside the passband is created `paused`.
 - `sh.v1.dev.<dev>.ctl.vfo.update`: `{"v":1,"id":..}` plus any of the fields above (partial patch,
   at least one). `null` for `bandwidth_hz` / `squelch_dbfs` / `deemphasis` / `cw_pitch_hz` /
-  `stereo` resets to the default / off. Changing `mode` drops a `deemphasis`, `cw_pitch_hz` or
-  `stereo` override unless given in the same request. Changing
+  `stereo` / `tones` / `tone_squelch_hz` resets to the default / off. Changing `mode` drops a
+  `deemphasis`, `cw_pitch_hz`, `stereo`, `tones` or `tone_squelch_hz` override unless given in the same request. Changing
   mode or bandwidth rebuilds the channel (a short audio gap); switching `stereo` restarts the
   audio filters and the encoder (a short gap, the RDS data stays); frequency and squelch changes
   do not.
@@ -167,6 +170,19 @@ cuts the top of the difference signal and loses RDS. `stereo` (default on) choos
 station without a pilot, or with a weak one, plays as mono on both channels automatically. RDS
 is always decoded and published as VFO-scoped JSON events (`sh.v1.dev.<dev>.rds.<vfo>`, forwarded
 on the audio WebSocket), whatever the stereo setting.
+### CTCSS and DTMF
+
+An NFM or AM VFO can detect the CTCSS sub-tone of the received transmission and DTMF digits
+natively (`superhet-dsp::tones`, details in `docs/protocol-audio.md`, "Tone state"). `tones`
+switches the detector (default on for NFM, off for AM; costs well under 1 % of a core per VFO).
+The results are VFO-scoped JSON events (`sh.v1.dev.<dev>.tones.<vfo>`, forwarded on the audio
+WebSocket). `tone_squelch_hz` (one of 67.0, 69.3, ..., 254.1 Hz; values within 0.05 Hz of a
+standard tone snap to it, anything else is `invalid`) turns on tone squelch: the audio gate opens
+only while the power squelch is open and that sub-tone is locked. The detector needs about 0.6 s,
+so the first syllables of every transmission are cut off, and the squelch flag in the audio
+frames follows the gate. A tone squelch needs `tones` on (`invalid` otherwise), so switching
+`tones` off requires `"tone_squelch_hz":null` in the same request. `tones` and `tone_squelch_hz`
+are `invalid` for modes other than NFM and AM.
 - `sh.v1.dev.<dev>.ctl.vfo.delete`: `{"v":1,"id":..}`.
 
 Free tuning: a VFO that is created, or updated in `freq_hz`, `mode` or `bandwidth_hz`, and ends up

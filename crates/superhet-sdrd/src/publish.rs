@@ -80,6 +80,22 @@ pub fn spawn_rds_publisher(
 /// Messages buffered between the VFO thread and the RDS publisher task.
 const RDS_QUEUE_MESSAGES: usize = 32;
 
+/// Start a publisher task for the tone state (CTCSS, DTMF) of the VFOs of `device`; the sink takes
+/// `(vfo_id, JSON message)` and publishes on `sh.v1.dev.<dev>.tones.<vfo>`. Same drop behaviour as
+/// the RDS sink.
+///
+/// # Errors
+/// Fails if `device` is not usable as a subject token.
+pub fn spawn_tones_publisher(
+    client: Client,
+    device: &str,
+) -> Result<impl FnMut(u32, Vec<u8>) + Send + 'static, superhet_bus::subjects::InvalidToken> {
+    spawn_vfo_publisher(client, device, "tones", TONES_QUEUE_MESSAGES)
+}
+
+/// Messages buffered between the VFO thread and the tone publisher task.
+const TONES_QUEUE_MESSAGES: usize = 32;
+
 /// Shared implementation: `sh.v1.dev.<dev>.<kind>.<vfo>`.
 fn spawn_vfo_publisher(
     client: Client,

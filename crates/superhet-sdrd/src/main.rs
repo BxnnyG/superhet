@@ -141,7 +141,9 @@ async fn start_pipeline(
     let vfos = Arc::new(vfo::VfoShared::default());
     let audio_sink = publish::spawn_audio_publisher(client.clone(), &config.device_id)?;
     let rds_sink = publish::spawn_rds_publisher(client.clone(), &config.device_id)?;
-    let audio = audio::AudioEngine::start_with_rds(Arc::clone(&vfos), audio_sink, rds_sink)?;
+    let tones_sink = publish::spawn_tones_publisher(client.clone(), &config.device_id)?;
+    let audio =
+        audio::AudioEngine::start_with_sinks(Arc::clone(&vfos), audio_sink, rds_sink, tones_sink)?;
     let sink = publish::spawn_spectrum_publisher(client.clone(), subject);
     let zoom_handle = zoom::ZoomHandle::default();
     let zoom_sink = publish::spawn_spectrum_publisher(
