@@ -18,7 +18,8 @@ loaded onto any device the settings fit (a file replay refuses other sample rate
   "ppm": 0,
   "bias_tee": false,
   "vfos": [
-    {"freq_hz": 433970000, "mode": "nfm", "bandwidth_hz": 12500, "squelch_dbfs": -45.0, "deemphasis": "none"}
+    {"freq_hz": 433970000, "mode": "nfm", "bandwidth_hz": 12500, "squelch_dbfs": -45.0, "deemphasis": "none"},
+    {"freq_hz": 99500000, "mode": "wfm", "stereo": false}
   ],
   "lock": false,
   "decoders": []
@@ -32,7 +33,7 @@ loaded onto any device the settings fit (a file replay refuses other sample rate
   absent/`null` for auto). `ppm` -1000..1000.
 - `vfos` (at most 8): `freq_hz` (1..1e12) and `mode` (`wfm`|`nfm`|`am`|`usb`|`lsb`|`cw`) required;
   `bandwidth_hz` (100..1000000), `squelch_dbfs` (-200..0), `deemphasis` (`none`|`50us`|`75us`,
-  only with `wfm`/`nfm`) and `cw_pitch_hz` (200..2000, only with `cw`; not written when unset) optional, `null`/absent = mode default / squelch off. Whether a VFO can be
+  only with `wfm`/`nfm`), `stereo` (boolean, only with `wfm`; absent = on) and `cw_pitch_hz` (200..2000, only with `cw`; not written when unset) optional, `null`/absent = mode default / squelch off. Whether a VFO can be
   realised at the profile's sample rate is checked when loading.
 - `lock`: take the user tuning lock after loading. Loading never releases a lock.
 - `decoders`: reserved for decoder instances (P2); at most 32 objects, stored and returned

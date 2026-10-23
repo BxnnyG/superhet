@@ -25,7 +25,7 @@ Legend:
 | Tuning lock, decoder frequency binding, paused state | MVP (lock, binding), v1 (decoder UI) | ✅ | – | UX clarity |
 | NFM, AM demodulation | MVP | ✅ | own DSP | – |
 | WFM (mono/stereo) | MVP | ✅ | own DSP | CPU (stereo pilot PLL) |
-| RDS | v1 (P2) | ✅ | redsea (MIT) as plugin, native later | – |
+| RDS | v1 | ✅ | native (`superhet-dsp::rds`, ADR-0010) | – |
 | USB/LSB | MVP | 🟡 VHF/UHF only without upconverter | own DSP | – |
 | CW (audio) | MVP | 🟡 VHF/UHF beacons; HF needs upconverter | own DSP | – |
 | CW decoder (text) | later | 🟡 | own / ggmorse (MIT) | Accuracy |

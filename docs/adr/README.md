@@ -13,3 +13,4 @@ Format: one file per decision, `NNNN-short-title.md`, sections *Status*, *Contex
 | [0007](0007-service-decomposition-and-bus.md) | Service decomposition and message bus | accepted |
 | [0008](0008-local-auth.md) | Local admin authentication | accepted |
 | [0009](0009-zoom-fft.md) | Zoom FFT (real resolution when zoomed) | accepted |
+| [0010](0010-wfm-stereo-and-rds.md) | WFM stereo, stereo audio streams and native RDS | accepted |

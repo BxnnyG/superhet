@@ -53,7 +53,7 @@ fields and limits: section "VFOs" below. Bodies are at most 4 KiB, `Content-Type
   (`{"v":1,"ok":true,"vfo":{...},"retune":"none|applied|locked|failed","state":{...}}`) and `Location: /api/v1/devices/{dev}/vfos/{id}`.
 - `PATCH`: partial update as `ctl.vfo.update`; the id comes from the URL (a different `"id"` in the
   body is a `400`). At least one field is required; `null` resets `bandwidth_hz`, `squelch_dbfs`
-  `deemphasis` and `cw_pitch_hz`. `200` with the daemon's reply.
+  `deemphasis`, `cw_pitch_hz` and `stereo`. `200` with the daemon's reply.
 - `DELETE`: `204` without body.
 - Errors use the shape of the tune route: `400` invalid body/value, non-numeric id, or the daemon's
   `invalid`/`unsupported` (including the limit of 8 VFOs); `404` the daemon's `not_found` (unknown
@@ -111,13 +111,13 @@ manual steps. `tuner` is omitted when unknown.
 ## VFOs
 
 A VFO is a demodulated channel at an absolute frequency inside the passband of the device. The
-daemon runs one channelizer per VFO on a dedicated thread, encodes the audio to Opus (48 kHz mono,
-20 ms frames, VBR; 64 kbit/s WFM, 24 kbit/s NFM/AM) and publishes it as binary `AudioFrame` v1 on
+daemon runs one channelizer per VFO on a dedicated thread, encodes the audio to Opus (48 kHz, mono
+or stereo, 20 ms frames, VBR; 64 kbit/s mono WFM, 96 kbit/s stereo WFM, 24 kbit/s NFM/AM) and publishes it as binary `AudioFrame` v1 on
 `sh.v1.dev.<dev>.audio.<vfo_id>` (core NATS, lossy; format in `docs/protocol-audio.md`). At most 8
 VFOs per device.
 
 VFO object (in `vfos` and in replies):
-`{"id","freq_hz","mode":"wfm"|"nfm"|"am"|"usb"|"lsb"|"cw","bandwidth_hz","squelch_dbfs":null|number,"deemphasis":"none"|"50us"|"75us"|null,"cw_pitch_hz"?:number,"offset_hz","status":"active"|"paused"}`
+`{"id","freq_hz","mode":"wfm"|"nfm"|"am"|"usb"|"lsb"|"cw","bandwidth_hz","squelch_dbfs":null|number,"deemphasis":"none"|"50us"|"75us"|null,"stereo":true|false|null,"cw_pitch_hz"?:number,"offset_hz","status":"active"|"paused"}`
 
 - `id` is assigned by the daemon (starting at 1, increasing, not reused while the daemon runs).
 - `bandwidth_hz` is the effective value (mode default: WFM 180 kHz, NFM 12.5 kHz, AM 10 kHz,
@@ -125,7 +125,8 @@ VFO object (in `vfos` and in replies):
   from `freq_hz` (default 300 Hz ..= 2.7 kHz above for USB, below for LSB); the carrier side and
   the opposite sideband are rejected (> 40 dB, tested). For CW it is the width of the filter centred on
   `freq_hz`. `deemphasis` is the effective value (WFM 50 us, NFM none) and `null` for the other
-  modes. `cw_pitch_hz` is present for CW only (effective value, default 700): a carrier exactly
+  modes. `stereo` is the effective stereo setting of a WFM VFO (default `true`) and `null` for the
+  other modes; see "WFM stereo and RDS" below. `cw_pitch_hz` is present for CW only (effective value, default 700): a carrier exactly
   on `freq_hz` is heard as a tone of this frequency, one 100 Hz above as pitch + 100 Hz.
 - USB/LSB/CW audio goes through a peak AGC with fast attack (2-3 ms), a hang time (250 ms SSB,
   100 ms CW) and a slow decay (400 ms SSB, 200 ms CW); the squelch measures the power after the
@@ -142,15 +143,30 @@ Requests (request/reply, JSON, `v` required, unknown fields rejected). Success r
 shape as `ctl.tune`. VFO requests are not coalesced.
 
 - `sh.v1.dev.<dev>.ctl.vfo.create`: `{"v":1,"freq_hz":..,"mode":"wfm"|"nfm"|"am"|"usb"|"lsb"|"cw","bandwidth_hz"?:..,
-  "squelch_dbfs"?:..,"deemphasis"?:..,"cw_pitch_hz"?:..}`. `freq_hz` 1..1 THz, `bandwidth_hz`
+  "squelch_dbfs"?:..,"deemphasis"?:..,"cw_pitch_hz"?:..,"stereo"?:..}`. `freq_hz` 1..1 THz, `bandwidth_hz`
   100..1000000 (and realisable for the mode at the device's sample rate: at least 1000 for
   WFM/NFM/AM, 300 for USB/LSB, 100 for CW), `squelch_dbfs` -200..0 (absent or `null` = off),
-  `deemphasis` only for WFM/NFM, `cw_pitch_hz` 200..2000 only for CW. A VFO outside the passband is created `paused`.
+  `deemphasis` only for WFM/NFM, `cw_pitch_hz` 200..2000 only for CW, `stereo` (boolean) only for
+  WFM. A VFO outside the passband is created `paused`.
 - `sh.v1.dev.<dev>.ctl.vfo.update`: `{"v":1,"id":..}` plus any of the fields above (partial patch,
-  at least one). `null` for `bandwidth_hz` / `squelch_dbfs` / `deemphasis` / `cw_pitch_hz` resets to the
-  default / off. Changing `mode` drops a `deemphasis` or `cw_pitch_hz` override unless given in
-  the same request. Changing
-  mode or bandwidth rebuilds the channel (a short audio gap); frequency and squelch changes do not.
+  at least one). `null` for `bandwidth_hz` / `squelch_dbfs` / `deemphasis` / `cw_pitch_hz` /
+  `stereo` resets to the default / off. Changing `mode` drops a `deemphasis`, `cw_pitch_hz` or
+  `stereo` override unless given in the same request. Changing
+  mode or bandwidth rebuilds the channel (a short audio gap); switching `stereo` restarts the
+  audio filters and the encoder (a short gap, the RDS data stays); frequency and squelch changes
+  do not.
+
+### WFM stereo and RDS
+
+A WFM VFO decodes the stereo multiplex (19 kHz pilot PLL, 38 kHz L-R carrier from the doubled
+pilot phase, 15 kHz audio filters, de-emphasis per channel, matrix) and RDS (57 kHz carrier from
+the tripled pilot phase) natively. The RDS carrier sits at 57 kHz, so RDS needs a channel
+bandwidth of at least about 130 kHz (default 180 kHz); the 100 kHz preset still plays stereo but
+cuts the top of the difference signal and loses RDS. `stereo` (default on) chooses between a 2-channel and a
+1-channel audio stream (`docs/protocol-audio.md`: `channels`, flag bit 1 = pilot locked). A
+station without a pilot, or with a weak one, plays as mono on both channels automatically. RDS
+is always decoded and published as VFO-scoped JSON events (`sh.v1.dev.<dev>.rds.<vfo>`, forwarded
+on the audio WebSocket), whatever the stereo setting.
 - `sh.v1.dev.<dev>.ctl.vfo.delete`: `{"v":1,"id":..}`.
 
 Free tuning: a VFO that is created, or updated in `freq_hz`, `mode` or `bandwidth_hz`, and ends up

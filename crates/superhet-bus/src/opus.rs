@@ -175,7 +175,7 @@ impl Encoder {
     /// # Errors
     /// Fails on an invalid frame size or a too small output buffer.
     pub fn encode_float(&mut self, pcm: &[f32], out: &mut [u8]) -> Result<usize, OpusError> {
-        if pcm.len() % self.channels != 0 {
+        if !pcm.len().is_multiple_of(self.channels) {
             return Err(OpusError::from_code(-1));
         }
         let frame =
