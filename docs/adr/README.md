@@ -14,3 +14,6 @@ Format: one file per decision, `NNNN-short-title.md`, sections *Status*, *Contex
 | [0008](0008-local-auth.md) | Local admin authentication | accepted |
 | [0009](0009-zoom-fft.md) | Zoom FFT (real resolution when zoomed) | accepted |
 | [0010](0010-wfm-stereo-and-rds.md) | WFM stereo, stereo audio streams and native RDS | accepted |
+| [0011](0011-users-roles-and-guest-access.md) | Users, roles and guest access (amends 0008) | accepted |
+| [0012](0012-audit-log-and-admin-console.md) | Audit log and admin console | accepted |
+| [0013](0013-dab-via-plugin.md) | DAB/DAB+ via plugin | accepted |

@@ -255,6 +255,7 @@ Install via pluginhost (Git URL or local path → copy to `/data/plugins/<id>/<v
 
 - Auth lives in **api** only (ADR-0008, contract in `docs/api-auth.md`). First run: create the local admin (Argon2id hash), guarded by a one-time setup token that api logs at startup. Login → server-side session in PostgreSQL (`superhet.users`, `superhet.sessions`; only the SHA-256 of the cookie token is stored; 7 d idle / 30 d absolute), `HttpOnly; SameSite=Strict` cookie, `Secure` when served over https. Failed logins are rate limited per client address and globally.
 - Everything except `/healthz`, `/readyz` and `/api/v1/auth/*` sits behind the session check (deny by default, including unknown paths).
+- Planned (P1.5, ADR-0011/0012): roles `admin`/`operator`/`listener`, per-user sessions, invite links, VFO ownership, optional guest sessions (off by default), append-only `audit_events` and an admin console. This supersedes the single-user statements in this section and in ADR-0008 once implemented; the mechanics above (hashing, sessions, cookie, rate limits, deny by default) stay.
 - OIDC (P5): Authorization Code + PKCE via the `openidconnect` crate, generic issuer discovery, tested against Zitadel; claim → local user mapping; local admin stays as fallback (can be disabled).
 - WebSocket upgrade requires a valid session and an `Origin` check; state-changing HTTP routes check `Origin` too. All config changes go through authenticated endpoints. No anonymous listening mode (single user).
 
