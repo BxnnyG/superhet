@@ -1,7 +1,8 @@
 import { useMemo } from "react";
+import { usePermissions } from "../auth/context";
 import { downloadEventLog } from "../decoders/api";
 import { NO_FILTER } from "../decoders/events";
-import type { InspectorState } from "../shell/inspector";
+import { visibleTabs, type InspectorState } from "../shell/inspector";
 import { EDIT_FREQUENCY_EVENT, OPEN_SETTINGS_EVENT, emitAppEvent } from "../shell/appEvents";
 import type { Receiver } from "../shell/useReceiver";
 import { runShortcut, type ShortcutContext } from "../shell/useShortcuts";
@@ -19,7 +20,10 @@ interface Props {
 /** Wires the palette to the receiver; mounted only while the palette is open. */
 export function PaletteHost({ r, inspector, shortcutCtx, onClose }: Props) {
   const recent = useMemo(() => loadRecent(), []);
+  const perms = usePermissions();
   const deps: PaletteDeps = {
+    tabs: visibleTabs(perms),
+    canBookmark: perms.canEditBookmarks,
     vfos: r.vfoSnap.vfos,
     selectedId: r.vfoSnap.selectedId,
     bookmarks: r.bookmarkSnap.bookmarks,

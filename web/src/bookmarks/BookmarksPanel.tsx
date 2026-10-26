@@ -10,6 +10,8 @@ import {
   type MouseEvent,
 } from "react";
 import type { OverlayStore } from "../bandplan/settings";
+import { usePermissions } from "../auth/context";
+import { NEEDS_OPERATOR } from "../auth/permissions";
 import type { AnnotationTarget } from "../spectrum/annotations";
 import { formatFrequency } from "../spectrum/freq";
 import {
@@ -122,6 +124,8 @@ const rowHeight = (r: Row) => (r.kind === "item" ? ITEM_H : HEAD_H);
  */
 export function BookmarksPanel({ store, overlay, activeFreqHz, onTune, onTuneNew, onAdd }: Props) {
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  // Listeners read bookmarks; adding, editing, importing and deleting needs the operator role.
+  const canEdit = usePermissions().canEditBookmarks;
   const show = useSyncExternalStore(overlay.subscribe, overlay.getSnapshot).bookmarks;
   const [filter, setFilter] = useState<Filter>(NO_FILTER);
   const [prefs, setPrefs] = useState(() => loadPrefs());
@@ -276,14 +280,23 @@ export function BookmarksPanel({ store, overlay, activeFreqHz, onTune, onTuneNew
             onChange={(e) => set({ query: e.target.value })}
             className="focus-ring h-8 min-w-0 flex-1 rounded-md border border-border-strong bg-surface-1 px-2.5 text-sm text-fg placeholder:text-fg-subtle"
           />
-          <IconButton label="Add bookmark…" onClick={onAdd}>
+          <IconButton
+            label="Add bookmark…"
+            tip={canEdit ? undefined : NEEDS_OPERATOR}
+            disabled={!canEdit}
+            onClick={onAdd}
+          >
             <PlusIcon />
           </IconButton>
           <ActionsMenu
             label="More bookmark actions"
             icon={<MoreIcon />}
             actions={[
-              { label: "Import…", onSelect: () => fileRef.current?.click() },
+              {
+                label: "Import…",
+                disabled: !canEdit,
+                onSelect: () => fileRef.current?.click(),
+              },
               {
                 label: "Export JSON",
                 disabled: empty,
@@ -305,7 +318,12 @@ export function BookmarksPanel({ store, overlay, activeFreqHz, onTune, onTuneNew
                 onSelect: () =>
                   download("bookmarks-chirp.csv", "text/csv", exportChirp(snap.bookmarks)),
               },
-              { label: "Manage groups…", separated: true, onSelect: () => setManagingGroups(true) },
+              {
+                label: "Manage groups…",
+                separated: true,
+                disabled: !canEdit,
+                onSelect: () => setManagingGroups(true),
+              },
               {
                 label: "Show on spectrum",
                 checked: show,
@@ -427,6 +445,7 @@ export function BookmarksPanel({ store, overlay, activeFreqHz, onTune, onTuneNew
                     Math.round(activeFreqHz) === Math.round(row.bookmark.freqHz)
                   }
                   busy={busy}
+                  canEdit={canEdit}
                   onTune={tune}
                   onEdit={edit}
                   onDelete={setDeleting}
@@ -498,6 +517,7 @@ interface RowProps {
   bookmark: Bookmark;
   active: boolean;
   busy: boolean;
+  canEdit: boolean;
   onTune: (b: Bookmark, e: MouseEvent) => void;
   onEdit: (b: Bookmark) => void;
   onDelete: (b: Bookmark) => void;
@@ -509,6 +529,7 @@ const BookmarkRow = memo(function BookmarkRow({
   bookmark: b,
   active,
   busy,
+  canEdit,
   onTune,
   onEdit,
   onDelete,
@@ -523,12 +544,14 @@ const BookmarkRow = memo(function BookmarkRow({
         aria-label={`Tune to ${b.name}`}
         title={[
           b.tags.length > 0 ? b.tags.join(", ") : null,
-          "Click to tune, Alt-click for a new VFO, double-click to edit",
+          canEdit
+            ? "Click to tune, Alt-click for a new VFO, double-click to edit"
+            : "Click to tune, Alt-click for a new VFO",
         ]
           .filter(Boolean)
           .join(" · ")}
         onClick={(e) => onTune(b, e)}
-        onDoubleClick={() => onEdit(b)}
+        onDoubleClick={canEdit ? () => onEdit(b) : undefined}
         className={cn(
           "flex h-10 min-w-0 flex-1 items-center gap-2 rounded-md border px-2.5 text-left",
           "transition-colors duration-150",
@@ -569,31 +592,33 @@ const BookmarkRow = memo(function BookmarkRow({
           </span>
         </span>
       </PlainButton>
-      <div
-        className={cn(
-          "flex shrink-0 items-center opacity-0 transition-opacity",
-          "group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100",
-        )}
-      >
-        <IconButton
-          label={b.favourite ? `Unfavourite ${b.name}` : `Favourite ${b.name}`}
-          size="sm"
-          onClick={() => onFavourite(b)}
+      {canEdit && (
+        <div
+          className={cn(
+            "flex shrink-0 items-center opacity-0 transition-opacity",
+            "group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100",
+          )}
         >
-          <StarIcon size={14} fill={b.favourite ? "currentColor" : "none"} />
-        </IconButton>
-        <IconButton label={`Edit bookmark ${b.name}`} size="sm" onClick={() => onEdit(b)}>
-          <PencilIcon size={14} />
-        </IconButton>
-        <IconButton
-          label={`Delete bookmark ${b.name}`}
-          size="sm"
-          disabled={busy}
-          onClick={() => onDelete(b)}
-        >
-          <TrashIcon size={14} />
-        </IconButton>
-      </div>
+          <IconButton
+            label={b.favourite ? `Unfavourite ${b.name}` : `Favourite ${b.name}`}
+            size="sm"
+            onClick={() => onFavourite(b)}
+          >
+            <StarIcon size={14} fill={b.favourite ? "currentColor" : "none"} />
+          </IconButton>
+          <IconButton label={`Edit bookmark ${b.name}`} size="sm" onClick={() => onEdit(b)}>
+            <PencilIcon size={14} />
+          </IconButton>
+          <IconButton
+            label={`Delete bookmark ${b.name}`}
+            size="sm"
+            disabled={busy}
+            onClick={() => onDelete(b)}
+          >
+            <TrashIcon size={14} />
+          </IconButton>
+        </div>
+      )}
     </div>
   );
 });

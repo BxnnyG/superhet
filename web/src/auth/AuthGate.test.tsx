@@ -4,6 +4,7 @@ import { AuthError, type AuthClient, type AuthStatus } from "./api";
 import { AuthGate } from "./AuthGate";
 import { useAuth } from "./context";
 import { notifyUnauthorized } from "./session";
+import { GUEST_LIMITS, accountStatus, makeStatus } from "./testing";
 
 function fakeClient(status: AuthStatus, over: Partial<AuthClient> = {}): AuthClient {
   return {
@@ -12,13 +13,16 @@ function fakeClient(status: AuthStatus, over: Partial<AuthClient> = {}): AuthCli
     login: vi.fn().mockResolvedValue(undefined),
     logout: vi.fn().mockResolvedValue(undefined),
     changePassword: vi.fn().mockResolvedValue(undefined),
+    guestStart: vi.fn().mockResolvedValue(GUEST_LIMITS),
+    previewInvite: vi.fn(),
+    acceptInvite: vi.fn().mockResolvedValue(undefined),
     ...over,
   };
 }
 
-const SETUP: AuthStatus = { setupRequired: true, authenticated: false, username: null };
-const ANON: AuthStatus = { setupRequired: false, authenticated: false, username: null };
-const AUTHED: AuthStatus = { setupRequired: false, authenticated: true, username: "benny" };
+const SETUP: AuthStatus = makeStatus({ setupRequired: true });
+const ANON: AuthStatus = makeStatus();
+const AUTHED: AuthStatus = accountStatus("admin", "benny", 1);
 
 function Probe() {
   const auth = useAuth();

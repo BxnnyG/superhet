@@ -12,6 +12,8 @@ export interface LockHolder {
   /** `user` today; recordings, decoders and claims add their own kinds. */
   kind: string;
   id: string;
+  /** Login name of the account holding a user lock (not sent to guests). */
+  name?: string;
   sinceMs: number;
 }
 
@@ -81,7 +83,8 @@ export interface ApiClient {
   tune(device: string, patch: TunePatch, signal?: AbortSignal): Promise<DeviceState>;
   /** Take (`lock`) or drop (`unlock`) the user tuning lock; both are idempotent. */
   lock(device: string): Promise<DeviceState>;
-  unlock(device: string): Promise<DeviceState>;
+  /** `force` (admins) releases every user lock, not just the caller's own. */
+  unlock(device: string, force?: boolean): Promise<DeviceState>;
 }
 
 export type Rec = Record<string, unknown>;
@@ -110,6 +113,7 @@ export function parseHolders(raw: unknown): LockHolder[] {
     out.push({
       kind: h.kind,
       id: typeof h.id === "string" ? h.id : h.kind,
+      ...(typeof h.name === "string" && h.name !== "" ? { name: h.name } : {}),
       sinceMs: typeof h.since_ms === "number" ? h.since_ms : 0,
     });
   }
@@ -252,8 +256,10 @@ export function createApiClient(fetchImpl: typeof fetch = apiFetch): ApiClient {
       const { res, body } = await call(`${deviceUrl(device)}/lock`, { method: "POST" });
       return parseTuneReply(body, res.status);
     },
-    async unlock(device) {
-      const { res, body } = await call(`${deviceUrl(device)}/lock`, { method: "DELETE" });
+    async unlock(device, force = false) {
+      const { res, body } = await call(`${deviceUrl(device)}/lock${force ? "?force=true" : ""}`, {
+        method: "DELETE",
+      });
       return parseTuneReply(body, res.status);
     },
   };

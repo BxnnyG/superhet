@@ -12,7 +12,7 @@ All routes require a session cookie and answer `401 {"error":"unauthenticated"}`
 open to every signed-in caller including guests, subject to VFO ownership and the guest policy;
 `tune` and the lock routes need `operator`. Refusals are `403`: `forbidden` (role), `not_owner`,
 `vfo_limit`, `mode_not_allowed`, `frequency_not_allowed`, `locked` (guest policy), with the
-device error shape below. The state is prepared per viewer: each VFO gets `"mine"`, `owner` is only
+device error shape below. The state is prepared per viewer: each VFO gets `"mine"` and `"shared"`, `owner` is only
 shown to operators and admins, guests do not see lock holder names.
 `{dev}` is the device id (`SUPERHET_DEVICE_ID` of the daemon).
 

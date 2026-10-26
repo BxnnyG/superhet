@@ -9,9 +9,11 @@ interface Props {
   onSuccess: (username: string) => void;
   /** Shown above the form, e.g. when the session expired. */
   notice?: string;
+  /** Guest access is on: offer "Continue as guest". */
+  onGuest?: () => void;
 }
 
-export function LoginPage({ client, onSuccess, notice }: Props) {
+export function LoginPage({ client, onSuccess, notice, onGuest }: Props) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -78,6 +80,19 @@ export function LoginPage({ client, onSuccess, notice }: Props) {
               ? `Try again in ${formatCountdown(remaining)}`
               : "Sign in"}
         </Button>
+        {onGuest && (
+          <>
+            <div
+              role="separator"
+              className="flex items-center gap-3 text-xs text-fg-subtle before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border"
+            >
+              or
+            </div>
+            <Button size="lg" onClick={onGuest} disabled={busy}>
+              Continue as guest
+            </Button>
+          </>
+        )}
       </form>
     </AuthLayout>
   );

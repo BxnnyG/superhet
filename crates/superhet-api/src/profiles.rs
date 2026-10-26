@@ -17,7 +17,7 @@ use serde::Deserialize;
 use superhet_bus::{profile::ProfileData, subjects};
 use superhet_db::{PgPool, profiles};
 
-use crate::devices::{DevicesState, call_daemon, ctl_state, failure, guard_mutation, json};
+use crate::devices::{DevicesState, call_daemon, ctl_state, failure, guard_mutation, json, viewed};
 
 /// Largest accepted request body.
 const MAX_BODY_BYTES: usize = 16 * 1024;
@@ -346,7 +346,7 @@ async fn load_profile(
                 serde_json::json!({"profile": id}),
             )
             .await;
-        Ok::<_, Box<Response>>(json(StatusCode::OK, reply))
+        Ok::<_, Box<Response>>(json(StatusCode::OK, viewed(reply, &principal)))
     }
     .await;
     result.unwrap_or_else(|r| *r)

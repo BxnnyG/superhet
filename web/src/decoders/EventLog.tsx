@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { usePermissions } from "../auth/context";
 import { ActionsMenu } from "../bookmarks/ActionsMenu";
 import { layoutRows, visibleWindow } from "../bookmarks/virtual";
 import type { AnnotationTarget } from "../spectrum/annotations";
@@ -63,6 +64,8 @@ export function EventLog({ store, device, onTune }: Props) {
   const { events, filter } = snap;
   const [query, setQuery] = useState(filter.q);
   const [confirmClear, setConfirmClear] = useState(false);
+  // Clearing the shared history needs the operator role.
+  const canClear = usePermissions().canClearHistory;
   const [busy, setBusy] = useState(false);
 
   // Search runs on the server; wait until typing pauses.
@@ -181,7 +184,12 @@ export function EventLog({ store, device, onTune }: Props) {
             icon={<MoreIcon />}
             actions={[
               { label: "Export CSV", onSelect: download },
-              { label: "Clear history…", separated: true, onSelect: () => setConfirmClear(true) },
+              {
+                label: "Clear history…",
+                separated: true,
+                disabled: !canClear,
+                onSelect: () => setConfirmClear(true),
+              },
             ]}
           />
         </div>

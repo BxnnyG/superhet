@@ -234,7 +234,7 @@ pub fn find_rule(method: &Method, path: &str) -> Option<&'static Rule> {
 }
 
 /// Prepare a device state document for one viewer: guests see no names, only operators and
-/// admins see who owns a VFO; everybody gets `mine` per VFO.
+/// admins see who owns a VFO; everybody gets `mine` and `shared` per VFO.
 pub fn view_state(doc: &mut Value, viewer: &Principal) {
     let me = viewer.owner_id();
     let privileged = viewer.sees_all_vfos();
@@ -244,7 +244,11 @@ pub fn view_state(doc: &mut Value, viewer: &Principal) {
                 continue;
             };
             let mine = vfo.get("owner").and_then(Value::as_str) == Some(me.as_str());
+            // Ownerless VFOs are shared: everybody may listen. Without this flag a listener
+            // could not tell a shared VFO from somebody else's (the owner is hidden).
+            let shared = vfo.get("owner").is_none_or(Value::is_null);
             vfo.insert("mine".into(), Value::Bool(mine));
+            vfo.insert("shared".into(), Value::Bool(shared));
             if !privileged {
                 vfo.remove("owner");
             }
@@ -259,6 +263,20 @@ pub fn view_state(doc: &mut Value, viewer: &Principal) {
                 lock.remove("id");
             }
         }
+    }
+}
+
+/// Prepare a daemon reply for one viewer. `/tune`, lock, VFO and profile replies carry the new
+/// state document and the changed VFO; both get the same treatment as the state feed (`mine`,
+/// `shared`, no foreign owners for listeners and guests, no lock holder names for guests).
+pub fn view_reply(reply: &mut Value, viewer: &Principal) {
+    if let Some(state) = reply.get_mut("state") {
+        view_state(state, viewer);
+    }
+    if let Some(vfo) = reply.get_mut("vfo") {
+        let mut doc = serde_json::json!({ "vfos": [vfo.take()] });
+        view_state(&mut doc, viewer);
+        *vfo = doc["vfos"][0].take();
     }
 }
 
@@ -406,6 +424,37 @@ mod tests {
     }
 
     #[test]
+    fn replies_are_prepared_for_the_viewer_too() {
+        let reply = json!({
+            "ok": true,
+            "vfo": {"id": 2, "owner": "g:ab12"},
+            "state": {
+                "vfos": [{"id": 1, "owner": "u:1"}, {"id": 2, "owner": "g:ab12"}, {"id": 3}],
+                "locks": [{"kind": "user", "id": "u:1", "name": "tester", "since_ms": 5}],
+            },
+        });
+        let mut g = reply.clone();
+        view_reply(&mut g, &guest());
+        assert_eq!(g["vfo"]["mine"], true);
+        assert_eq!(g["vfo"]["shared"], false);
+        assert!(g["vfo"].get("owner").is_none());
+        assert_eq!(g["state"]["vfos"][0]["mine"], false);
+        assert_eq!(g["state"]["vfos"][2]["shared"], true);
+        assert!(g["state"]["vfos"][1].get("owner").is_none());
+        assert!(g["state"]["locks"][0].get("name").is_none());
+        assert_eq!(g["ok"], true);
+
+        let mut op = reply;
+        view_reply(&mut op, &Principal::test(Role::Operator));
+        assert_eq!(op["vfo"]["owner"], "g:ab12");
+        assert_eq!(op["state"]["vfos"][1]["mine"], false);
+        // A reply without state or vfo (an error body) is left alone.
+        let mut err = json!({"ok": false, "code": "locked"});
+        view_reply(&mut err, &guest());
+        assert_eq!(err, json!({"ok": false, "code": "locked"}));
+    }
+
+    #[test]
     fn state_views_hide_owners_and_names() {
         let doc = json!({
             "vfos": [{"id": 1, "owner": "u:1"}, {"id": 2, "owner": "g:ab12"}, {"id": 3}],
@@ -416,6 +465,9 @@ mod tests {
         assert_eq!(listener["vfos"][0]["mine"], true);
         assert_eq!(listener["vfos"][1]["mine"], false);
         assert!(listener["vfos"][0].get("owner").is_none());
+        assert_eq!(listener["vfos"][1]["shared"], false);
+        assert_eq!(listener["vfos"][2]["shared"], true);
+        assert_eq!(listener["vfos"][2]["mine"], false);
         assert_eq!(listener["locks"][0]["name"], "tester");
 
         let mut operator = doc.clone();

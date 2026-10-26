@@ -90,7 +90,7 @@ cookie and the `400`/`403`/`503` refusals work as for the spectrum socket (`400`
 Text frames only, JSON, always `{"v":1,"type":"state","state":{...}}` with the complete state
 object. There are no diffs: the newest frame replaces everything the client knew. The document is
 prepared for the viewer as in `GET /api/v1/devices/{dev}/state` (`docs/api-users.md`): every VFO
-has `"mine"`, `owner` only for operators/admins, lock holder names and ids are removed for guests.
+has `"mine"` and `"shared"`, `owner` only for operators/admins, lock holder names and ids are removed for guests.
 
 - The first frame is the current state (asked from the daemon, falling back to the last known
   one in KV). If the device has no state yet (daemon not running), no frame is sent until it

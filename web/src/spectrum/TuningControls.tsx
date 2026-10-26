@@ -1,3 +1,5 @@
+import { usePermissions } from "../auth/context";
+import { NEEDS_OPERATOR } from "../auth/permissions";
 import { lockedBy } from "../state/locks";
 import { droppedNotice } from "../shell/dropped";
 import { overloadNotice } from "../shell/overload";
@@ -33,6 +35,8 @@ interface Props {
 /** Source section content: centre frequency, sample rate, gain, PPM. */
 export function TuningControls({ tuning, onTune }: Props) {
   const { display, busy } = tuning;
+  // Centre, rate, gain and ppm need the operator role (POST /tune); others see the values only.
+  const readOnly = !usePermissions().canTune;
   const holders = tuning.state?.locks ?? [];
   const locked = holders.length > 0;
   const rates =
@@ -56,12 +60,12 @@ export function TuningControls({ tuning, onTune }: Props) {
         value={display?.centerHz ?? 0}
         format={formatFrequency}
         parse={parseFrequency}
-        disabled={!display || locked}
+        disabled={!display || locked || readOnly}
         onCommit={(hz) => onTune({ centerHz: hz })}
       />
       <Select
         label="Sample rate"
-        disabled={!display || busy || locked}
+        disabled={!display || busy || locked || readOnly}
         value={display ? String(display.sampleRate) : ""}
         onChange={(v) => onTune({ sampleRate: Number(v) })}
         options={[
@@ -69,7 +73,12 @@ export function TuningControls({ tuning, onTune }: Props) {
           ...rates.map((r) => ({ value: String(r), label: formatRate(r) })),
         ]}
       />
-      {locked && (
+      {readOnly && (
+        <p role="note" className="text-xs text-fg-subtle">
+          {NEEDS_OPERATOR} can change the source settings.
+        </p>
+      )}
+      {locked && !readOnly && (
         <p role="status" className="flex items-start gap-1.5 text-xs text-warn">
           <LockIcon size={14} className="mt-px shrink-0" />
           <span>{lockedBy(holders)}. Unlock to change the centre frequency or sample rate.</span>
@@ -98,7 +107,7 @@ export function TuningControls({ tuning, onTune }: Props) {
           <Toggle
             label="Automatic gain"
             checked={gain.mode === "auto"}
-            disabled={busy}
+            disabled={busy || readOnly}
             onChange={(auto) => onTune({ gain: auto ? "auto" : (gainDb ?? 0) })}
           />
           <Slider
@@ -106,7 +115,7 @@ export function TuningControls({ tuning, onTune }: Props) {
             min={0}
             max={Math.max(0, gains.length - 1)}
             value={gainIdx}
-            disabled={gain.mode === "auto" || gains.length < 2}
+            disabled={gain.mode === "auto" || gains.length < 2 || readOnly}
             valueLabel={gain.mode === "auto" ? "auto" : `${(gainDb ?? 0).toFixed(1)} dB`}
             onChange={(i) => {
               const db = gains[i];
@@ -121,7 +130,7 @@ export function TuningControls({ tuning, onTune }: Props) {
         min={-1000}
         max={1000}
         value={display?.ppm ?? 0}
-        disabled={!display}
+        disabled={!display || readOnly}
         onCommit={(ppm) => onTune({ ppm })}
       />
     </div>

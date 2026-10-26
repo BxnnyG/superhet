@@ -1,8 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "./App";
 import { AuthGate } from "./auth/AuthGate";
 import "./index.css";
+import { Root } from "./Root";
 import { applyTheme, loadTheme } from "./ui/theme";
 
 const root = document.getElementById("root");
@@ -15,7 +15,7 @@ applyTheme(loadTheme());
 createRoot(root).render(
   <StrictMode>
     <AuthGate>
-      <App />
+      <Root />
     </AuthGate>
   </StrictMode>,
 );

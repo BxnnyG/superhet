@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { AuthContext } from "./auth/context";
+import { accountStatus, authValue, stubClient } from "./auth/testing";
 import { INSPECTOR_STORAGE_KEY } from "./shell/inspector";
 
 beforeEach(() => window.localStorage.removeItem(INSPECTOR_STORAGE_KEY));
@@ -86,15 +87,9 @@ it("switches the theme from the settings menu", () => {
 
 it("shows the account section and signs out when rendered inside a session", () => {
   const signOut = vi.fn().mockResolvedValue(undefined);
-  const client = {
-    status: vi.fn(),
-    setup: vi.fn(),
-    login: vi.fn(),
-    logout: vi.fn(),
-    changePassword: vi.fn().mockResolvedValue(undefined),
-  };
+  const client = stubClient({ changePassword: vi.fn().mockResolvedValue(undefined) });
   render(
-    <AuthContext value={{ username: "benny", client, signOut }}>
+    <AuthContext value={authValue(accountStatus("admin", "benny", 1), { client, signOut })}>
       <App />
     </AuthContext>,
   );

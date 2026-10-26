@@ -282,6 +282,20 @@ async fn listeners_own_their_vfos_and_cannot_retune() {
     );
     assert_eq!(created.status, 201, "{created:?}");
     let lars_vfo = created.json()["vfo"]["id"].as_u64().expect("id");
+    // The reply is prepared for the viewer like the state feed: flags yes, owners no.
+    let reply = created.json();
+    assert_eq!(reply["vfo"]["mine"], true);
+    assert_eq!(reply["vfo"]["shared"], false);
+    assert!(reply["vfo"].get("owner").is_none(), "{reply}");
+    let in_reply = reply["state"]["vfos"]
+        .as_array()
+        .expect("state in the reply");
+    assert!(
+        in_reply
+            .iter()
+            .all(|v| v.get("owner").is_none() && v["mine"].is_boolean())
+    );
+    assert_eq!(in_reply[0]["shared"], true);
     let lena_vfo = s.create(&lena, CENTER + 60_000, "nfm").json()["vfo"]["id"]
         .as_u64()
         .expect("id");

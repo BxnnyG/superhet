@@ -1,5 +1,6 @@
 import { useRef, useState, type KeyboardEvent } from "react";
 import { AudioControls } from "../audio/AudioControls";
+import { usePermissions } from "../auth/context";
 import { BandPlanPanel } from "../bandplan/BandPlanPanel";
 import { BookmarksPanel } from "../bookmarks/BookmarksPanel";
 import { DecodersTab } from "../decoders/DecodersTab";
@@ -7,12 +8,7 @@ import { ProfilesPanel } from "../profiles/ProfilesPanel";
 import { DisplayControls } from "../spectrum/DisplayControls";
 import { CloseIcon, IconButton, PlainButton, Section, cn } from "../ui";
 import { ReceiverPanel } from "../vfo/ReceiverPanel";
-import {
-  INSPECTOR_LABEL,
-  INSPECTOR_TABS,
-  type InspectorState,
-  type InspectorTab,
-} from "./inspector";
+import { INSPECTOR_LABEL, visibleTabs, type InspectorState, type InspectorTab } from "./inspector";
 import { SourceSettings } from "./SourceSettings";
 import { PHONE_QUERY, useMediaQuery } from "./useMediaQuery";
 import type { Receiver } from "./useReceiver";
@@ -32,7 +28,11 @@ interface Props {
  * on its own; the page never does.
  */
 export function Inspector({ r, inspector }: Props) {
-  const { tab, open, docked, setTab, close } = inspector;
+  const { open, docked, setTab, close } = inspector;
+  const perms = usePermissions();
+  const tabs = visibleTabs(perms);
+  // A tab the role cannot see (guests: bookmarks) falls back to the receiver.
+  const tab: InspectorTab = tabs.includes(inspector.tab) ? inspector.tab : "receiver";
   const phoneUp = useMediaQuery(PHONE_QUERY);
   const tabRefs = useRef<Partial<Record<InspectorTab, HTMLButtonElement | null>>>({});
 
@@ -42,11 +42,11 @@ export function Inspector({ r, inspector }: Props) {
       e.key === "Home"
         ? 0
         : e.key === "End"
-          ? INSPECTOR_TABS.length - 1
-          : (index + delta + INSPECTOR_TABS.length) % INSPECTOR_TABS.length;
+          ? tabs.length - 1
+          : (index + delta + tabs.length) % tabs.length;
     if (delta === 0 && e.key !== "Home" && e.key !== "End") return;
     e.preventDefault();
-    const target = INSPECTOR_TABS[next];
+    const target = tabs[next];
     if (!target) return;
     setTab(target);
     tabRefs.current[target]?.focus();
@@ -88,7 +88,7 @@ export function Inspector({ r, inspector }: Props) {
               aria-label="Inspector"
               className="flex min-w-0 flex-1 items-stretch self-stretch overflow-x-auto px-1"
             >
-              {INSPECTOR_TABS.map((t, i) => (
+              {tabs.map((t, i) => (
                 <PlainButton
                   key={t}
                   ref={(el) => {
@@ -147,6 +147,7 @@ export function Inspector({ r, inspector }: Props) {
 
 function TabBody({ r, tab, phoneUp }: { r: Receiver; tab: InspectorTab; phoneUp: boolean }) {
   const [profilesOpen, setProfilesOpen] = useState(true);
+  const perms = usePermissions();
   switch (tab) {
     case "receiver":
       return (
@@ -209,17 +210,19 @@ function TabBody({ r, tab, phoneUp }: { r: Receiver; tab: InspectorTab; phoneUp:
           <Section title="Source">
             <SourceSettings r={r} />
           </Section>
-          <Section title="Profiles" onOpenChange={setProfilesOpen}>
-            <ProfilesPanel
-              api={r.profileApi}
-              device={r.device}
-              doc={r.currentDoc}
-              onState={r.applyDoc}
-              onUnlock={r.unlock}
-              connected={r.feed.status === "connected"}
-              refreshSignal={String(profilesOpen)}
-            />
-          </Section>
+          {perms.canProfiles && (
+            <Section title="Profiles" onOpenChange={setProfilesOpen}>
+              <ProfilesPanel
+                api={r.profileApi}
+                device={r.device}
+                doc={r.currentDoc}
+                onState={r.applyDoc}
+                onUnlock={r.unlock}
+                connected={r.feed.status === "connected"}
+                refreshSignal={String(profilesOpen)}
+              />
+            </Section>
+          )}
           <Section title="Audio device">
             <AudioControls audio={r.audio} snapshot={r.audioSnap} />
           </Section>
