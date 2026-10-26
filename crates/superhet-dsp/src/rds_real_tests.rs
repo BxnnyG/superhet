@@ -26,7 +26,12 @@ fn real_recording_probe() {
             )
         })
         .collect();
-    for offset in [-810_000.0, 790_000.0, -10_000.0] {
+    // Station offsets from the recording's centre, comma separated (Hz).
+    let offsets: Vec<f64> = std::env::var("SUPERHET_RDS_OFFSETS")
+        .ok()
+        .map(|v| v.split(',').filter_map(|o| o.trim().parse().ok()).collect())
+        .unwrap_or_else(|| vec![-810_000.0, 790_000.0]);
+    for offset in offsets {
         let mut ch = Channel::new(ChannelConfig {
             input_rate: rate,
             offset_hz: offset,
@@ -46,8 +51,10 @@ fn real_recording_probe() {
             synced += usize::from(ch.rds_synced());
         }
         eprintln!(
-            "offset {offset}: power {power:.1} pilot {} synced {synced}/200 info {:?}",
+            "offset {offset}: power {power:.1} pilot {} synced {synced}/{} blocks (good, bad) {:?} info {:?}",
             ch.stereo_locked(),
+            iq.len() / (rate as usize / 20),
+            ch.rds_block_counts(),
             ch.rds_info()
         );
     }
