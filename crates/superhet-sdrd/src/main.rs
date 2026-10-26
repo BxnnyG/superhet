@@ -15,6 +15,7 @@ mod lock;
 mod overload;
 mod pipeline;
 mod publish;
+mod rds_quality;
 mod service;
 mod vfo;
 mod window;
@@ -167,6 +168,7 @@ async fn start_pipeline(
         pipeline.control(),
         vfos,
         zoom_handle,
+        pipeline.overload(),
     )
     .await?;
     let running = Running {

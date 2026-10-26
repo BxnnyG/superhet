@@ -1,6 +1,12 @@
 import type { ReactNode } from "react";
 import type { AudioController, AudioSnapshot } from "../audio/controller";
-import { ptyName, type RdsState } from "../audio/rds";
+import {
+  ptyName,
+  rdsQualityLevel,
+  rdsTooWeakForText,
+  type RdsQualityLevel,
+  type RdsState,
+} from "../audio/rds";
 import { formatCtcss, type ToneState } from "../audio/tones";
 import { Badge, Button, EmptyState, Select, Toggle, cn } from "../ui";
 import type { Vfo, VfoPatch } from "../vfo/api";
@@ -147,6 +153,7 @@ export function RdsCard({
           >
             {rds.rt ?? <span className="text-fg-subtle">no RadioText yet</span>}
           </p>
+          <RdsQuality rds={rds} />
           <div className="flex flex-wrap items-center gap-1.5">
             {rds.pi !== null && (
               <Badge tone="neutral" title="Programme identification">
@@ -181,6 +188,74 @@ export function RdsCard({
         </p>
       )}
     </Card>
+  );
+}
+
+const QUALITY_LABEL: Record<RdsQualityLevel, string> = {
+  none: "No sync",
+  good: "Good",
+  fair: "Fair",
+  poor: "Poor",
+};
+
+const QUALITY_BAR: Record<RdsQualityLevel, string> = {
+  none: "bg-fg-subtle",
+  good: "bg-success",
+  fair: "bg-warn",
+  poor: "bg-danger",
+};
+
+const QUALITY_TEXT: Record<RdsQualityLevel, string> = {
+  none: "text-fg-subtle",
+  good: "text-success",
+  fair: "text-warn",
+  poor: "text-danger",
+};
+
+/** Reception quality of the RDS subcarrier: bar, grade and block error rate of the last ~10 s. */
+function RdsQuality({ rds }: { rds: RdsState }) {
+  const level = rdsQualityLevel(rds);
+  const quality = rds.quality ?? 0;
+  const detail =
+    rds.bler === null
+      ? "Measuring…"
+      : `${rds.bler} % of the RDS blocks failed in the last 10 s (good: up to 10 %, fair: up to 35 %).`;
+  return (
+    <div className="flex flex-col gap-1" data-testid="rds-quality" data-level={level}>
+      <div
+        className="flex items-center gap-2"
+        title={`${detail} Weak or clipped reception loses station name and RadioText first.`}
+      >
+        <span className="w-12 shrink-0 text-[11px] text-fg-subtle">Signal</span>
+        <div
+          role="meter"
+          aria-label="RDS reception quality"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={quality}
+          aria-valuetext={`${QUALITY_LABEL[level]}${rds.bler === null ? "" : `, ${rds.bler} % block errors`}`}
+          className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-3"
+        >
+          <div
+            className={cn(
+              "h-full rounded-full transition-[width] duration-300",
+              QUALITY_BAR[level],
+            )}
+            style={{ width: `${quality}%` }}
+          />
+        </div>
+        <span className={cn("shrink-0 text-[11px] font-medium num", QUALITY_TEXT[level])}>
+          {QUALITY_LABEL[level]}
+          {rds.bler !== null && <span className="text-fg-subtle"> · {rds.bler} % BLER</span>}
+        </span>
+      </div>
+      {rdsTooWeakForText(rds) && (
+        <p role="status" className="text-xs text-warn">
+          Signal too weak for the station name and RadioText. Try a better antenna position or a
+          different gain.
+        </p>
+      )}
+    </div>
   );
 }
 

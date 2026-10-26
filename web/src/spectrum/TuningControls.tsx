@@ -1,5 +1,6 @@
 import { lockedBy } from "../state/locks";
-import { LockIcon, NumberField, Select, Slider, Toggle } from "../ui";
+import { overloadNotice } from "../shell/overload";
+import { Alert, LockIcon, NumberField, Select, Slider, Toggle } from "../ui";
 import type { TunePatch } from "./api";
 import { formatFrequency, parseFrequency } from "./freq";
 import type { TuningSnapshot } from "./tuning";
@@ -41,6 +42,7 @@ export function TuningControls({ tuning, onTune }: Props) {
   const gains = display?.gainsDb ?? [];
   const gainIdx = nearestGainIndex(gains, gain?.db ?? null);
   const gainDb = gains[gainIdx];
+  const overload = overloadNotice(tuning.state);
 
   return (
     <div className="flex flex-col gap-3" role="group" aria-label="Source">
@@ -70,6 +72,12 @@ export function TuningControls({ tuning, onTune }: Props) {
           <LockIcon size={14} className="mt-px shrink-0" />
           <span>{lockedBy(holders)}. Unlock to change the centre frequency or sample rate.</span>
         </p>
+      )}
+      {overload && (
+        <Alert tone="warn" className="text-xs">
+          <p className="font-medium">{overload.summary}</p>
+          <p className="mt-0.5">{overload.action}</p>
+        </Alert>
       )}
       {gain === null ? (
         display ? (

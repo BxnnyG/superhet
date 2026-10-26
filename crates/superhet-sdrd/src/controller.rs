@@ -15,6 +15,7 @@ use tokio::sync::watch;
 
 use crate::control::{CtlError, Retune, VERSION, error_reply, ok_reply, state_json, vfo_reply};
 use crate::lock::{Holder, HolderKind, LockSet};
+use crate::overload::OverloadStatus;
 use crate::vfo::{self, Tuning, Vfo, VfoCreate, VfoMode, VfoRegistry, VfoShared};
 use crate::window;
 
@@ -28,6 +29,7 @@ pub struct Controller {
     vfos: Arc<VfoShared>,
     locks: Mutex<LockSet>,
     state: StateTx,
+    overload: Arc<OverloadStatus>,
 }
 
 fn tuning_of(state: &DeviceState) -> Tuning {
@@ -76,7 +78,15 @@ impl Controller {
             vfos,
             locks: Mutex::new(LockSet::default()),
             state,
+            overload: Arc::default(),
         }
+    }
+
+    /// Takes the ADC overload state for the state document from `status`.
+    #[must_use]
+    pub fn with_overload(mut self, status: Arc<OverloadStatus>) -> Self {
+        self.overload = status;
+        self
     }
 
     fn gate(&self) -> MutexGuard<'_, LockSet> {
@@ -89,7 +99,14 @@ impl Controller {
     /// it changed. Returns the JSON for replies.
     fn publish(&self, locks: &LockSet, device_state: &DeviceState) -> Arc<str> {
         let vfos = self.vfos.with(|r| r.list().to_vec());
-        let json: Arc<str> = state_json(&self.device, device_state, &vfos, locks.holders()).into();
+        let json: Arc<str> = state_json(
+            &self.device,
+            device_state,
+            &vfos,
+            locks.holders(),
+            self.overload.get(),
+        )
+        .into();
         self.state.send_if_modified(|current| {
             if current.as_deref() == Some(&*json) {
                 false

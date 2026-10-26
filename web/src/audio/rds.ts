@@ -17,6 +17,10 @@ export interface RdsState {
   ps: string | null;
   /** RadioText. */
   rt: string | null;
+  /** Failed blocks in percent over the last ~10 s of block sync; null until enough blocks. */
+  bler: number | null;
+  /** Reception quality 0..100 (100 - bler, 0 without sync); null together with bler. */
+  quality: number | null;
 }
 
 export interface RdsMessage {
@@ -26,6 +30,8 @@ export interface RdsMessage {
 
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const bool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
+const percent = (v: unknown): number | null =>
+  typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100 ? Math.round(v) : null;
 
 /** Validate a decoded JSON message; null if it is not an RDS message. */
 export function parseRds(msg: unknown): RdsMessage | null {
@@ -47,6 +53,8 @@ export function parseRds(msg: unknown): RdsMessage | null {
       ms: bool(m.ms),
       ps: str(m.ps),
       rt: str(m.rt),
+      bler: percent(m.bler),
+      quality: percent(m.quality),
     },
   };
 }
@@ -60,8 +68,30 @@ export function isEmptyRds(s: RdsState): boolean {
     s.ta === null &&
     s.ms === null &&
     s.ps === null &&
-    s.rt === null
+    s.rt === null &&
+    s.quality === null
   );
+}
+
+export type RdsQualityLevel = "none" | "good" | "fair" | "poor";
+
+/** Block error rate (percent) up to which RDS text decodes reliably. */
+const BLER_GOOD = 10;
+/** Above this, PS and RadioText rarely complete; PI and PTY still come through. */
+const BLER_FAIR = 35;
+
+/** Reception grade of a state: no sync, or good/fair/poor by block error rate. */
+export function rdsQualityLevel(s: Pick<RdsState, "synced" | "bler">): RdsQualityLevel {
+  if (!s.synced) return "none";
+  if (s.bler === null) return "fair";
+  if (s.bler <= BLER_GOOD) return "good";
+  if (s.bler <= BLER_FAIR) return "fair";
+  return "poor";
+}
+
+/** True when the signal is too weak for the station name and RadioText to complete. */
+export function rdsTooWeakForText(s: RdsState): boolean {
+  return s.synced && s.bler !== null && s.bler > BLER_FAIR && (s.ps === null || s.rt === null);
 }
 
 export function sameRds(a: RdsState, b: RdsState): boolean {
@@ -73,7 +103,9 @@ export function sameRds(a: RdsState, b: RdsState): boolean {
     a.ta === b.ta &&
     a.ms === b.ms &&
     a.ps === b.ps &&
-    a.rt === b.rt
+    a.rt === b.rt &&
+    a.bler === b.bler &&
+    a.quality === b.quality
   );
 }
 

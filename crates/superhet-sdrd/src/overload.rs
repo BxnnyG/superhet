@@ -3,19 +3,49 @@
 //! An RTL-SDR has an 8-bit ADC. In a crowded band (FM broadcast) the tuner's automatic gain
 //! often leaves the sum of all stations at or above full scale; the clipping then smears
 //! intermodulation products over every channel, which costs stereo separation and wipes out RDS
-//! (needs ~15 dB carrier-to-noise at 57 kHz). The monitor counts samples at full scale and
-//! reports a sustained overload once per interval, with a hint at the cause.
+//! (needs ~15 dB carrier-to-noise at 57 kHz). The monitor counts samples at full scale, logs a
+//! sustained overload and publishes the result in [`OverloadStatus`], which goes into the
+//! device state document so the UI can tell the user to lower the gain.
 
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use superhet_device::Complex32;
 
 /// Report interval.
-const INTERVAL: Duration = Duration::from_secs(10);
+const INTERVAL: Duration = Duration::from_secs(5);
 /// A component at or beyond this magnitude counts as clipped (the 8-bit rails map to +-1.0).
 const RAIL: f32 = 0.992;
 /// Fraction of clipped components above which the front end counts as overloaded.
 const OVERLOAD_FRACTION: f64 = 0.01;
+
+/// Latest result of the monitor, shared with the control service.
+#[derive(Debug, Default)]
+pub struct OverloadStatus {
+    overloaded: AtomicBool,
+    /// Clipped share of the last interval in 1/1000.
+    clipped_permille: AtomicU32,
+}
+
+impl OverloadStatus {
+    /// Stores the result of an interval.
+    pub fn set(&self, fraction: f64, overloaded: bool) {
+        self.clipped_permille.store(
+            (fraction * 1000.0).round().clamp(0.0, 1000.0) as u32,
+            Ordering::Release,
+        );
+        self.overloaded.store(overloaded, Ordering::Release);
+    }
+
+    /// `(clipped share in percent with one decimal, overloaded)` of the last interval.
+    #[must_use]
+    pub fn get(&self) -> (f64, bool) {
+        (
+            f64::from(self.clipped_permille.load(Ordering::Acquire)) / 10.0,
+            self.overloaded.load(Ordering::Acquire),
+        )
+    }
+}
 
 /// Counts samples at the ADC rails.
 #[derive(Debug)]
@@ -57,9 +87,9 @@ impl OverloadMonitor {
         clipped as f64 / (2 * samples.len()) as f64
     }
 
-    /// Accounts for a block; returns the clipped fraction when an interval ended and the
-    /// overload state changed or persists (`Some((fraction, overloaded))`).
-    pub fn push(&mut self, samples: &[Complex32]) -> Option<(f64, bool)> {
+    /// Accounts for a block; returns `(fraction, overloaded, was_overloaded)` when an interval
+    /// ended.
+    pub fn push(&mut self, samples: &[Complex32]) -> Option<(f64, bool, bool)> {
         let clipped = Self::clipped_fraction(samples) * (2 * samples.len()) as f64;
         self.clipped += clipped.round() as u64;
         self.total += 2 * samples.len() as u64;
@@ -70,24 +100,26 @@ impl OverloadMonitor {
         self.clipped = 0;
         self.total = 0;
         self.since = Instant::now();
-        let overloaded = fraction >= OVERLOAD_FRACTION;
-        let report = overloaded || self.overloaded;
-        self.overloaded = overloaded;
-        report.then_some((fraction, overloaded))
+        let was = self.overloaded;
+        self.overloaded = fraction >= OVERLOAD_FRACTION;
+        Some((fraction, self.overloaded, was))
     }
 
-    /// Accounts for a block and logs a sustained overload (and its end).
-    pub fn observe(&mut self, samples: &[Complex32]) {
-        match self.push(samples) {
-            Some((fraction, true)) => tracing::warn!(
-                clipped_percent = format!("{:.1}", fraction * 100.0),
+    /// Accounts for a block, publishes the result of a finished interval to `status` and logs
+    /// when the overload starts or ends.
+    pub fn observe(&mut self, samples: &[Complex32], status: &OverloadStatus) {
+        let Some((fraction, overloaded, was)) = self.push(samples) else {
+            return;
+        };
+        status.set(fraction, overloaded);
+        let clipped_percent = format!("{:.1}", fraction * 100.0);
+        match (overloaded, was) {
+            (true, false) => tracing::warn!(
+                clipped_percent,
                 "ADC overload: the front end clips; lower the tuner gain (RDS and stereo suffer)"
             ),
-            Some((fraction, false)) => tracing::info!(
-                clipped_percent = format!("{:.1}", fraction * 100.0),
-                "ADC overload ended"
-            ),
-            None => {}
+            (false, true) => tracing::info!(clipped_percent, "ADC overload ended"),
+            _ => {}
         }
     }
 }
@@ -120,17 +152,29 @@ mod tests {
     }
 
     #[test]
-    fn reports_a_sustained_overload_once_per_interval_and_its_end() {
+    fn reports_every_interval_and_tracks_the_state() {
         let mut m = OverloadMonitor::new();
         assert_eq!(m.push(&block(10)), None, "interval not over yet");
         m.since -= INTERVAL;
-        let (fraction, overloaded) = m.push(&block(10)).expect("report");
-        assert!(overloaded && (fraction - 0.1).abs() < 1e-9);
+        let (fraction, overloaded, was) = m.push(&block(10)).expect("report");
+        assert!(overloaded && !was && (fraction - 0.1).abs() < 1e-9);
         assert_eq!(m.push(&block(10)), None, "next interval still running");
         (m.clipped, m.total) = (0, 0);
         m.since -= INTERVAL;
-        assert_eq!(m.push(&block(100_000)).map(|r| r.1), Some(false));
+        let (_, overloaded, was) = m.push(&block(100_000)).expect("report");
+        assert!(!overloaded && was);
         m.since -= INTERVAL;
-        assert_eq!(m.push(&block(100_000)), None, "quiet again, nothing to say");
+        let (_, overloaded, was) = m.push(&block(100_000)).expect("quiet intervals report too");
+        assert!(!overloaded && !was);
+    }
+
+    #[test]
+    fn status_keeps_the_last_interval() {
+        let status = OverloadStatus::default();
+        assert_eq!(status.get(), (0.0, false));
+        status.set(0.0734, true);
+        assert_eq!(status.get(), (7.3, true));
+        status.set(2.0, true);
+        assert_eq!(status.get(), (100.0, true));
     }
 }

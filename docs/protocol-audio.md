@@ -66,7 +66,7 @@ plugin). The decoded state is published as JSON on core NATS (lossy, like audio)
 `sh.v1.dev.<dev>.rds.<vfo_id>`; the daemon needs publish permission on `sh.v1.dev.*.rds.>`
 (`deploy/nats/nats.conf`). Reference: `crates/superhet-bus/src/rds.rs`.
 
-`{"v":1,"type":"rds","vfo":3,"synced":true,"pi":"D3C2","pty":10,"tp":true,"ta":false,"ms":true,"ps":"SUPERHET","rt":"Now playing"}`
+`{"v":1,"type":"rds","vfo":3,"synced":true,"pi":"D3C2","pty":10,"tp":true,"ta":false,"ms":true,"ps":"SUPERHET","rt":"Now playing","bler":3,"quality":97}`
 
 - One message is the complete state of the VFO's station, not a delta. All fields except `v`,
   `type`, `vfo` and `synced` are `null` until decoded: `pi` (four upper-case hex digits), `pty`
@@ -74,6 +74,12 @@ plugin). The decoded state is published as JSON on core NATS (lossy, like audio)
   `ps` (programme service name, 8 characters), `rt` (RadioText, up to 64 characters, trailing
   blanks trimmed). Text is UTF-8, mapped from the RDS basic character set. `synced` says the
   block synchronisation holds right now.
+- Optional quality fields (absent until about 10 blocks were seen in the window, and from older
+  daemons): `bler` is the share of failed blocks in percent (0..100) over the last ~10 s of block
+  sync, `quality` is `100 - bler`, or 0 while the sync is lost. The UI grades them good (BLER up to
+  10 %), fair (up to 35 %) and poor, and explains that station name and RadioText need a better
+  signal when BLER is high and they are missing. After sync is lost the fields fade out within
+  10 s.
 - Published on every change and repeated once a second while there is anything to show, so a
   subscriber that joins late has the state within a second. An **empty state** (`synced:false`,
   everything `null`) is published when the data goes away: retune of the VFO or the device (more
@@ -81,7 +87,12 @@ plugin). The decoded state is published as JSON on core NATS (lossy, like audio)
 - Robustness: blocks are checked by their syndrome; single-bit and two-bit bursts are corrected
   while in sync. Text from error-free groups is taken over at once, text that needed a
   correction only after it was received twice in a row; a PI change forgets everything of the old
-  station. Group types 0A/0B (PS, TA, M/S) and 2A/2B (RadioText) are decoded, PI/PTY/TP from every
+  station. The PI is also recovered from block A repetitions that never decode on their own: while in
+  sync, the bits of failed or burst-corrected block A are summed up weighted by their
+  reliability (with fading memory), and a combined word that passes the block check counts as one
+  PI reception. A PI is shown after two receptions out of a small candidate table, so a false
+  block neither delays nor replaces the right one. Block sync is kept up to 30 failed blocks out
+  of 40 so weak stations keep delivering. Group types 0A/0B (PS, TA, M/S) and 2A/2B (RadioText) are decoded, PI/PTY/TP from every
   group. Clock time, alternative frequencies and the other groups are not decoded yet.
 - Messages are limited to 2048 bytes; the API discards messages that are malformed, have another
   `v`/`type`, or whose `vfo` differs from the subject.

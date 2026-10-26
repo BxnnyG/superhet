@@ -43,6 +43,14 @@ export interface DeviceState {
   /** Lock holders; empty = tuning is free. */
   locks: LockHolder[];
   window: FreqWindow;
+  /** The ADC clips (front end overloaded); absent from daemons that do not report it. */
+  overload?: OverloadState;
+}
+
+export interface OverloadState {
+  active: boolean;
+  /** Share of the samples at the ADC rails over the last few seconds, in percent. */
+  clippedPercent: number;
 }
 
 export interface TunePatch {
@@ -153,6 +161,11 @@ export function parseDeviceState(raw: unknown): DeviceState {
     window: parseWindow(raw.window, num(raw, "center_hz"), sampleRate),
   };
   if (typeof raw.tuner === "string") state.tuner = raw.tuner;
+  const ov = raw.overload;
+  if (isRec(ov) && typeof ov.active === "boolean") {
+    const pct = typeof ov.clipped_percent === "number" ? ov.clipped_percent : 0;
+    state.overload = { active: ov.active, clippedPercent: Number.isFinite(pct) ? pct : 0 };
+  }
   return state;
 }
 

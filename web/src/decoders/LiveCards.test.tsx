@@ -27,6 +27,8 @@ const rds = (over: Partial<RdsState> = {}): RdsState => ({
   ms: true,
   ps: "RADIO X ",
   rt: "Now playing: Song",
+  bler: null,
+  quality: null,
   ...over,
 });
 
@@ -55,6 +57,37 @@ it("shows the station name big with RadioText, PI, PTY and the sync state", () =
   expect(screen.getByText("PI D220")).toBeInTheDocument();
   expect(screen.getByText("TP")).toBeInTheDocument();
   expect(screen.getByText("RDS sync")).toBeInTheDocument();
+});
+
+it("grades the reception by the block error rate", () => {
+  const { unmount } = render(
+    <LiveCards
+      vfos={[vfo()]}
+      selectedId={1}
+      audio={{ clearDigits: vi.fn() } as unknown as AudioController}
+      audioSnap={snap({ 1: rds({ bler: 4, quality: 96 }) })}
+      onUpdate={vi.fn()}
+    />,
+  );
+  expect(screen.getByTestId("rds-quality")).toHaveAttribute("data-level", "good");
+  expect(screen.getByText(/4 % BLER/)).toBeInTheDocument();
+  expect(screen.getByRole("meter", { name: "RDS reception quality" })).toHaveAttribute(
+    "aria-valuenow",
+    "96",
+  );
+  expect(screen.queryByText(/too weak/)).not.toBeInTheDocument();
+  unmount();
+});
+
+it("warns that the signal is too weak for text when blocks fail a lot", () => {
+  setup([vfo()], snap({ 1: rds({ bler: 62, quality: 38, ps: null, rt: null }) }));
+  expect(screen.getByTestId("rds-quality")).toHaveAttribute("data-level", "poor");
+  expect(screen.getByText(/too weak for the station name/)).toBeInTheDocument();
+});
+
+it("does not call a decoded station too weak", () => {
+  setup([vfo()], snap({ 1: rds({ bler: 62, quality: 38 }) }));
+  expect(screen.queryByText(/too weak/)).not.toBeInTheDocument();
 });
 
 it("says explicitly when there is no RDS sync", () => {

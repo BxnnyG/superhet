@@ -33,6 +33,14 @@ describe("parseDeviceState", () => {
     });
   });
 
+  it("reads the ADC overload report and tolerates its absence", () => {
+    expect(parseDeviceState(rawState).overload).toBeUndefined();
+    expect(
+      parseDeviceState({ ...rawState, overload: { active: true, clipped_percent: 7.3 } }).overload,
+    ).toEqual({ active: true, clippedPercent: 7.3 });
+    expect(parseDeviceState({ ...rawState, overload: { active: "yes" } }).overload).toBeUndefined();
+  });
+
   it("accepts gain null (file replay) and a missing tuner", () => {
     const s = parseDeviceState({ ...rawState, gain: null, tuner: undefined, gains_db: [] });
     expect(s.gain).toBeNull();

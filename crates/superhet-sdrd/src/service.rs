@@ -25,11 +25,14 @@ use crate::control::{
     self, CtlError, DEBOUNCE, MAX_BATCH_WAIT, TuneJob, collect_batch, error_reply, ok_reply,
 };
 use crate::controller::Controller;
+use crate::overload::OverloadStatus;
 use crate::vfo::VfoShared;
 use crate::zoom::ZoomHandle;
 
 /// Tune requests queued between the bus loop and the executor.
 const QUEUE_JOBS: usize = 64;
+/// How often the ADC overload state is checked for changes.
+const OVERLOAD_POLL: Duration = Duration::from_secs(1);
 /// Timeout for each JetStream operation.
 const JS_TIMEOUT: Duration = Duration::from_secs(5);
 /// State is re-published this often, so a restarted NATS server regains it.
@@ -63,6 +66,7 @@ pub async fn start(
     control: Arc<dyn DeviceControl>,
     vfos: Arc<VfoShared>,
     zoom: ZoomHandle,
+    overload: Arc<OverloadStatus>,
 ) -> Result<Service, Box<dyn std::error::Error>> {
     let ctl_subject = subjects::ctl_all(&device)?;
     let state_subject = subjects::state(&device)?;
@@ -70,7 +74,9 @@ pub async fn start(
     let restore_key = subjects::restore_key(&device)?;
 
     let (state_tx, state_rx) = watch::channel(None);
-    let controller = Arc::new(Controller::new(device, control, vfos, state_tx));
+    let controller = Arc::new(
+        Controller::new(device, control, vfos, state_tx).with_overload(Arc::clone(&overload)),
+    );
     let restored = restore_saved_state(&client, &controller, &restore_key).await;
     let persist = restored.persist;
     if !restored.applied {
@@ -92,6 +98,7 @@ pub async fn start(
         persist.then_some(restore_key),
         state_rx,
     ));
+    let overload_watch = tokio::spawn(watch_overload(Arc::clone(&controller), overload));
     let executor = tokio::spawn(execute_jobs(
         job_rx,
         client.clone(),
@@ -106,7 +113,7 @@ pub async fn start(
         })
     };
     Ok(Service {
-        tasks: vec![publisher, executor, server],
+        tasks: vec![publisher, executor, server, overload_watch],
         client,
         key,
     })
@@ -131,6 +138,31 @@ impl Service {
             .is_none()
         {
             tracing::debug!("could not remove state entry on shutdown");
+        }
+    }
+}
+
+/// Republish the state document when the ADC overload state changes (it is part of it).
+async fn watch_overload(controller: Arc<Controller>, status: Arc<OverloadStatus>) {
+    // Whole percent steps are enough; the exact clip share changes with every interval.
+    let key = |status: &OverloadStatus| {
+        let (percent, active) = status.get();
+        (percent.round() as u32, active)
+    };
+    let mut seen = key(&status);
+    let mut tick = tokio::time::interval(OVERLOAD_POLL);
+    loop {
+        tick.tick().await;
+        let now = key(&status);
+        if now != seen {
+            seen = now;
+            let controller = Arc::clone(&controller);
+            if tokio::task::spawn_blocking(move || controller.refresh())
+                .await
+                .is_err()
+            {
+                tracing::error!("state refresh after an overload change panicked");
+            }
         }
     }
 }

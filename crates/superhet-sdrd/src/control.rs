@@ -257,6 +257,15 @@ struct StateWire<'a> {
     vfos: Vec<VfoWire>,
     locks: &'a [Holder],
     window: WindowWire,
+    overload: OverloadWire,
+}
+
+/// ADC overload as seen over the last few seconds.
+#[derive(Serialize)]
+struct OverloadWire {
+    active: bool,
+    /// Share of the samples at the ADC rails in percent.
+    clipped_percent: f64,
 }
 
 #[derive(Serialize)]
@@ -268,7 +277,13 @@ struct WindowWire {
 /// Encode a device state, with its VFOs evaluated against the current tuning, as the JSON
 /// published on the state subject and stored in KV.
 #[must_use]
-pub fn state_json(device: &str, state: &DeviceState, vfos: &[Vfo], locks: &[Holder]) -> String {
+pub fn state_json(
+    device: &str,
+    state: &DeviceState,
+    vfos: &[Vfo],
+    locks: &[Holder],
+    overload: (f64, bool),
+) -> String {
     let tuning = Tuning {
         center_hz: state.center_hz,
         sample_rate: state.sample_rate,
@@ -296,6 +311,10 @@ pub fn state_json(device: &str, state: &DeviceState, vfos: &[Vfo], locks: &[Hold
         gains_db: &state.gains_db,
         vfos: vfos.iter().map(|v| v.wire(tuning)).collect(),
         locks,
+        overload: OverloadWire {
+            active: overload.1,
+            clipped_percent: overload.0,
+        },
         window: {
             let (start_hz, end_hz) = window::bounds(tuning);
             WindowWire { start_hz, end_hz }
@@ -502,7 +521,7 @@ mod tests {
             tuning_epoch: 3,
             gains_db: vec![0.0, 0.9, 28.0],
         };
-        let json = state_json("rtl0", &state, &[], &[Holder::user_since(7)]);
+        let json = state_json("rtl0", &state, &[], &[Holder::user_since(7)], (7.3, true));
         let value: serde_json::Value = serde_json::from_str(&json).expect("json");
         assert_eq!(value["v"], 1);
         assert_eq!(value["device"], "rtl0");
@@ -517,6 +536,8 @@ mod tests {
         // 85 % of 2.048 MS/s around 100 MHz.
         assert_eq!(value["window"]["start_hz"], 99_129_600);
         assert_eq!(value["window"]["end_hz"], 100_870_400);
+        assert_eq!(value["overload"]["active"], true);
+        assert_eq!(value["overload"]["clipped_percent"], 7.3);
 
         let reply: serde_json::Value = serde_json::from_slice(&ok_reply(&json)).expect("json");
         assert_eq!(reply["ok"], true);
@@ -529,7 +550,7 @@ mod tests {
             ..state
         };
         let value: serde_json::Value =
-            serde_json::from_str(&state_json("f", &file, &[], &[])).expect("json");
+            serde_json::from_str(&state_json("f", &file, &[], &[], (0.0, false))).expect("json");
         assert!(value.get("tuner").is_none());
         assert!(value["gain"].is_null());
 
