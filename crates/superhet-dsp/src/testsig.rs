@@ -77,6 +77,87 @@ pub fn differential(bits: &[bool]) -> Vec<bool> {
         .collect()
 }
 
+/// Samples per bit of the pulse table.
+const PULSE_RES: usize = 64;
+/// Half length of the pulse table in bits.
+const PULSE_SPAN: usize = 4;
+
+/// The shaped biphase pulse of IEC 62106 (Manchester pair with the `cos(pi f T / 4)` spectrum,
+/// band-limited to 2.375 kHz), peak-normalised, sampled `PULSE_RES` times per bit over
+/// `+-PULSE_SPAN` bits around the start of the bit.
+fn pulse_table() -> Vec<f64> {
+    // Impulse response of the cosine shaping: integral of cos(a f) cos(b f) over |f| <= fc.
+    let tb = 1.0 / BIT_RATE_HZ;
+    let fc = 2.0 / tb;
+    let a = std::f64::consts::PI * tb / 4.0;
+    let r = |t: f64| {
+        let b = TAU * t;
+        let term = |d: f64| {
+            if d.abs() < 1e-9 {
+                fc
+            } else {
+                (d * fc).sin() / d
+            }
+        };
+        term(a - b) + term(a + b)
+    };
+    let len = 2 * PULSE_SPAN * PULSE_RES + 1;
+    let mut table: Vec<f64> = (0..len)
+        .map(|i| {
+            let t = (i as f64 / PULSE_RES as f64 - PULSE_SPAN as f64) * tb;
+            r(t) - r(t - tb / 2.0)
+        })
+        .collect();
+    let peak = table.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+    for v in &mut table {
+        *v /= peak;
+    }
+    table
+}
+
+/// Biphase waveform sampled at `fs`: each bit is a shaped Manchester pulse (IEC 62106),
+/// signed by the bit. Endless generator over the repeated `bits`.
+pub struct ShapedBaseband {
+    bits: Vec<bool>,
+    fs: f64,
+    n: u64,
+    table: Vec<f64>,
+    /// Bit clock error relative to the nominal 1187.5 Hz in ppm.
+    pub ppm: f64,
+}
+
+impl ShapedBaseband {
+    pub fn new(bits: Vec<bool>, fs: f64) -> Self {
+        Self {
+            bits,
+            fs,
+            n: 0,
+            table: pulse_table(),
+            ppm: 0.0,
+        }
+    }
+
+    pub fn sample(&mut self) -> f64 {
+        let t = self.n as f64 / self.fs * BIT_RATE_HZ * (1.0 + self.ppm * 1e-6);
+        self.n += 1;
+        let k0 = t.floor() as i64;
+        let mut acc = 0.0;
+        for k in (k0 - PULSE_SPAN as i64 + 1)..=(k0 + PULSE_SPAN as i64 - 1) {
+            let pos = (t - k as f64 + PULSE_SPAN as f64) * PULSE_RES as f64;
+            let i = pos.floor();
+            if i < 0.0 || i as usize + 1 >= self.table.len() {
+                continue;
+            }
+            let frac = pos - i;
+            let i = i as usize;
+            let v = self.table[i] * (1.0 - frac) + self.table[i + 1] * frac;
+            let bit = self.bits[k.rem_euclid(self.bits.len() as i64) as usize];
+            acc += if bit { v } else { -v };
+        }
+        acc
+    }
+}
+
 /// Biphase waveform sampled at `fs`: each bit is one cycle of a 1187.5 Hz sine, signed by
 /// the bit. Returns an endless generator over the repeated `bits`.
 pub struct Baseband {
@@ -108,7 +189,8 @@ pub struct Station {
     offset: f64,
     n: u64,
     fm_phase: f64,
-    rds: Baseband,
+    rds: ShapedBaseband,
+    clock: f64,
     noise: u32,
     pub noise_amp: f32,
 }
@@ -138,7 +220,8 @@ impl Station {
             offset,
             n: 0,
             fm_phase: 0.0,
-            rds: Baseband::new(bits, f64::from(rate)),
+            rds: ShapedBaseband::new(bits, f64::from(rate)),
+            clock: 1.0,
             noise: 0x9E37_79B9,
             noise_amp: 0.0,
         }
@@ -151,9 +234,21 @@ impl Station {
         (f64::from(self.noise) / f64::from(u32::MAX) - 0.5) as f32
     }
 
+    /// Seeds the receiver noise (`noise_amp`); the seed must not be zero.
+    pub fn set_noise_seed(&mut self, seed: u32) {
+        self.noise = seed.max(1);
+    }
+
+    /// Lets the station's sample clock (pilot, subcarriers, bit clock, tones) run `ppm` parts
+    /// per million fast, as a receiver with an inaccurate crystal sees it.
+    pub fn set_clock_ppm(&mut self, ppm: f64) {
+        self.clock = 1.0 + ppm * 1e-6;
+        self.rds.ppm = ppm;
+    }
+
     /// Next IQ sample.
     pub fn next(&mut self, c: Content) -> Complex32 {
-        let t = self.n as f64 / self.rate;
+        let t = self.n as f64 / self.rate * self.clock;
         self.n += 1;
         let l = c.left * (TAU * 1_000.0 * t).sin();
         let r = c.right * (TAU * 3_000.0 * t).sin();
