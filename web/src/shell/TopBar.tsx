@@ -1,18 +1,10 @@
 import { AudioButton } from "../audio/AudioControls";
-import {
-  IconButton,
-  Kbd,
-  Logo,
-  PanelRightIcon,
-  PlainButton,
-  SearchIcon,
-  Slider,
-  toasts,
-} from "../ui";
+import { IconButton, Kbd, Logo, PanelRightIcon, PlainButton, SearchIcon, Slider } from "../ui";
 import type { ThemePreference } from "../ui/theme";
 import { DeviceSwitcher } from "./DeviceSwitcher";
 import type { InspectorState } from "./inspector";
 import { SettingsMenu } from "./SettingsMenu";
+import { PALETTE_KEY } from "./shortcuts";
 import type { Receiver } from "./useReceiver";
 
 interface Props {
@@ -20,6 +12,7 @@ interface Props {
   theme: ThemePreference;
   onTheme: (t: ThemePreference) => void;
   onShortcuts: () => void;
+  onPalette: () => void;
   inspector: InspectorState;
 }
 
@@ -27,7 +20,7 @@ interface Props {
  * Top bar (no frequencies): logo, device switcher, command palette trigger, audio on/off with the
  * master volume, inspector toggle and settings. Below 600 px only logo, palette, audio, settings.
  */
-export function TopBar({ r, theme, onTheme, onShortcuts, inspector }: Props) {
+export function TopBar({ r, theme, onTheme, onShortcuts, onPalette, inspector }: Props) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-surface-1 px-3 shell:gap-3 shell:px-4">
       <Logo />
@@ -36,22 +29,15 @@ export function TopBar({ r, theme, onTheme, onShortcuts, inspector }: Props) {
       </div>
       <div className="flex-1" />
       <PlainButton
-        title="Command palette (coming soon)"
-        onClick={() =>
-          toasts.push({
-            key: "palette",
-            tone: "info",
-            title: "Search is coming soon",
-            body: "Jump to a frequency, bookmark or action from here.",
-            durationMs: 3000,
-          })
-        }
+        title={`Command palette (${PALETTE_KEY} or /)`}
+        aria-haspopup="dialog"
+        onClick={onPalette}
         className="inline-flex h-8 items-center gap-2 rounded-md border border-border-strong bg-surface-2 px-2.5 text-xs text-fg-subtle transition-colors duration-150 hover:text-fg shell:w-64 max-phone:size-11 max-phone:justify-center max-phone:px-0"
       >
         <SearchIcon size={14} className="shrink-0" />
         <span className="flex-1 truncate text-left max-phone:sr-only">Search or jump…</span>
         <span className="max-shell:hidden">
-          <Kbd>⌘K</Kbd>
+          <Kbd>{PALETTE_KEY}</Kbd>
         </span>
       </PlainButton>
       <div className="flex items-center gap-2">

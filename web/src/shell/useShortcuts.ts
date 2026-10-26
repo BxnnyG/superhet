@@ -22,6 +22,12 @@ export interface ShortcutContext {
   startBookmark: () => void;
   openHelp: () => void;
   toggleInspector: () => void;
+  /** Open the typed-entry field of the active VFO's frequency readout. */
+  focusFrequency: () => void;
+  /** Open the command palette (the `/` key). */
+  openPalette: () => void;
+  /** Open or close the command palette (Ctrl/Cmd+K, also while typing). */
+  togglePalette: () => void;
 }
 
 /** Run one shortcut; true when it did something (the caller then swallows the key event). */
@@ -101,6 +107,19 @@ export function runShortcut(action: ShortcutAction, ctx: ShortcutContext): boole
     case "inspector":
       ctx.toggleInspector();
       return true;
+    case "vfoAt": {
+      const target = snap.vfos[action.index];
+      if (!target) return false;
+      ctx.vfoCtl.select(target.id);
+      return true;
+    }
+    case "focusFrequency":
+      if (!active) return false;
+      ctx.focusFrequency();
+      return true;
+    case "palette":
+      ctx.openPalette();
+      return true;
   }
 }
 
@@ -113,6 +132,14 @@ export function useShortcuts(ctx: ShortcutContext): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing) return;
+      // Ctrl/Cmd+K works while typing, but not over another dialog (the palette itself is fine).
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {
+        if (!document.querySelector('[aria-modal="true"]:not([data-palette])')) {
+          e.preventDefault();
+          ref.current.togglePalette();
+        }
+        return;
+      }
       const action = shortcutFor(e);
       if (!action || ignoresShortcuts(e.target)) return;
       if (runShortcut(action, ref.current)) e.preventDefault();

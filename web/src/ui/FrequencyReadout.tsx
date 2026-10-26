@@ -34,6 +34,8 @@ interface Props {
   lockedReason?: string;
   /** `lg` is the primary readout; `sm` a compact secondary one. */
   size?: "sm" | "lg";
+  /** Name of a window event that opens the typed entry (the F shortcut, the palette). */
+  editEvent?: string;
 }
 
 const DEFAULT_FOCUS = 6;
@@ -53,6 +55,7 @@ export function FrequencyReadout({
   locked = false,
   lockedReason,
   size = "lg",
+  editEvent,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [focusIdx, setFocusIdx] = useState(DEFAULT_FOCUS);
@@ -116,6 +119,17 @@ export function FrequencyReadout({
     setInvalid(false);
     setEditing(true);
   };
+
+  const startEditRef = useRef(startEdit);
+  useEffect(() => {
+    startEditRef.current = startEdit;
+  });
+  useEffect(() => {
+    if (!editEvent) return;
+    const on = () => startEditRef.current();
+    window.addEventListener(editEvent, on);
+    return () => window.removeEventListener(editEvent, on);
+  }, [editEvent]);
 
   const stopEdit = () => {
     setEditing(false);
