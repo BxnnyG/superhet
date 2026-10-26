@@ -56,6 +56,18 @@ describe("defaultModeFor", () => {
     expect(defaultModeFor(145.5e6)).toBe("nfm");
     expect(defaultModeFor(433.9e6)).toBe("nfm");
   });
+
+  it("picks sideband on HF ham bands (LSB below 10 MHz) and AM for the rest of HF", () => {
+    expect(defaultModeFor(3.7e6)).toBe("lsb");
+    expect(defaultModeFor(7.1e6)).toBe("lsb");
+    expect(defaultModeFor(14.2e6)).toBe("usb");
+    expect(defaultModeFor(28.4e6)).toBe("usb");
+    expect(defaultModeFor(6.1e6)).toBe("am"); // 49 m broadcast
+    expect(defaultModeFor(7.3e6)).toBe("am"); // 41 m broadcast, just above the ham band
+    expect(defaultModeFor(27.185e6)).toBe("am"); // CB
+    expect(defaultModeFor(1.0e6)).toBe("am"); // MW
+    expect(defaultModeFor(50.2e6)).toBe("nfm");
+  });
 });
 
 describe("squelch slider", () => {
