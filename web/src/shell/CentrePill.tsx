@@ -1,5 +1,6 @@
 import { formatFrequency } from "../spectrum/freq";
 import { AlertIcon, LockIcon, PlainButton, Popover, SettingsIcon, cn } from "../ui";
+import { droppedNotice, useRecentDrops } from "./dropped";
 import { overloadNotice } from "./overload";
 import { SourceSettings } from "./SourceSettings";
 import type { Receiver } from "./useReceiver";
@@ -12,6 +13,8 @@ export function CentrePill({ r }: { r: Receiver }) {
   const centerHz = r.tuningSnap.display?.centerHz ?? null;
   const locked = r.locks.length > 0;
   const overload = overloadNotice(r.tuningSnap.state);
+  const dropped = droppedNotice(r.tuningSnap.state);
+  const recentDrops = useRecentDrops(r.tuningSnap.state?.droppedBlocks);
   return (
     <Popover
       label="Source settings"
@@ -22,9 +25,11 @@ export function CentrePill({ r }: { r: Receiver }) {
           title={
             overload
               ? `${overload.summary} Open the source settings to lower the gain.`
-              : "Device centre and source settings"
+              : dropped && recentDrops
+                ? `${dropped.summary} ${dropped.action}`
+                : "Device centre and source settings"
           }
-          aria-label={`Centre ${centerHz === null ? "unknown" : formatFrequency(centerHz).slice(0, -4)}${locked ? ", locked" : ""}${overload ? ", ADC overload, reduce gain" : ""}, source settings`}
+          aria-label={`Centre ${centerHz === null ? "unknown" : formatFrequency(centerHz).slice(0, -4)}${locked ? ", locked" : ""}${overload ? ", ADC overload, reduce gain" : ""}${dropped && recentDrops ? ", dropping samples" : ""}, source settings`}
           className={cn(
             "inline-flex h-8 items-center gap-2 rounded-full border border-border-strong",
             "bg-surface-1 px-3 text-xs text-fg-muted transition-colors duration-150",
@@ -44,6 +49,15 @@ export function CentrePill({ r }: { r: Receiver }) {
             >
               <AlertIcon size={11} className="shrink-0" />
               Overload
+            </span>
+          )}
+          {dropped && recentDrops && (
+            <span
+              data-testid="dropped-chip"
+              className="inline-flex h-5 items-center gap-1 rounded-full bg-warn-soft px-1.5 text-[11px] font-medium text-warn ring-1 ring-warn/20 ring-inset"
+            >
+              <AlertIcon size={11} className="shrink-0" />
+              Dropping
             </span>
           )}
         </PlainButton>

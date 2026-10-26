@@ -258,6 +258,8 @@ struct StateWire<'a> {
     locks: &'a [Holder],
     window: WindowWire,
     overload: OverloadWire,
+    /// IQ blocks dropped since start because a stage lagged (device to DSP, DSP to VFO).
+    dropped_blocks: u64,
 }
 
 /// ADC overload as seen over the last few seconds.
@@ -283,6 +285,7 @@ pub fn state_json(
     vfos: &[Vfo],
     locks: &[Holder],
     overload: (f64, bool),
+    dropped_blocks: u64,
 ) -> String {
     let tuning = Tuning {
         center_hz: state.center_hz,
@@ -315,6 +318,7 @@ pub fn state_json(
             active: overload.1,
             clipped_percent: overload.0,
         },
+        dropped_blocks,
         window: {
             let (start_hz, end_hz) = window::bounds(tuning);
             WindowWire { start_hz, end_hz }
@@ -521,7 +525,14 @@ mod tests {
             tuning_epoch: 3,
             gains_db: vec![0.0, 0.9, 28.0],
         };
-        let json = state_json("rtl0", &state, &[], &[Holder::user_since(7)], (7.3, true));
+        let json = state_json(
+            "rtl0",
+            &state,
+            &[],
+            &[Holder::user_since(7)],
+            (7.3, true),
+            5,
+        );
         let value: serde_json::Value = serde_json::from_str(&json).expect("json");
         assert_eq!(value["v"], 1);
         assert_eq!(value["device"], "rtl0");
@@ -538,6 +549,7 @@ mod tests {
         assert_eq!(value["window"]["end_hz"], 100_870_400);
         assert_eq!(value["overload"]["active"], true);
         assert_eq!(value["overload"]["clipped_percent"], 7.3);
+        assert_eq!(value["dropped_blocks"], 5);
 
         let reply: serde_json::Value = serde_json::from_slice(&ok_reply(&json)).expect("json");
         assert_eq!(reply["ok"], true);
@@ -550,7 +562,7 @@ mod tests {
             ..state
         };
         let value: serde_json::Value =
-            serde_json::from_str(&state_json("f", &file, &[], &[], (0.0, false))).expect("json");
+            serde_json::from_str(&state_json("f", &file, &[], &[], (0.0, false), 0)).expect("json");
         assert!(value.get("tuner").is_none());
         assert!(value["gain"].is_null());
 

@@ -88,6 +88,7 @@ async fn state_ws(
         .max_message_size(MAX_CLIENT_BYTES)
         .max_frame_size(MAX_CLIENT_BYTES)
         .on_upgrade(move |socket| async move {
+            let _client = crate::metrics::track_client("state");
             let initial = current_state(&state.devices, &client, &device).await;
             serve_client(socket, updates, initial).await;
             drop(permit);

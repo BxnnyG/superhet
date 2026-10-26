@@ -76,6 +76,7 @@ services:
       SUPERHET_SETUP_TOKEN: ${SUPERHET_SETUP_TOKEN:-}
       SUPERHET_COOKIE_SECURE: ${SUPERHET_COOKIE_SECURE:-auto}
       SUPERHET_TRUST_PROXY: ${SUPERHET_TRUST_PROXY:-false}
+      SUPERHET_METRICS_LISTEN: ${SUPERHET_METRICS_LISTEN:-}
     depends_on:
       postgres: { condition: service_healthy }
       nats: { condition: service_healthy }

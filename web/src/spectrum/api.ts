@@ -45,6 +45,8 @@ export interface DeviceState {
   window: FreqWindow;
   /** The ADC clips (front end overloaded); absent from daemons that do not report it. */
   overload?: OverloadState;
+  /** IQ blocks dropped since the daemon started (a stage could not keep up); absent on old daemons. */
+  droppedBlocks?: number;
 }
 
 export interface OverloadState {
@@ -165,6 +167,9 @@ export function parseDeviceState(raw: unknown): DeviceState {
   if (isRec(ov) && typeof ov.active === "boolean") {
     const pct = typeof ov.clipped_percent === "number" ? ov.clipped_percent : 0;
     state.overload = { active: ov.active, clippedPercent: Number.isFinite(pct) ? pct : 0 };
+  }
+  if (typeof raw.dropped_blocks === "number" && Number.isFinite(raw.dropped_blocks)) {
+    state.droppedBlocks = Math.max(0, Math.floor(raw.dropped_blocks));
   }
   return state;
 }

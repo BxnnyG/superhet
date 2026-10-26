@@ -36,6 +36,8 @@ phase (plugins, recording) first.
 | DTMF digit detection per NFM/AM VFO (Goertzel, Q.24 twist and duration, talk-off guard; digit string with copy/clear) | done (next alpha) | native in `superhet-dsp::tones` |
 | CTCSS sub-tone detection (50 standard tones) and tone squelch | done (next alpha) | tone squelch costs about 0.6 s of every transmission start; DCS detection, tone removal from the audio and DTMF/CTCSS for SSB/WFM still open |
 | USB/LSB/CW demodulators (one-sided SSB passband with edge drag, CW pitch) | done (alpha.5) | P1 crit. 4 |
+| CW pitch slider (400-1000 Hz, last pick remembered for new CW VFOs) | done | Receiver tab |
+| Default mode by frequency on HF (ham bands LSB/USB, rest AM) | done | `defaultModeFor`, default VFO |
 | Noise reduction / notch filter | later | P1 polish |
 
 ## Memory and data

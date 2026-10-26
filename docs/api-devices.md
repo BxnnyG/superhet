@@ -89,13 +89,15 @@ fields and limits: section "VFOs" below. Bodies are at most 4 KiB, `Content-Type
   their ids and the user lock. If the bus is not usable within 30 s the daemon starts with the
   device's own settings and leaves the snapshot alone until the next start.
 - Default VFO: when no snapshot is applied at start (first run, a snapshot of another device or
-  driver, or an unusable bus) the daemon creates one VFO (id 1) at the centre frequency, WFM if
-  the centre is within 87.5-108 MHz, NFM otherwise. An applied snapshot is never topped up: if the
+  driver, or an unusable bus) the daemon creates one VFO (id 1) at the centre frequency: WFM if
+  the centre is within 87.5-108 MHz, AM in the airband (up to 137 MHz), LSB (below 10 MHz) or USB
+  on an HF amateur band, AM on the rest of HF (below 30 MHz), NFM otherwise. The web UI uses the
+  same rule for a new VFO whose mode the user, a bookmark or a band plan entry did not choose. An applied snapshot is never topped up: if the
   user deleted every VFO, the set stays empty across restarts.
 
 ## State object
 
-`{"v":1,"device","driver","tuner"?,"center_hz","sample_rate","gain":{"mode":"auto"|"manual","db":null|number}|null,"ppm","bias_tee","tuning_epoch","gains_db":[...],"vfos":[...],"locks":[...],"window":{"start_hz","end_hz"},"overload":{"active","clipped_percent"}}`
+`{"v":1,"device","driver","tuner"?,"center_hz","sample_rate","gain":{"mode":"auto"|"manual","db":null|number}|null,"ppm","bias_tee","tuning_epoch","gains_db":[...],"vfos":[...],"locks":[...],"window":{"start_hz","end_hz"},"overload":{"active","clipped_percent"},"dropped_blocks"}`
 
 `vfos` lists the device's VFOs (see below) with their current `status`; it is re-published on
 every VFO change and every retune (status follows the tuning). VFOs live in the daemon's memory
@@ -113,6 +115,12 @@ manual steps. `tuner` is omitted when unknown.
 last interval. The state is re-published when `active` flips or the rounded percentage changes.
 The UI shows a warning chip and, with automatic gain, a hint to switch to manual gain. Clients
 must tolerate the field being absent (older daemons).
+
+`dropped_blocks` counts the IQ blocks the daemon threw away since it started because a stage
+could not keep up (device thread to DSP thread, DSP thread to VFO thread). Zero on a healthy
+system; any growth means glitches in waterfall or audio (lower the sample rate, see
+`docs/perf.md`). The counter moves with every lost block, so the state is re-published for it at
+most every 5 s. The UI hides it while zero. Clients must tolerate the field being absent.
 
 ## VFOs
 

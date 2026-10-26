@@ -7,6 +7,7 @@ mod bookmarks;
 mod decoder_events;
 mod devices;
 mod hub;
+mod metrics;
 mod origin;
 mod profiles;
 mod state_ws;
@@ -128,6 +129,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = listen.parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "superhet-api listening");
+    if let Some(metrics_addr) =
+        metrics::listen_addr(std::env::var(metrics::ENV_LISTEN).ok().as_deref())?
+    {
+        // Separate, unauthenticated, internal-only listener; never on the public port.
+        let metrics_listener = tokio::net::TcpListener::bind(metrics_addr).await?;
+        tracing::info!(addr = %metrics_addr, "metrics listening (internal, unauthenticated)");
+        tokio::spawn(async move {
+            if let Err(err) = axum::serve(metrics_listener, metrics::router()).await {
+                tracing::error!(%err, "metrics listener stopped");
+            }
+        });
+    }
     let web = web::Web::from_env();
     let app = app(web, Deps { db, nats }, auth, ws, audio, devices);
     axum::serve(

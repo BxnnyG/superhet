@@ -13,6 +13,7 @@ import {
   type VfoPatch,
   type VfoReply,
 } from "./api";
+import { loadCwPitch } from "./cwPitch";
 import { DEFAULT_BANDWIDTH_HZ } from "./model";
 
 export interface VfoSnapshot {
@@ -48,6 +49,7 @@ export function applyVfoPatch(vfo: Vfo, patch: VfoPatch): Vfo {
   else if (patch.bandwidthHz === null && patch.mode !== undefined)
     next.bandwidthHz = DEFAULT_BANDWIDTH_HZ[patch.mode];
   if (patch.squelchDbfs !== undefined) next.squelchDbfs = patch.squelchDbfs;
+  if (patch.cwPitchHz !== undefined) next.cwPitchHz = patch.cwPitchHz;
   return next;
 }
 
@@ -106,7 +108,8 @@ export class VfoController {
 
   /** Create a VFO; it appears (and is selected) when the daemon has answered. */
   create(req: VfoCreate): void {
-    this.ops.push({ kind: "create", req });
+    const pitch = req.mode === "cw" && req.cwPitchHz === undefined ? loadCwPitch() : null;
+    this.ops.push({ kind: "create", req: pitch === null ? req : { ...req, cwPitchHz: pitch } });
     this.error = null;
     this.publish();
     this.schedule();
@@ -114,7 +117,18 @@ export class VfoController {
 
   /** Change a VFO; fields of earlier unsent updates of the same VFO are overwritten. */
   update(id: number, patch: VfoPatch): void {
-    this.pending.set(id, { ...this.pending.get(id), ...patch });
+    // Switching a VFO to CW starts with the pitch the user last picked (the daemon would
+    // otherwise reset it to 700 Hz).
+    const current = this.confirmed.find((v) => v.id === id);
+    const pitch =
+      patch.mode === "cw" && patch.cwPitchHz === undefined && current?.mode !== "cw"
+        ? loadCwPitch()
+        : null;
+    this.pending.set(id, {
+      ...this.pending.get(id),
+      ...patch,
+      ...(pitch === null ? {} : { cwPitchHz: pitch }),
+    });
     this.error = null;
     this.publish();
     this.schedule();

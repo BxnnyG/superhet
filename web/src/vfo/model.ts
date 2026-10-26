@@ -71,10 +71,36 @@ export function snapFrequency(hz: number, stepHz: number): number {
   return Math.max(stepHz, Math.round(hz / stepHz) * stepHz);
 }
 
-/** Sensible mode for a new VFO: FM broadcast WFM, airband AM, everything else NFM. */
+/**
+ * HF amateur bands (Hz, IARU region 1 plus the common US edges). Operators use single sideband
+ * there: LSB below 10 MHz, USB from 10 MHz up. Keep in sync with `default_mode` in
+ * `crates/superhet-sdrd/src/controller.rs`.
+ */
+const HAM_HF_BANDS: ReadonlyArray<readonly [number, number]> = [
+  [1.8e6, 2e6],
+  [3.5e6, 3.9e6],
+  [5.25e6, 5.45e6],
+  [7e6, 7.2e6],
+  [10.1e6, 10.15e6],
+  [14e6, 14.35e6],
+  [18.068e6, 18.168e6],
+  [21e6, 21.45e6],
+  [24.89e6, 24.99e6],
+  [28e6, 29.7e6],
+];
+
+/**
+ * Sensible mode for a new VFO when the user (or a bookmark / band plan entry) did not choose
+ * one: FM broadcast WFM, airband AM, HF amateur bands LSB (below 10 MHz) or USB, the rest of
+ * HF (broadcast, CB, utility) AM, everything else NFM.
+ */
 export function defaultModeFor(hz: number): VfoMode {
   if (hz >= 87.5e6 && hz <= 108e6) return "wfm";
   if (hz > 108e6 && hz <= 137e6) return "am";
+  if (hz < 30e6) {
+    if (HAM_HF_BANDS.some(([lo, hi]) => hz >= lo && hz <= hi)) return hz < 10e6 ? "lsb" : "usb";
+    return "am";
+  }
   return "nfm";
 }
 

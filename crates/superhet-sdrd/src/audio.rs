@@ -65,6 +65,7 @@ impl IqTap {
             Ok(()) => true,
             Err(TrySendError::Full(_)) => {
                 self.dropped.fetch_add(1, Ordering::Relaxed);
+                crate::metrics::global().vfo_block_dropped();
                 false
             }
             Err(TrySendError::Disconnected(_)) => false,
@@ -361,6 +362,7 @@ impl Slot {
                 let quality =
                     self.rds_quality
                         .observe(Instant::now(), channel.rds_block_counts(), seen.1);
+                crate::metrics::global().set_rds_bler(id, quality.map(|q| q.bler));
                 let nonempty = seen.1 || quality.is_some() || info.is_some_and(|i| !i.is_empty());
                 let due = nonempty && self.rds_at.elapsed() >= RDS_REPEAT;
                 if !self.rds_clear && seen == self.rds_seen && !due {
@@ -383,6 +385,7 @@ impl Slot {
                 message
             }
             None => {
+                crate::metrics::global().set_rds_bler(id, None);
                 if !self.rds_clear {
                     return;
                 }

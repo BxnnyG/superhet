@@ -14,6 +14,7 @@ use superhet_dsp::{SpectrumConfig, SpectrumError, SpectrumProcessor};
 
 use crate::audio::IqTap;
 use crate::config::SpectrumSettings;
+use crate::metrics;
 use crate::overload::{OverloadMonitor, OverloadStatus};
 use crate::zoom::ZoomEngine;
 
@@ -113,6 +114,9 @@ impl Pipeline {
                 let mut overload = OverloadMonitor::new();
                 while let Ok(block) = stream.blocks.recv() {
                     let block = Arc::new(block);
+                    let counters = metrics::global();
+                    counters.block_processed(block.samples.len());
+                    counters.set_device_dropped_blocks(stream.dropped_blocks());
                     if let Some(tap) = &tap {
                         tap.send(&block);
                     }

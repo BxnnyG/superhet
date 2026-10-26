@@ -12,6 +12,7 @@ mod config;
 mod control;
 mod controller;
 mod lock;
+mod metrics;
 mod overload;
 mod pipeline;
 mod publish;
@@ -46,13 +47,46 @@ struct Deps {
     pipeline_running: Option<Arc<AtomicBool>>,
     /// Bus client (connecting in the background).
     nats: Option<async_nats::Client>,
+    /// What `/metrics` reads besides the process counters.
+    metrics: Option<MetricsSource>,
+}
+
+/// Live objects `/metrics` renders the gauges from.
+#[derive(Clone)]
+struct MetricsSource {
+    device: String,
+    control: Arc<dyn superhet_device::DeviceControl>,
+    vfos: Arc<vfo::VfoShared>,
+    overload: Arc<overload::OverloadStatus>,
 }
 
 fn app(deps: Deps) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .route("/metrics", get(metrics_text))
         .with_state(deps)
+}
+
+/// Prometheus text exposition; counters only, see `docs/perf.md`. This port is internal (not
+/// published by the compose files) and carries no authentication.
+async fn metrics_text(State(deps): State<Deps>) -> impl IntoResponse {
+    let body = match &deps.metrics {
+        Some(src) => {
+            let state = src.control.state();
+            let tuning = vfo::Tuning {
+                center_hz: state.center_hz,
+                sample_rate: state.sample_rate,
+            };
+            let (_, vfos) = src.vfos.snapshot();
+            metrics::global().render(&src.device, Some(tuning), &vfos, &src.overload)
+        }
+        None => metrics::global().render("", None, &[], &overload::OverloadStatus::default()),
+    };
+    (
+        [(header::CONTENT_TYPE, superhet_bus::metrics::CONTENT_TYPE)],
+        body,
+    )
 }
 
 async fn healthz() -> &'static str {
@@ -146,11 +180,12 @@ async fn start_pipeline(
     let tones_sink = publish::spawn_tones_publisher(client.clone(), &config.device_id)?;
     let audio =
         audio::AudioEngine::start_with_sinks(Arc::clone(&vfos), audio_sink, rds_sink, tones_sink)?;
-    let sink = publish::spawn_spectrum_publisher(client.clone(), subject);
+    let sink = publish::spawn_spectrum_publisher(client.clone(), subject, "spectrum");
     let zoom_handle = zoom::ZoomHandle::default();
     let zoom_sink = publish::spawn_spectrum_publisher(
         client.clone(),
         superhet_bus::subjects::spectrum_zoom(&config.device_id)?,
+        "zoom",
     );
     let zoom_engine =
         zoom::ZoomEngine::new(zoom_handle.clone(), config.spectrum.clone(), zoom_sink);
@@ -162,6 +197,12 @@ async fn start_pipeline(
         Some(zoom_engine),
     )?;
     deps.pipeline_running = Some(pipeline.running_flag());
+    deps.metrics = Some(MetricsSource {
+        device: config.device_id.clone(),
+        control: pipeline.control(),
+        vfos: Arc::clone(&vfos),
+        overload: pipeline.overload(),
+    });
     let service = service::start(
         client,
         config.device_id.clone(),
@@ -221,6 +262,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn metrics_are_served_as_prometheus_text() {
+        let (status, body) = get_path(Deps::default(), "/metrics").await;
+        assert!(status.is_success());
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("# TYPE superhet_sdrd_dropped_blocks_total counter"));
+        assert!(text.contains("superhet_sdrd_dropped_blocks_total{stage=\"device\"} "));
+    }
+
+    #[tokio::test]
     async fn readyz_is_ok_without_device() {
         let (status, body) = get_path(Deps::default(), "/readyz").await;
         assert!(status.is_success());
@@ -233,6 +283,7 @@ mod tests {
             device_expected: true,
             pipeline_running: Some(Arc::new(AtomicBool::new(false))),
             nats: None,
+            metrics: None,
         };
         let (status, body) = get_path(deps, "/readyz").await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
@@ -254,6 +305,7 @@ mod tests {
             device_expected: true,
             pipeline_running: Some(Arc::new(AtomicBool::new(true))),
             nats: Some(client),
+            metrics: None,
         };
         let (status, body) = get_path(deps, "/readyz").await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);

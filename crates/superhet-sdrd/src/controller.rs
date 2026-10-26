@@ -47,10 +47,42 @@ fn device_gain(gain: profile::Gain) -> Option<Gain> {
     }
 }
 
-/// Mode of the default VFO: WFM in the FM broadcast band (87.5-108 MHz), NFM elsewhere.
+/// HF amateur bands in Hz (IARU region 1 plus the common US edges); single sideband is the
+/// convention there. Keep in sync with `HAM_HF_BANDS` in `web/src/vfo/model.ts`.
+const HAM_HF_BANDS_HZ: [(u64, u64); 10] = [
+    (1_800_000, 2_000_000),
+    (3_500_000, 3_900_000),
+    (5_250_000, 5_450_000),
+    (7_000_000, 7_200_000),
+    (10_100_000, 10_150_000),
+    (14_000_000, 14_350_000),
+    (18_068_000, 18_168_000),
+    (21_000_000, 21_450_000),
+    (24_890_000, 24_990_000),
+    (28_000_000, 29_700_000),
+];
+
+/// Mode of the default VFO: WFM in the FM broadcast band (87.5-108 MHz), AM for airband, LSB /
+/// USB (below / from 10 MHz) on HF amateur bands, AM on the rest of HF, NFM elsewhere. Same
+/// rule as `defaultModeFor` in the web UI.
 fn default_mode(center_hz: u64) -> VfoMode {
     if (87_500_000..=108_000_000).contains(&center_hz) {
         VfoMode::Wfm
+    } else if (108_000_001..=137_000_000).contains(&center_hz) {
+        VfoMode::Am
+    } else if center_hz < 30_000_000 {
+        if HAM_HF_BANDS_HZ
+            .iter()
+            .any(|&(lo, hi)| (lo..=hi).contains(&center_hz))
+        {
+            if center_hz < 10_000_000 {
+                VfoMode::Lsb
+            } else {
+                VfoMode::Usb
+            }
+        } else {
+            VfoMode::Am
+        }
     } else {
         VfoMode::Nfm
     }
@@ -105,6 +137,8 @@ impl Controller {
             &vfos,
             locks.holders(),
             self.overload.get(),
+            crate::metrics::global().device_dropped_blocks()
+                + crate::metrics::global().vfo_dropped_blocks(),
         )
         .into();
         self.state.send_if_modified(|current| {
@@ -737,6 +771,8 @@ mod tests {
     fn essence(c: &Controller) -> Value {
         let mut s = state(c);
         s["tuning_epoch"] = Value::Null;
+        // A process-wide counter that other tests move.
+        s["dropped_blocks"] = Value::Null;
         s["locks"] = json!(s["locks"].as_array().map_or(0, Vec::len));
         for vfo in s["vfos"].as_array_mut().expect("vfos") {
             vfo["id"] = Value::Null;
@@ -837,6 +873,23 @@ mod tests {
             // Not a second one.
             c.seed_default_vfo();
             assert_eq!(state(&c)["vfos"].as_array().map(Vec::len), Some(1));
+        }
+    }
+
+    #[test]
+    fn default_mode_uses_sideband_on_hf_ham_bands() {
+        for (hz, mode) in [
+            (3_700_000u64, VfoMode::Lsb),
+            (7_100_000, VfoMode::Lsb),
+            (14_200_000, VfoMode::Usb),
+            (28_400_000, VfoMode::Usb),
+            (6_100_000, VfoMode::Am),
+            (7_300_000, VfoMode::Am),
+            (27_185_000, VfoMode::Am),
+            (121_500_000, VfoMode::Am),
+            (50_200_000, VfoMode::Nfm),
+        ] {
+            assert_eq!(default_mode(hz), mode, "{hz}");
         }
     }
 
@@ -974,6 +1027,7 @@ mod tests {
         assert_eq!(restored["locks"], saved["locks"]);
         // The epoch differs (the new device was retuned), everything else is identical.
         restored["tuning_epoch"] = saved["tuning_epoch"].clone();
+        restored["dropped_blocks"] = saved["dropped_blocks"].clone();
         assert_eq!(restored, saved);
         // Ids survive and new VFOs continue after the highest one.
         let reply = create(&fresh, 433_600_000);

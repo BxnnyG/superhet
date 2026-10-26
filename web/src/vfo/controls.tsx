@@ -14,6 +14,14 @@ import {
 } from "../ui";
 import { VFO_MODES, type Vfo, type VfoMode, type VfoPatch } from "./api";
 import type { AutoSquelch } from "./autoSquelch";
+import {
+  CW_PITCH_DEFAULT_HZ,
+  CW_PITCH_MAX_HZ,
+  CW_PITCH_MIN_HZ,
+  CW_PITCH_STEP_HZ,
+  clampCwPitch,
+  saveCwPitch,
+} from "./cwPitch";
 import { LiveMarker } from "./LiveMarker";
 import {
   BANDWIDTH_PRESETS,
@@ -40,6 +48,34 @@ export function ModeSelect({ vfo, onUpdate }: { vfo: Vfo; onUpdate: Update }) {
       options={VFO_MODES.map((m) => ({ value: m, label: MODE_LABEL[m] }))}
       onChange={(m: VfoMode) => onUpdate(vfo.id, { mode: m, bandwidthHz: null })}
     />
+  );
+}
+
+/**
+ * CW pitch (BFO offset): the tone a carrier on the VFO frequency is heard at. The pick is kept
+ * on the daemon for this VFO and remembered for the next VFO switched to CW.
+ */
+export function CwPitchControl({ vfo, onUpdate }: { vfo: Vfo; onUpdate: Update }) {
+  const pitch = clampCwPitch(vfo.cwPitchHz ?? CW_PITCH_DEFAULT_HZ);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Slider
+        label="Pitch"
+        min={CW_PITCH_MIN_HZ}
+        max={CW_PITCH_MAX_HZ}
+        step={CW_PITCH_STEP_HZ}
+        value={pitch}
+        valueLabel={`${pitch} Hz`}
+        title="Tone a carrier on the VFO frequency is heard at"
+        onChange={(hz) => {
+          saveCwPitch(hz);
+          onUpdate(vfo.id, { cwPitchHz: hz });
+        }}
+      />
+      <p className="text-xs text-fg-subtle">
+        The CW filter stays centred on the VFO; a lower pitch suits narrow filters.
+      </p>
+    </div>
   );
 }
 

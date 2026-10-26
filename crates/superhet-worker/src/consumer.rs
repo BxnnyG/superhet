@@ -116,6 +116,7 @@ impl Consumer {
         for new in events {
             match decoder_events::insert(&self.pool, &new).await {
                 Ok(stored) => {
+                    crate::metrics::event_inserted(&new.kind);
                     if let Ok(subject) = subjects::decoder_events(&stored.data.device) {
                         let payload = stored.to_json().to_string();
                         if let Err(err) = self.client.publish(subject, payload.into()).await {
@@ -124,6 +125,7 @@ impl Consumer {
                     }
                 }
                 Err(err) => {
+                    crate::metrics::insert_failed();
                     tracing::warn!(%err, kind = %new.kind, "storing a decoder event failed");
                 }
             }
@@ -247,7 +249,10 @@ pub async fn run(
                 };
                 match decoder_events::prune(&me.pool, cutoff).await {
                     Ok(0) => {}
-                    Ok(n) => tracing::info!(removed = n, "pruned old decoder events"),
+                    Ok(n) => {
+                        crate::metrics::events_pruned(n);
+                        tracing::info!(removed = n, "pruned old decoder events");
+                    }
                     Err(err) => tracing::warn!(%err, "pruning decoder events failed"),
                 }
             }

@@ -29,6 +29,7 @@ describe("parsing", () => {
       bandwidthHz: 180_000,
       squelchDbfs: null,
       deemphasis: "50us",
+      cwPitchHz: null,
       stereo: null,
       tones: null,
       toneSquelchHz: null,
