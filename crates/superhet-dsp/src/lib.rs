@@ -33,4 +33,6 @@ pub use tones::{CTCSS_TONES_HZ, DTMF_TAIL_LEN, ToneDetector, canonical_ctcss};
 pub use zoom::{ZoomConfig, ZoomError, ZoomSpectrum, shift_for_span};
 
 #[cfg(test)]
+mod rds_tests;
+#[cfg(test)]
 mod wfm_tests;

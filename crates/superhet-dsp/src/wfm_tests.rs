@@ -230,32 +230,146 @@ fn rds_works_in_stereo_mode_too() {
     assert!(ch.stereo_locked());
 }
 
+/// What a receiver sees of a station through the whole WFM chain.
+struct Reception {
+    /// Seconds until the PS / the RadioText were complete and correct.
+    ps_at: Option<f64>,
+    rt_at: Option<f64>,
+    /// True if a wrong PS, RadioText or PI was ever shown.
+    garbage: bool,
+    stereo: bool,
+}
+
+/// Runs a station through the chain. The channel is tuned `mistune_hz` away from the station,
+/// the receiver's sample clock is `ppm` fast, the stereo matrix is on or off.
+fn receive(
+    noise: f32,
+    rds: f64,
+    mistune_hz: f64,
+    ppm: f64,
+    stereo: bool,
+    seconds: f64,
+) -> Reception {
+    receive_seeded(noise, rds, mistune_hz, ppm, stereo, seconds, 0x9E37_79B9)
+}
+
+fn receive_seeded(
+    noise: f32,
+    rds: f64,
+    mistune_hz: f64,
+    ppm: f64,
+    stereo: bool,
+    seconds: f64,
+    seed: u32,
+) -> Reception {
+    const PS: &str = "SUPERHET";
+    const RT: &str = "Hello RDS world";
+    let rate = 1_024_000;
+    let mut ch = channel(rate, 0.0, Deemphasis::Us50, stereo);
+    let mut st = Station::new(rate, mistune_hz, PS, RT);
+    st.noise_amp = noise;
+    st.set_noise_seed(seed);
+    st.set_clock_ppm(ppm);
+    let c = Content {
+        left: 0.4,
+        right: 0.4,
+        pilot: 0.1,
+        rds,
+    };
+    let mut out = Vec::new();
+    let mut got = Reception {
+        ps_at: None,
+        rt_at: None,
+        garbage: false,
+        stereo: false,
+    };
+    let steps = (seconds / 0.25) as usize;
+    for step in 1..=steps {
+        out.clear();
+        feed(&mut ch, &mut st, c, 0.25, &mut out);
+        let info = ch.rds_info().expect("wfm has rds");
+        let t = step as f64 * 0.25;
+        if info.ps.as_deref() == Some(PS) && got.ps_at.is_none() {
+            got.ps_at = Some(t);
+        }
+        if info.rt.as_deref() == Some(RT) && got.rt_at.is_none() {
+            got.rt_at = Some(t);
+        }
+        got.garbage |= info.ps.as_deref().is_some_and(|p| p != PS)
+            || info.rt.as_deref().is_some_and(|r| !RT.starts_with(r))
+            || info.pi.is_some_and(|p| p != 0xD3C2);
+    }
+    got.stereo = ch.stereo_locked();
+    got
+}
+
+#[test]
+#[ignore = "threshold statistics over noise seeds, prints a table"]
+fn rds_threshold_statistics() {
+    let seeds = 8u32;
+    for noise in [0.6, 0.7, 0.8] {
+        for (name, mistune, ppm) in [("on tune", 0.0, 0.0), ("-3 kHz +80 ppm", -3_000.0, 80.0)] {
+            let (mut ps_ok, mut rt_ok, mut garbage, mut time) = (0, 0, 0, 0.0);
+            for seed in 1..=seeds {
+                let r = receive_seeded(noise, 0.035, mistune, ppm, true, 12.0, seed * 7919);
+                if let Some(t) = r.ps_at {
+                    ps_ok += 1;
+                    time += t;
+                }
+                rt_ok += i32::from(r.rt_at.is_some());
+                garbage += i32::from(r.garbage);
+            }
+            println!(
+                "noise {noise} {name:<15}: PS {ps_ok}/{seeds} (mean {:.1} s)  RT {rt_ok}/{seeds}  garbage {garbage}",
+                if ps_ok > 0 {
+                    time / f64::from(ps_ok)
+                } else {
+                    f64::NAN
+                }
+            );
+        }
+    }
+}
+
 #[test]
 #[ignore = "sensitivity sweep, prints a table"]
 fn rds_sensitivity_sweep() {
-    let rate = 1_024_000;
-    for noise in [0.0, 0.02, 0.05, 0.1, 0.15, 0.2] {
-        for rds in [0.015, 0.035] {
-            let mut ch = channel(rate, 0.0, Deemphasis::Us50, true);
-            let mut st = Station::new(rate, 0.0, "SUPERHET", "Hello RDS world");
-            st.noise_amp = noise;
-            let c = Content {
-                left: 0.4,
-                right: 0.4,
-                pilot: 0.1,
-                rds,
-            };
-            let mut out = Vec::new();
-            feed(&mut ch, &mut st, c, 10.0, &mut out);
-            let info = ch.rds_info().expect("wfm");
-            println!(
-                "noise {noise} rds {rds}: locked {} synced {} ps {:?} rt {:?}",
-                ch.stereo_locked(),
-                ch.rds_synced(),
-                info.ps,
-                info.rt
-            );
+    for (name, mistune, ppm) in [
+        ("on tune", 0.0, 0.0),
+        ("+5 kHz", 5_000.0, 0.0),
+        ("-5 kHz", -5_000.0, 0.0),
+        ("+100 ppm", 0.0, 100.0),
+        ("-5 kHz -100 ppm", -5_000.0, -100.0),
+    ] {
+        for noise in [0.0, 0.3, 0.5, 0.7, 0.9] {
+            for rds in [0.02, 0.035] {
+                let r = receive(noise, rds, mistune, ppm, true, 12.0);
+                println!(
+                    "{name:<16} noise {noise:<4} rds {rds}: PS {:>5.2?} s  RT {:>5.2?} s  stereo {}  garbage {}",
+                    r.ps_at, r.rt_at, r.stereo, r.garbage
+                );
+            }
         }
+    }
+}
+
+#[test]
+fn rds_is_decoded_when_the_vfo_is_off_the_station() {
+    for mistune in [-5_000.0, 5_000.0] {
+        let r = receive(0.004, 0.035, mistune, 0.0, false, 6.0);
+        assert!(r.ps_at.is_some(), "PS at {mistune} Hz");
+        assert!(r.rt_at.is_some(), "RT at {mistune} Hz");
+        assert!(!r.garbage);
+    }
+}
+
+#[test]
+fn rds_is_decoded_with_a_wrong_sample_clock() {
+    for ppm in [-120.0, 120.0] {
+        let r = receive(0.004, 0.035, 0.0, ppm, true, 6.0);
+        assert!(r.ps_at.is_some(), "PS at {ppm} ppm");
+        assert!(r.rt_at.is_some(), "RT at {ppm} ppm");
+        assert!(!r.garbage);
     }
 }
 

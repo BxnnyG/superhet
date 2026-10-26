@@ -42,16 +42,30 @@ P2).
   so a weak station plays mono without clicks. De-emphasis is 50 us (default) or 75 us as before.
   The PLL detector has no limiter: clipping the large stereo sidebands would bias the lock phase.
 - **RDS** (`superhet-dsp::rds`): the multiplex is mixed with `exp(-j 3 phi)`, low-passed and
-  resampled to 19 kHz (16 samples per bit), run through a biphase matched filter with a
-  bit-clock phase picked by energy, a continuous BPSK axis estimate and differential decoding.
-  Blocks are found by the syndrome of the 10-bit check word with the five offset words, sync after
-  two valid blocks at the right distance, loss after more than 24 bad blocks of 40, burst
-  correction up to two bits. Groups 0A/0B and 2A/2B give PS, TA, M/S and RadioText; PI, PTY and TP
-  come from every group. Text that needed a correction must be received twice. Everything is
-  forgotten on a PI change, on a retune of more than 5 kHz and after 10 s without sync.
-  Unit tests verify the polynomial and offset words against the published syndromes, an encoder
-  built from the specification round-trips through the full FM chain (stereo separation above
-  20 dB, correct PS / RT / PI / PTY, also with noise and 8-bit quantisation).
+  resampled to 19 kHz (16 samples per bit). Carrier recovery is a decision-directed BPSK Costas
+  loop with frequency-locked-loop assist on the derotated samples, so a jittering or slightly
+  offset pilot-derived carrier (up to about +-150 Hz) does not matter. The matched filter is the
+  pulse of IEC 62106 (Manchester pair of the `cos(pi f T / 4)` shape); bit timing is a
+  second-order early/late loop with cubic interpolation that follows sample-clock errors of a few
+  hundred ppm (the 16 sample phases only seed it). Soft symbols are differentially decoded, every
+  bit carries a reliability. Blocks are found by the syndrome of the 10-bit check word with the
+  five offset words, sync after two valid blocks at the right distance, loss after more than 24
+  bad blocks of 40, a quick re-sync after three bad blocks in a row (bit slip). In sync, bursts
+  of up to five bits are corrected through a syndrome table (these bursts have unique syndromes);
+  the longer the burst, the more unreliable the flipped bits must be relative to the rest of the
+  block. Groups 0A/0B and 2A/2B give PS, TA, M/S and RadioText; PI, PTY and TP come from every
+  group. PI must be received twice before it is shown or replaces a station; PS and RadioText
+  segments are taken over at once only from error-free blocks and only if nothing complete was
+  there before, otherwise (corrected block, or a change of text that is already shown) they must
+  be received twice in a row; the RadioText A/B flag from a corrected block counts only when
+  repeated. Everything is forgotten on a PI change, on a retune of more than 5 kHz and after 10 s
+  without sync.
+  Unit tests verify the polynomial and offset words against the published syndromes, the burst
+  syndromes, an encoder built from the specification round-trips through the full FM chain
+  (stereo separation above 20 dB, correct PS / RT / PI / PTY, also with noise, 8-bit
+  quantisation, a VFO 5 kHz off the station and a sample clock off by 120 ppm); waveform tests
+  cover weak signals (7 dB Eb/N0) with clock drift, carrier offset and phase noise, and pure noise
+  must decode nothing.
 - **Audio format** (`docs/protocol-audio.md`, still `AudioFrame` v1): `channels` may be 2 (Opus
   stereo packet, 96 kbit/s), flag bit 1 = stereo pilot locked. `sample_pos` stays in sample
   frames. Old consumers that assumed `channels = 1` must follow the field; the only consumer
