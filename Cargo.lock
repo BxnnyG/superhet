@@ -2081,8 +2081,14 @@ dependencies = [
 name = "superhet-worker"
 version = "0.1.0"
 dependencies = [
+ "async-nats",
  "axum",
+ "futures-util",
  "http-body-util",
+ "serde_json",
+ "sqlx",
+ "superhet-bus",
+ "superhet-db",
  "tokio",
  "tower",
  "tracing",

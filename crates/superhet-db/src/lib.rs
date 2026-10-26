@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod bookmarks;
+pub mod decoder_events;
 pub mod profiles;
 
 use std::time::Duration;

@@ -133,6 +133,7 @@ services:
       SUPERHET_NATS_URL: nats://nats:4222
       SUPERHET_NATS_USER: worker
       SUPERHET_NATS_PASSWORD: ${NATS_WORKER_PASSWORD}
+      SUPERHET_EVENT_RETENTION_DAYS: ${SUPERHET_EVENT_RETENTION_DAYS:-30}
     depends_on:
       postgres: { condition: service_healthy }
       nats: { condition: service_healthy }

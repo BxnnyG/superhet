@@ -1,6 +1,6 @@
 # WebSocket protocol: spectrum gateway and state feed (v1)
 
-The state feed (`/api/v1/ws/state`) is described at the end. The audio socket, including the
+The state feed (`/api/v1/ws/state`) is described at the end; the decoder event feed (`/api/v1/ws/events`) in `api-decoder-events.md`. The audio socket, including the
 `{"type":"rds"}` text messages with the decoded RDS state of a VFO (PS, RadioText, PI, PTY), is
 specified in `docs/protocol-audio.md`. Spectrum endpoint: `GET /api/v1/ws/spectrum?dev=<device-id>` on **superhet-api** (port 8073). Part of the
 browser-facing edge described in `docs/ARCHITECTURE.md` (section 2, step 3a). The audio socket
