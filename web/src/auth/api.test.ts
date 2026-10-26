@@ -14,6 +14,11 @@ describe("auth client", () => {
       setupRequired: false,
       authenticated: true,
       username: "a",
+      userId: null,
+      role: "admin",
+      kind: "user",
+      mustChangePassword: false,
+      guest: { enabled: false, privacyText: null },
     });
     expect(() => parseStatus({})).toThrow(AuthError);
   });

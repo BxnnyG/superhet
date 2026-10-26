@@ -58,6 +58,10 @@ export interface PaletteDeps {
   toggleAudio: () => void;
   exportLog: () => void;
   openSettings: () => void;
+  /** Inspector tabs the role can see; default all. */
+  tabs?: readonly InspectorTab[];
+  /** The role may add bookmarks; default true. */
+  canBookmark?: boolean;
 }
 
 /** Longest list per group while searching; the list is for picking, not browsing. */
@@ -221,20 +225,22 @@ function actionItems(deps: PaletteDeps): PaletteItem[] {
       "autoSquelch",
     );
   }
-  add(
-    "bookmark",
-    "Add a bookmark here",
-    ["save", "favourite", "store"],
-    act({ type: "bookmark" }),
-    "bookmark",
-  );
+  if (deps.canBookmark !== false) {
+    add(
+      "bookmark",
+      "Add a bookmark here",
+      ["save", "favourite", "store"],
+      act({ type: "bookmark" }),
+      "bookmark",
+    );
+  }
   add(
     "audio",
     deps.audioEnabled ? "Turn audio off" : "Turn audio on",
     ["sound", "speaker", "mute", "output"],
     deps.toggleAudio,
   );
-  for (const tab of INSPECTOR_TABS) {
+  for (const tab of deps.tabs ?? INSPECTOR_TABS) {
     add(`tab-${tab}`, `Open the ${INSPECTOR_LABEL[tab]} tab`, ["inspector", "panel", tab], () =>
       deps.showTab(tab),
     );

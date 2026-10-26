@@ -83,7 +83,8 @@ export function runShortcut(action: ShortcutAction, ctx: ShortcutContext): boole
     case "delete": {
       if (!active) return false;
       const gone = active;
-      ctx.vfoCtl.remove(gone.id);
+      // `false`: the receiver belongs to somebody else and the controller already said so.
+      if (ctx.vfoCtl.remove(gone.id) === false) return true;
       toasts.push({
         key: "vfo-removed",
         tone: "info",

@@ -3,7 +3,9 @@
 // The confirmed list is pushed in by the state store (`ingest`); one REST read at start is the
 // fallback if the socket is not up. Plain TS; React subscribes via `subscribe`/`getSnapshot`.
 
+import { reportAccessError } from "../auth/accessErrors";
 import type { DeviceState } from "../spectrum/api";
+import { toasts } from "../ui/toast";
 import {
   createVfoApi,
   type Retune,
@@ -38,6 +40,24 @@ export interface VfoControllerOptions {
   onState?: (state: DeviceState) => void;
 }
 
+/** What the viewer may do with VFOs (role, ownership, guest policy); set after creation. */
+export interface VfoGuards {
+  /**
+   * Whether the viewer may change or delete this VFO (listeners and guests: only their own).
+   * A refused change is not sent; a toast says why.
+   */
+  canModify?: (vfo: Vfo) => boolean;
+  /** Reason why a new VFO must not be requested (known quota or guest policy), or null. */
+  createBlock?: (req: VfoCreate, current: readonly Vfo[]) => string | null;
+}
+
+const NOT_MINE = {
+  key: "not-owner",
+  tone: "warn",
+  title: "Not your receiver",
+  body: "This receiver belongs to someone else. Only its owner, an operator or an admin can change it.",
+} as const;
+
 type Op = { kind: "create"; req: VfoCreate } | { kind: "delete"; id: number };
 
 export function applyVfoPatch(vfo: Vfo, patch: VfoPatch): Vfo {
@@ -56,6 +76,7 @@ export function applyVfoPatch(vfo: Vfo, patch: VfoPatch): Vfo {
 export class VfoController {
   private readonly api: VfoApi;
   private readonly debounceMs: number;
+  private guards: VfoGuards = {};
   private confirmed: Vfo[] = [];
   private loaded = false;
   private selectedId: number | null = null;
@@ -77,6 +98,11 @@ export class VfoController {
     this.api = opts.api ?? createVfoApi();
     this.debounceMs = opts.debounceMs ?? 50;
     this.snapshot = this.build();
+  }
+
+  /** Replace the permission guards (the signed-in role can change while the page runs). */
+  setGuards(guards: VfoGuards): void {
+    this.guards = guards;
   }
 
   readonly subscribe = (listener: () => void): (() => void) => {
@@ -108,6 +134,16 @@ export class VfoController {
 
   /** Create a VFO; it appears (and is selected) when the daemon has answered. */
   create(req: VfoCreate): void {
+    const block = this.guards.createBlock?.(req, this.snapshot.vfos);
+    if (block) {
+      toasts.push({
+        key: "vfo-create",
+        tone: "warn",
+        title: "Cannot open a receiver",
+        body: block,
+      });
+      return;
+    }
     const pitch = req.mode === "cw" && req.cwPitchHz === undefined ? loadCwPitch() : null;
     this.ops.push({ kind: "create", req: pitch === null ? req : { ...req, cwPitchHz: pitch } });
     this.error = null;
@@ -117,6 +153,7 @@ export class VfoController {
 
   /** Change a VFO; fields of earlier unsent updates of the same VFO are overwritten. */
   update(id: number, patch: VfoPatch): void {
+    if (!this.mayModify(id)) return;
     // Switching a VFO to CW starts with the pitch the user last picked (the daemon would
     // otherwise reset it to 700 Hz).
     const current = this.confirmed.find((v) => v.id === id);
@@ -134,13 +171,22 @@ export class VfoController {
     this.schedule();
   }
 
-  remove(id: number): void {
+  remove(id: number): boolean {
+    if (!this.mayModify(id)) return false;
     this.pending.delete(id);
     this.ops.push({ kind: "delete", id });
     if (this.selectedId === id) this.selectedId = null;
     this.error = null;
     this.publish();
     this.schedule();
+    return true;
+  }
+
+  private mayModify(id: number): boolean {
+    const vfo = this.confirmed.find((v) => v.id === id);
+    if (!vfo || !this.guards.canModify || this.guards.canModify(vfo)) return true;
+    toasts.push(NOT_MINE);
+    return false;
   }
 
   /** Confirmed list pushed by the state store; ignored while a change is pending or in flight. */
@@ -223,7 +269,8 @@ export class VfoController {
     } catch (e) {
       if (this.stopped) return;
       failed = true;
-      this.error = message(e);
+      // A refusal by role, ownership or guest policy is a toast, not a red banner.
+      this.error = reportAccessError(e) ? null : message(e);
       // Drop unsent changes of the failed VFO; the display falls back to the device state.
       if (patchEntry) this.pending.delete(patchEntry[0]);
     } finally {

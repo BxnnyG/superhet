@@ -1,3 +1,5 @@
+import { usePermissions } from "../auth/context";
+import { NEEDS_OPERATOR, NOT_YOUR_VFO, canModifyVfo } from "../auth/permissions";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -82,16 +84,19 @@ function ActiveVfo({
   wide: boolean;
   locked: boolean;
 }) {
+  const perms = usePermissions();
+  // Somebody else's receiver: the controls stay visible but are disabled (the server says 403).
+  const readOnly = !canModifyVfo(perms, vfo);
   const stepHz = stepFor(r.step, vfo.mode);
   const nudge = (dir: 1 | -1) =>
     r.vfoCtl.update(vfo.id, { freqHz: snapFrequency(vfo.freqHz + dir * stepHz, stepHz) });
   const onUpdate = (id: number, patch: VfoPatch) => r.vfoCtl.update(id, patch);
   return (
     <>
-      <div
-        role="group"
+      <fieldset
+        disabled={readOnly}
         aria-label="Active VFO"
-        className="flex min-w-0 items-center gap-2 shell:shrink-0"
+        className="m-0 flex min-w-0 items-center gap-2 border-0 p-0 shell:shrink-0"
       >
         <span
           aria-hidden="true"
@@ -101,6 +106,7 @@ function ActiveVfo({
         <span className="shrink-0 text-xs font-medium text-fg-muted num max-2xl:sr-only">
           VFO {vfo.id}
         </span>
+        {readOnly && <Badge title={NOT_YOUR_VFO}>read-only</Badge>}
         <IconButton
           label="Down one step"
           variant="secondary"
@@ -141,7 +147,8 @@ function ActiveVfo({
         <IconButton
           label="Bookmark this frequency"
           className="max-phone:size-11"
-          tip="Bookmark this frequency (B)"
+          tip={perms.canEditBookmarks ? "Bookmark this frequency (B)" : NEEDS_OPERATOR}
+          disabled={!perms.canEditBookmarks}
           onClick={r.startBookmark}
         >
           <BookmarkIcon />
@@ -152,12 +159,12 @@ function ActiveVfo({
             paused
           </Badge>
         )}
-      </div>
+      </fieldset>
       {wide && (
-        <div
-          role="group"
+        <fieldset
+          disabled={readOnly}
           aria-label="Demodulator"
-          className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 max-shell:order-3 max-shell:basis-full shell:basis-[31rem] shell:flex-1 shell:flex-nowrap"
+          className="m-0 flex min-w-0 border-0 p-0 flex-wrap items-center gap-x-3 gap-y-2 max-shell:order-3 max-shell:basis-full shell:basis-[31rem] shell:flex-1 shell:flex-nowrap"
         >
           <ModeSelect vfo={vfo} onUpdate={onUpdate} />
           <BandwidthSelect vfo={vfo} onUpdate={onUpdate} />
@@ -171,7 +178,7 @@ function ActiveVfo({
             />
             <SMeter audio={r.audio} vfoId={vfo.id} inline />
           </div>
-        </div>
+        </fieldset>
       )}
     </>
   );

@@ -1,19 +1,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ChangePasswordDialog } from "../auth/ChangePasswordDialog";
-import { useAuth } from "../auth/context";
-import {
-  Button,
-  Field,
-  IconButton,
-  KeyIcon,
-  Kbd,
-  LogOutIcon,
-  SegmentedControl,
-  SettingsIcon,
-  UserIcon,
-} from "../ui";
+import { Button, Field, IconButton, Kbd, SegmentedControl, SettingsIcon } from "../ui";
 import { type ThemePreference } from "../ui/theme";
 import { OPEN_SETTINGS_EVENT, useAppEvent } from "./appEvents";
+import { AccountDialogs, AccountSection, type AccountDialogKind } from "./AccountSection";
 import { getWheelMode, setWheelMode, subscribeWheelMode } from "../spectrum/wheelMode";
 
 interface Props {
@@ -27,8 +16,7 @@ interface Props {
 export function SettingsMenu({ theme, onTheme, onShortcuts }: Props) {
   const wheel = useSyncExternalStore(subscribeWheelMode, getWheelMode);
   const [open, setOpen] = useState(false);
-  const [passwordOpen, setPasswordOpen] = useState(false);
-  const auth = useAuth();
+  const [accountDialog, setAccountDialog] = useState<AccountDialogKind | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   useAppEvent(OPEN_SETTINGS_EVENT, () => setOpen(true));
 
@@ -108,44 +96,10 @@ export function SettingsMenu({ theme, onTheme, onShortcuts }: Props) {
             Keyboard shortcuts
             <Kbd>?</Kbd>
           </Button>
-          {auth && (
-            <div className="flex flex-col gap-1 border-t border-border pt-3">
-              <div className="flex min-w-0 items-center gap-2 px-1 pb-1 text-sm">
-                <UserIcon className="shrink-0 text-fg-subtle" />
-                <span className="sr-only">Signed in as</span>
-                <span className="truncate font-medium" data-testid="signed-in-user">
-                  {auth.username}
-                </span>
-              </div>
-              <Button
-                variant="ghost"
-                icon={<KeyIcon />}
-                className="justify-start"
-                onClick={() => {
-                  setOpen(false);
-                  setPasswordOpen(true);
-                }}
-              >
-                Change password
-              </Button>
-              <Button
-                variant="ghost"
-                icon={<LogOutIcon />}
-                className="justify-start"
-                onClick={() => {
-                  setOpen(false);
-                  void auth.signOut();
-                }}
-              >
-                Sign out
-              </Button>
-            </div>
-          )}
+          <AccountSection onClose={() => setOpen(false)} onDialog={setAccountDialog} />
         </div>
       )}
-      {passwordOpen && auth && (
-        <ChangePasswordDialog client={auth.client} onClose={() => setPasswordOpen(false)} />
-      )}
+      <AccountDialogs kind={accountDialog} onClose={() => setAccountDialog(null)} />
     </div>
   );
 }

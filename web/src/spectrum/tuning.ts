@@ -4,6 +4,8 @@
 // the user tuning lock (take/drop) and refuses centre/rate changes while the lock is held.
 // Plain TS; React subscribes through `subscribe`/`getSnapshot` (useSyncExternalStore).
 
+import { reportAccessError } from "../auth/accessErrors";
+import { toasts } from "../ui/toast";
 import {
   ApiError,
   createApiClient,
@@ -55,6 +57,7 @@ export class TuningController {
   private readonly api: ApiClient;
   private readonly debounceMs: number;
   private lockBusy = false;
+  private allowed = true;
   private snapshot: TuningSnapshot = {
     state: null,
     display: null,
@@ -100,8 +103,23 @@ export class TuningController {
     this.abort = null;
   }
 
+  /** Whether the viewer may change the device (operators and admins); default yes. */
+  setAllowed(allowed: boolean): void {
+    this.allowed = allowed;
+  }
+
   /** Request a change; fields of earlier unsent requests are overwritten, others kept. */
   request(patch: TunePatch): void {
+    if (!this.allowed) {
+      // Spectrum gestures (axis drag, wheel on the scale) land here for listeners and guests.
+      toasts.push({
+        key: "tune-denied",
+        tone: "warn",
+        title: "Operators and admins only",
+        body: "Only operators and admins can change the centre frequency, sample rate or gain.",
+      });
+      return;
+    }
     const held = this.snapshot.state?.locks ?? [];
     if (held.length > 0) {
       const cur = this.snapshot.state;
@@ -131,15 +149,15 @@ export class TuningController {
     this.confirm(state, true);
   }
 
-  /** Take (`true`) or drop (`false`) the user tuning lock. */
-  async setLock(on: boolean): Promise<boolean> {
+  /** Take (`true`) or drop (`false`) the user tuning lock; `force` (admins) drops all user locks. */
+  async setLock(on: boolean, force = false): Promise<boolean> {
     if (this.lockBusy) return false;
     this.lockBusy = true;
     this.publish({});
     try {
       const state = on
         ? await this.api.lock(this.opts.device)
-        : await this.api.unlock(this.opts.device);
+        : await this.api.unlock(this.opts.device, force);
       if (this.stopped) return false;
       this.generation += 1;
       this.lockBusy = false;
@@ -148,7 +166,7 @@ export class TuningController {
     } catch (e) {
       if (this.stopped) return false;
       this.lockBusy = false;
-      this.publish({ error: message(e) });
+      this.publish({ error: reportAccessError(e) ? null : message(e) });
       return false;
     }
   }
@@ -201,7 +219,7 @@ export class TuningController {
           this.publish({});
           this.rejectLocked(e.holders ?? [], e.message);
         } else {
-          this.publish({ error: message(e) });
+          this.publish({ error: reportAccessError(e) ? null : message(e) });
         }
         void this.refresh(true);
       });

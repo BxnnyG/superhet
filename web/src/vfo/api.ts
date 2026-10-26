@@ -39,6 +39,12 @@ export interface Vfo {
   toneSquelchHz?: number | null;
   offsetHz: number;
   status: "active" | "paused";
+  /** The viewer created it. Absent on daemons without accounts (everything is editable). */
+  mine?: boolean;
+  /** Nobody owns it (default VFO, loaded profile): everybody may listen, listeners cannot edit. */
+  shared?: boolean;
+  /** Raw owner (`u:<id>` / `g:<id>`); only sent to operators and admins. */
+  owner?: string;
 }
 
 export interface VfoCreate {
@@ -139,6 +145,9 @@ export function parseVfo(raw: unknown): Vfo {
         : null,
     offsetHz: typeof offset_hz === "number" ? offset_hz : 0,
     status: status === "paused" ? "paused" : "active",
+    ...(typeof raw.mine === "boolean" ? { mine: raw.mine } : {}),
+    ...(typeof raw.shared === "boolean" ? { shared: raw.shared } : {}),
+    ...(typeof raw.owner === "string" ? { owner: raw.owner } : {}),
   };
 }
 

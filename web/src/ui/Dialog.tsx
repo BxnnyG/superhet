@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { cn } from "./cn";
 import { IconButton } from "./IconButton";
 import { CloseIcon } from "./icons";
 
@@ -9,11 +10,13 @@ const FOCUSABLE =
 interface Props {
   title: string;
   onClose: () => void;
+  /** `lg` for dialogs with lists or tables (default `sm`). */
+  size?: "sm" | "lg";
   children: ReactNode;
 }
 
 /** Modal dialog: backdrop click and Esc close it, Tab is trapped, focus returns on close. */
-export function Dialog({ title, onClose, children }: Props) {
+export function Dialog({ title, onClose, size = "sm", children }: Props) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -65,7 +68,10 @@ export function Dialog({ title, onClose, children }: Props) {
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="mt-auto flex h-fit w-full max-w-sm flex-col gap-4 rounded-xl border sm:mb-auto border-border bg-surface-1 p-5 shadow-pop outline-none"
+        className={cn(
+          "mt-auto flex h-fit w-full flex-col gap-4 rounded-xl border sm:mb-auto border-border bg-surface-1 p-5 shadow-pop outline-none",
+          size === "lg" ? "max-w-2xl" : "max-w-sm",
+        )}
       >
         <div className="flex items-center justify-between gap-2">
           <h2 id={titleId} className="text-base font-semibold tracking-tight">

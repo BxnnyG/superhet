@@ -3,7 +3,7 @@
 // the I/O and keeps the socket alive (reconnect with backoff, stops while the session is lost,
 // reloads the newest page after a reconnect so nothing is missed).
 
-import { isSessionLost, verifySession } from "../auth/session";
+import { checkSessionAfterClose, isSessionLost } from "../auth/session";
 import { backoffDelay, type SocketStatus } from "../spectrum/socket";
 import { createEventApi, type EventApi } from "./api";
 import {
@@ -173,11 +173,9 @@ export class DecoderEventStore {
       return;
     }
     this.ws = ws;
-    let opened = false;
     ws.onopen = () => {
       // A reconnect may have missed events: read the newest page again (merged by id).
       if (this.attempt > 0) this.refresh();
-      opened = true;
       this.attempt = 0;
       this.setStatus("connected");
     };
@@ -189,7 +187,7 @@ export class DecoderEventStore {
     ws.onclose = () => {
       if (this.ws !== ws) return;
       this.ws = null;
-      if (!opened) void verifySession();
+      checkSessionAfterClose();
       this.scheduleReconnect();
     };
     ws.onerror = () => undefined;

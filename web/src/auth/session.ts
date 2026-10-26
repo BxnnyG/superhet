@@ -30,6 +30,27 @@ export function onSessionLost(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
+// The auth gate re-reads /auth/status when the server says something about the session changed
+// (a socket closed, or a data route answered `password_change_required`).
+const statusListeners = new Set<(raw: unknown) => void>();
+const recheckListeners = new Set<() => void>();
+
+/** Receives the raw `/auth/status` document every time a session check saw a signed-in caller. */
+export function onSessionStatus(listener: (raw: unknown) => void): () => void {
+  statusListeners.add(listener);
+  return () => statusListeners.delete(listener);
+}
+
+/** The gate should re-read the status (e.g. the account was forced to change its password). */
+export function onRecheckRequested(listener: () => void): () => void {
+  recheckListeners.add(listener);
+  return () => recheckListeners.delete(listener);
+}
+
+export function requestRecheck(): void {
+  for (const l of [...recheckListeners]) l();
+}
+
 function urlOf(input: RequestInfo | URL): string {
   if (typeof input === "string") return input;
   if (input instanceof URL) return input.pathname;
@@ -43,7 +64,20 @@ function urlOf(input: RequestInfo | URL): string {
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const res = await fetch(input, { credentials: "same-origin", ...init });
   if (res.status === 401 && !urlOf(input).startsWith(AUTH_PREFIX)) notifyUnauthorized();
+  else if (res.status === 403 && !urlOf(input).startsWith(AUTH_PREFIX)) void checkForcedChange(res);
   return res;
+}
+
+/** A 403 `password_change_required` means the account must change its password first. */
+async function checkForcedChange(res: Response): Promise<void> {
+  try {
+    const body: unknown = await res.clone().json();
+    if (typeof body === "object" && body !== null && "error" in body) {
+      if (body.error === "password_change_required") requestRecheck();
+    }
+  } catch {
+    // Not JSON: an ordinary refusal.
+  }
 }
 
 /**
@@ -66,10 +100,21 @@ export async function verifySession(
     const body: unknown = await res.json();
     if (typeof body === "object" && body !== null && "authenticated" in body) {
       if (body.authenticated === false) notifyUnauthorized();
+      else for (const l of [...statusListeners]) l(body);
     }
   } catch {
     // Backend unreachable: keep the normal reconnect backoff.
   } finally {
     verifying = false;
   }
+}
+
+/**
+ * A WebSocket closed. That can be a network blip, but also a kick, a disabled account or a reset
+ * password (the server closes the sockets at once): ask the server who we are. The sockets call
+ * this on every close; the check is single flight, the reconnect backoff spaces the closes, and
+ * an ended session stops the reconnects (`isSessionLost`).
+ */
+export function checkSessionAfterClose(): void {
+  void verifySession();
 }

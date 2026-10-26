@@ -3,6 +3,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AudioController } from "../audio/controller";
+import { usePermissions } from "../auth/context";
+import {
+  NEEDS_OPERATOR,
+  canListenVfo,
+  canModifyVfo,
+  frequencyAllowed,
+  knownVfoLimit,
+  modeAllowed,
+  ownVfoCount,
+  type Permissions,
+} from "../auth/permissions";
 import { builtinBandPlan, matchBandPlan, suggestName } from "../bandplan/model";
 import { OverlayStore } from "../bandplan/settings";
 import { newInput, receiverState } from "../bookmarks/model";
@@ -16,6 +27,7 @@ import { formatFrequency } from "../spectrum/freq";
 import { LevelController, loadLevelSettings } from "../spectrum/levels";
 import type { SocketStatus } from "../spectrum/socket";
 import { TuningController } from "../spectrum/tuning";
+import { toasts } from "../ui/toast";
 import { AutoSquelch } from "../vfo/autoSquelch";
 import { VfoController } from "../vfo/controller";
 import { defaultModeFor, snapFrequency, STEPS_HZ, stepFor, type StepChoice } from "../vfo/model";
@@ -40,7 +52,24 @@ export interface ViewActions {
 
 const NO_VIEW_ACTIONS: ViewActions = { reset: () => undefined, zoom: () => undefined };
 
+/** Why a new VFO must not even be requested (guest policy and quota known up front), or null. */
+export function createBlockReason(
+  perms: Permissions,
+  vfos: readonly { mine?: boolean }[],
+  req: { freqHz: number; mode: string },
+): string | null {
+  const limit = knownVfoLimit(perms);
+  if (limit !== null && ownVfoCount(vfos) >= limit) {
+    return `You can open at most ${limit} ${limit === 1 ? "receiver" : "receivers"}. Close one first.`;
+  }
+  if (!modeAllowed(perms, req.mode)) return "This mode is not open to guests.";
+  if (!frequencyAllowed(perms, req.freqHz))
+    return "This frequency is outside the range open to guests.";
+  return null;
+}
+
 export function useReceiver(device: string) {
+  const perms = usePermissions();
   const [levelController] = useState(() => new LevelController(loadLevelSettings()));
   const store = useMemo(() => new StateStore({ device }), [device]);
   const feed = useSyncExternalStore(store.subscribe, store.getSnapshot);
@@ -58,6 +87,15 @@ export function useReceiver(device: string) {
       }),
     [device, tuning],
   );
+  const canTune = perms.canTune;
+  useEffect(() => tuning.setAllowed(canTune), [tuning, canTune]);
+  // Role, ownership and guest limits: refused changes are not sent and say why.
+  useEffect(() => {
+    vfoCtl.setGuards({
+      canModify: (vfo) => canModifyVfo(perms, vfo),
+      createBlock: (req, current) => createBlockReason(perms, current, req),
+    });
+  }, [vfoCtl, perms]);
   const vfoSnap = useSyncExternalStore(vfoCtl.subscribe, vfoCtl.getSnapshot);
   const audio = useMemo(() => new AudioController({ device }), [device]);
   const [autoSquelch] = useState(() => new AutoSquelch());
@@ -77,6 +115,7 @@ export function useReceiver(device: string) {
   const [info, setInfo] = useState<SpectrumInfo | null>(null);
   const [spectrumError, setSpectrumError] = useState<string | null>(null);
   const [step, setStep] = useState<StepChoice>("auto");
+  const canSeeDecoders = perms.canSeeDecoders;
 
   const stepRef = useRef(step);
   useEffect(() => {
@@ -130,7 +169,8 @@ export function useReceiver(device: string) {
     store.start();
     vfoCtl.start();
     audio.start();
-    decoderEvents.start();
+    // Guests only get the decoder history while the policy shows it.
+    if (canSeeDecoders) decoderEvents.start();
     return () => {
       unbind();
       store.stop();
@@ -138,18 +178,23 @@ export function useReceiver(device: string) {
       audio.stop();
       decoderEvents.stop();
     };
-  }, [store, tuning, vfoCtl, audio, decoderEvents]);
+  }, [store, tuning, vfoCtl, audio, decoderEvents, canSeeDecoders]);
 
   // Bookmarks live on the server: read them at start and again once the state feed is up.
   const feedUp = feed.status === "connected";
+  const canReadBookmarks = perms.canReadBookmarks;
   useEffect(() => {
-    void bookmarks.refresh();
-  }, [bookmarks, feedUp]);
+    if (canReadBookmarks) void bookmarks.refresh();
+  }, [bookmarks, feedUp, canReadBookmarks]);
 
   // The audio controller subscribes to the listened VFOs plus the active one (its S-meter and
   // squelch Auto need frames even when it is not in the mix). Wait for the first VFO list so
   // saved listen settings are not pruned against an empty one.
-  const vfoIds = vfoSnap.vfos.map((v) => v.id).join(",");
+  // Only receivers the viewer may hear: one foreign id makes the whole subscription `forbidden`.
+  const vfoIds = vfoSnap.vfos
+    .filter((v) => canListenVfo(perms, v))
+    .map((v) => v.id)
+    .join(",");
   const vfosLoaded = vfoSnap.loaded;
   useEffect(() => {
     if (!vfosLoaded) return;
@@ -180,8 +225,8 @@ export function useReceiver(device: string) {
   const applyDoc = useCallback((doc: StateDoc) => store.ingest(doc), [store]);
   const unlock = useCallback(() => tuning.setLock(false), [tuning]);
   const toggleLock = useCallback(
-    (on: boolean) => {
-      void tuning.setLock(on);
+    (on: boolean, force = false) => {
+      void tuning.setLock(on, force);
     },
     [tuning],
   );
@@ -190,7 +235,17 @@ export function useReceiver(device: string) {
   const centerHz = tuningSnap.display?.centerHz ?? null;
 
   // Open the bookmark dialog for the active VFO (or the centre), named after the band plan entry.
+  const canEditBookmarks = perms.canEditBookmarks;
   const startBookmark = useCallback(() => {
+    if (!canEditBookmarks) {
+      toasts.push({
+        key: "bookmark-denied",
+        tone: "warn",
+        title: NEEDS_OPERATOR,
+        body: "Bookmarks can only be added by operators and admins.",
+      });
+      return;
+    }
     const freqHz = selected?.freqHz ?? centerHz;
     if (freqHz === null) return;
     const name = suggestName(matchBandPlan(builtinBandPlan(), freqHz));
@@ -204,7 +259,7 @@ export function useReceiver(device: string) {
         ...receiverState(selected, selected !== null && autoSquelch.isAuto(selected), step),
       }),
     });
-  }, [bookmarks, selected, centerHz, autoSquelch, step]);
+  }, [bookmarks, selected, centerHz, autoSquelch, step, canEditBookmarks]);
   const errors = [spectrumError, tuningSnap.error, vfoSnap.error, audioSnap.error].filter(
     (e): e is string => e !== null,
   );

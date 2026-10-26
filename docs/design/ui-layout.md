@@ -75,6 +75,89 @@ notes and tokens: `docs/ui-design.md`.
   key hints in the palette. New keys: `F` types a frequency, `Alt+1..9` selects a VFO, `/` palette.
   Nothing fires while typing in a field or while a dialog is open.
 
+## Multi-user: sign-in screens, roles and the admin console (P1.5)
+
+Backend contract: `docs/api-users.md`, `docs/api-audit.md`, ADR-0011 and ADR-0012. Code:
+`web/src/auth/` (gate, pages, permissions) and `web/src/admin/` (console).
+
+### Gate (`AuthGate`)
+
+The app is gated on `GET /api/v1/auth/status`, in this order: setup wizard, invitation page (path
+`/invite/<token>`), login, forced password change, the app.
+
+- **Login** shows "Continue as guest" below the form while `guest.enabled`. The button opens a
+  card with the operator's privacy text (`guest.privacy_text`) and "Accept and continue as guest";
+  `503 guests_full` and `429 too_many_guests` get plain sentences.
+- **Forced password change** (`must_change_password`): one card, one-time password plus new
+  password twice, no other route works until it is done. A data route that answers `403
+  password_change_required` sends the gate here as well.
+- **Invitation** `/invite/<token>`: previews role and inviter (`GET /auth/invites/{token}`), asks
+  for user name and password, and removes the token from the address bar after accepting. A
+  used, revoked or expired link says so. The page sets `referrer: same-origin`.
+- **Session end**: every WebSocket close re-reads `/auth/status`. Signed out (kick, disabled
+  account, reset password, guest idle timeout) returns to the login page with a notice; a changed
+  role or a new forced password change is picked up without reload.
+
+### Role-aware shell
+
+One `Permissions` object per session (`web/src/auth/permissions.ts`, from role, kind and the guest
+limits that `POST /auth/guest` returns again for a resumed guest session). Controls the role cannot
+use are disabled with the reason as tooltip or hidden; the server answers 403 regardless.
+
+| Area | admin | operator | listener | guest |
+|---|---|---|---|---|
+| Centre, rate, gain, ppm (Source tab, centre pill) | yes | yes | read-only | read-only |
+| Tuning lock | take/release own, force-release others | take/release own | view holder | view (name hidden) |
+| Profiles section | yes | yes | hidden | hidden |
+| Bookmarks tab | edit | edit | read | tab hidden |
+| Clear decoder history | yes | yes | no | no |
+| Decoders tab | yes | yes | yes | only if the policy shows decoder events |
+| Own VFOs | yes | yes | yes (quota) | yes (policy) |
+| Other people's VFOs | edit and hear | edit and hear | shared: hear; others: dashed tab, no audio, read-only | same |
+| Settings menu | role badge, My sessions, Change password, Admin console, Sign out | same without console | same | End guest session only |
+
+- VFOs use the per-viewer flags `mine` and `shared` (`owner` only reaches operators and admins).
+  No fixed 8-VFO limit in the UI: the "+" button is disabled only for the guest policy, everything
+  else is a `403 vfo_limit` toast. The audio socket subscribes only to VFOs the viewer may hear
+  (one foreign id would make the whole subscription `forbidden`).
+- 403 codes become non-blocking toasts, not the red error banner: `not_owner`, `vfo_limit`,
+  `mode_not_allowed`, `frequency_not_allowed`, `locked` (guest policy), `forbidden`,
+  `password_change_required` (`web/src/auth/accessErrors.ts`).
+- The tuning lock names its holder ("Locked by alice"; "you" for the own account). Unlock releases
+  only the own lock; an admin gets "Force unlock tuning" for other accounts' locks
+  (`DELETE .../lock?force=true`).
+- Account menu: "My sessions" lists the account's browsers (`/me/sessions`) with sign out per
+  session; revoking the current one signs out.
+
+### Admin console (`/admin`, admins only)
+
+Own route, own chunk (lazy), no admin navigation for other roles ("Admins only" page, the API
+refuses regardless). Header with "Back to receiver" and sign out; sidebar of six sections on
+900 px and wider, a scrolling tab strip below that. Sections live at `/admin/<section>`:
+
+1. **Users and invites** (`users`): accounts with role select, status badges (disabled, one-time
+   password), live session count; actions: disable/enable, reset password, delete (confirmations;
+   the last active admin and the own account are protected). "New user" with optional password
+   (otherwise a generated one-time password is shown once, with copy). "Invite" creates a link
+   with role, expiry and note, shown once with copy; the invitation list revokes open links.
+2. **Live sessions** (`sessions`): every account and guest with role, address and browser as the
+   audit IP mode stores them, connections, the receivers they are tuned to (frequency, mode,
+   device/id), kick with confirmation; auto-refresh every 5 s (toggle).
+3. **Audit log** (`audit`): filters for time range (presets or custom), actor, actor type, role,
+   action (`user.*` prefix), outcome, IP or network, target; newest first, 50/100/250 rows with
+   Newer/Older cursor paging, expandable rows (browser, details JSON), CSV and JSON export with
+   the applied filters. Filters fold behind a button on phones.
+4. **Guest access** (`guests`): enable, guests online and per address, receivers per guest, idle
+   timeout, allowed modes, optional frequency window (MHz), "only while not locked", decoder
+   history for guests, privacy text (4000 characters). Save bar sticks to the bottom.
+5. **Audit settings** (`audit-settings`): retention for accounts and guests (0 = forever, guest
+   forever is flagged), IP mode (full, truncated, none) per class, stored entries and size.
+6. **Limits** (`limits`): receivers per listener and per operator (0 = daemon cap only).
+
+Settings forms keep an unsaved draft per section ("Unsaved changes", Discard). Tests: vitest for
+the gate, permissions, role gating of the shell, the admin API client and every section; there is
+no browser test setup in the repo yet (Playwright smoke test for criterion 8 is open).
+
 ## Later
 
 - Mobile sheets polish and the scanner UI (the scanner backend needs an ADR first).

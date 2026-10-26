@@ -3,7 +3,7 @@
 // and VFO controllers take their confirmed state from it (`bindState`). The socket reconnects
 // with backoff and stays down while the session is lost, like the spectrum and audio sockets.
 
-import { isSessionLost, verifySession } from "../auth/session";
+import { checkSessionAfterClose, isSessionLost } from "../auth/session";
 import { backoffDelay, type SocketStatus } from "../spectrum/socket";
 import { parseStateFrame, type StateDoc } from "./doc";
 
@@ -88,9 +88,7 @@ export class StateStore {
       return;
     }
     this.ws = ws;
-    let opened = false;
     ws.onopen = () => {
-      opened = true;
       this.attempt = 0;
       this.setStatus("connected");
     };
@@ -103,7 +101,7 @@ export class StateStore {
       if (this.ws !== ws) return;
       this.ws = null;
       // A rejected upgrade (401) looks like any failed connection: let the session check decide.
-      if (!opened) void verifySession();
+      checkSessionAfterClose();
       this.scheduleReconnect();
     };
     // `close` always follows `error`.
