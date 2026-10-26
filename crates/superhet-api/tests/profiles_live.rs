@@ -210,6 +210,7 @@ fn without_mine(vfos: &Value) -> Value {
     for vfo in vfos.as_array_mut().into_iter().flatten() {
         if let Some(object) = vfo.as_object_mut() {
             object.remove("mine");
+            object.remove("shared");
         }
     }
     vfos
@@ -227,6 +228,7 @@ fn essence(state: &Value) -> Value {
             if let Some(object) = v.as_object_mut() {
                 object.remove("owner");
                 object.remove("mine");
+                object.remove("shared");
             }
             v
         })
