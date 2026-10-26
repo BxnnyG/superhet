@@ -14,6 +14,7 @@ export { Logo } from "./Logo";
 export { Meter, type MeterTick } from "./Meter";
 export { NumberField } from "./NumberField";
 export { Panel, Section } from "./Section";
+export { PlainButton } from "./PlainButton";
 export { RowButton } from "./RowButton";
 export { SegmentedControl, type SegmentOption } from "./SegmentedControl";
 export { Select, type SelectOption } from "./Select";

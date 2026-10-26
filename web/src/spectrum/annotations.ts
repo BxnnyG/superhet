@@ -1,12 +1,19 @@
-// Band plan and bookmark overlay on the spectrum: a strip along the top edge with thin range bars
-// (stacked in lanes where ranges overlap), channel ticks with short labels and bookmark flags.
+// Band plan and bookmark overlay on the spectrum: a strip along the top edge with a thin ribbon of
+// range bars (stacked in lanes where ranges overlap), channel ticks with short labels and
+// clickable bookmark pins (a click applies the bookmark's whole receiver state).
 // `layoutStrip` is pure (geometry in CSS px, relative to the plot's left edge); `AnnotationLayer`
 // holds the data, draws the strip on the interaction canvas and hit-tests it. No React here.
 
 import { builtinBandPlan, categoryColor, visibleChannels, visibleRanges } from "../bandplan/model";
 import type { BandPlan, Channel } from "../bandplan/model";
 import type { BandRange, CategoryId } from "../bandplan/data";
-import { bookmarkColor, type Bookmark } from "../bookmarks/model";
+import {
+  bookmarkColor,
+  bookmarkTarget,
+  digitalBadge,
+  toneBadge,
+  type Bookmark,
+} from "../bookmarks/model";
 import type { VfoMode } from "../vfo/api";
 import { MODE_LABEL, formatBandwidth } from "../vfo/model";
 import { formatFrequency } from "./freq";
@@ -14,7 +21,7 @@ import { CANVAS_SANS, CANVAS_TEXT, CANVAS_TEXT_STRONG, CHIP_BG, CHIP_BORDER } fr
 import { spanWidth, type Span } from "./view";
 
 export const TOP_PAD = 2;
-export const LANE_H = 11;
+export const LANE_H = 9;
 export const MAX_LANES = 3;
 /** Channel/bookmark lane: tick (and flag) on top, short label below. */
 export const CHANNEL_LANE_H = 19;
@@ -28,6 +35,14 @@ export interface AnnotationTarget {
   freqHz: number;
   mode?: VfoMode;
   bandwidthHz?: number;
+  /** Squelch threshold in dBFS to apply. */
+  squelchDbfs?: number;
+  /** The squelch is meant to be set automatically (needs signal data, so it is not applied here). */
+  squelchAuto?: boolean;
+  /** Tuning step to select. */
+  stepHz?: number;
+  /** CTCSS tone squelch in Hz; null switches it off. Only set for NFM / AM capable targets. */
+  toneSquelchHz?: number | null;
 }
 
 export interface BarItem {
@@ -207,14 +222,7 @@ export function hitStrip(layout: StripLayout, x: number, y: number): AnnotationH
 /** The tuning a click on this hit performs, or null when it is not tunable. */
 export function hitTarget(hit: AnnotationHit | null): AnnotationTarget | null {
   if (!hit) return null;
-  if (hit.kind === "bookmark") {
-    const b = hit.bookmark;
-    return {
-      freqHz: b.freqHz,
-      ...(b.mode ? { mode: b.mode } : {}),
-      ...(b.bandwidthHz ? { bandwidthHz: b.bandwidthHz } : {}),
-    };
-  }
+  if (hit.kind === "bookmark") return bookmarkTarget(hit.bookmark);
   if (hit.kind === "channel" && hit.channel.mode) {
     const c = hit.channel;
     return {
@@ -241,6 +249,8 @@ export function hitTooltip(hit: AnnotationHit): Tooltip {
     const tech = [
       b.mode ? MODE_LABEL[b.mode] : null,
       b.bandwidthHz ? formatBandwidth(b.bandwidthHz) : null,
+      toneBadge(b),
+      digitalBadge(b),
     ]
       .filter(Boolean)
       .join(" · ");
@@ -355,7 +365,7 @@ export class AnnotationLayer {
       ctx.globalAlpha = b.range.approx ? 0.55 : 1;
       ctx.fillStyle = color;
       ctx.fillRect(x0, y, w, 2 * dpr);
-      ctx.globalAlpha = 0.14;
+      ctx.globalAlpha = 0.12;
       ctx.fillRect(x0, y + 2 * dpr, w, (LANE_H - 3) * dpr);
       if (b.label) {
         ctx.globalAlpha = 1;
@@ -391,13 +401,19 @@ export class AnnotationLayer {
       ctx.fillStyle = color;
       ctx.strokeStyle = color;
       ctx.lineWidth = Math.max(1, dpr);
-      // Flag: a down-pointing triangle with a faint stem through the rest of the canvas.
+      // Pin: a down-pointing triangle (outlined when favourite) with a faint stem through the
+      // rest of the canvas.
       ctx.beginPath();
       ctx.moveTo(x - 4 * dpr, top * dpr);
       ctx.lineTo(x + 4 * dpr, top * dpr);
       ctx.lineTo(x, (top + 7) * dpr);
       ctx.closePath();
       ctx.fill();
+      if (m.bookmark.favourite) {
+        ctx.strokeStyle = CANVAS_TEXT_STRONG;
+        ctx.stroke();
+        ctx.strokeStyle = color;
+      }
       ctx.globalAlpha = 0.2;
       ctx.beginPath();
       ctx.moveTo(x, (top + 7) * dpr);

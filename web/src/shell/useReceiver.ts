@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { AudioController } from "../audio/controller";
 import { builtinBandPlan, matchBandPlan, suggestName } from "../bandplan/model";
 import { OverlayStore } from "../bandplan/settings";
+import { newInput, receiverState } from "../bookmarks/model";
 import { BookmarkStore } from "../bookmarks/store";
 import { createProfileApi } from "../profiles/api";
 import type { StateDoc } from "../state/doc";
@@ -16,7 +17,7 @@ import type { SocketStatus } from "../spectrum/socket";
 import { TuningController } from "../spectrum/tuning";
 import { AutoSquelch } from "../vfo/autoSquelch";
 import { VfoController } from "../vfo/controller";
-import { defaultModeFor, snapFrequency, stepFor, type StepChoice } from "../vfo/model";
+import { defaultModeFor, snapFrequency, STEPS_HZ, stepFor, type StepChoice } from "../vfo/model";
 import { SpectrumMetrics } from "./metrics";
 import { createFor, patchFor } from "./annotationTuning";
 import { noticeLocked, noticeRetune } from "./notices";
@@ -88,16 +89,29 @@ export function useReceiver(device: string) {
     [vfoCtl],
   );
 
-  // A band plan channel or bookmark tunes the active VFO (mode and bandwidth when it has them);
-  // with no VFO yet it creates one.
+  // A band plan channel or bookmark tunes the active VFO (mode, bandwidth, squelch and tone when it
+  // has them, and the step); with no VFO yet it creates one. Alt-click on a bookmark makes a new VFO.
+  const applyStep = useCallback((t: AnnotationTarget) => {
+    if (t.stepHz !== undefined && (STEPS_HZ as readonly number[]).includes(t.stepHz)) {
+      setStep(t.stepHz);
+    }
+  }, []);
   const tuneTo = useCallback(
     (t: AnnotationTarget) => {
       const snap = vfoCtl.getSnapshot();
       const vfo = snap.vfos.find((v) => v.id === snap.selectedId) ?? snap.vfos[0];
       if (vfo) vfoCtl.update(vfo.id, patchFor(vfo, t));
       else if (snap.loaded) vfoCtl.create(createFor(t));
+      applyStep(t);
     },
-    [vfoCtl],
+    [vfoCtl, applyStep],
+  );
+  const tuneNew = useCallback(
+    (t: AnnotationTarget) => {
+      vfoCtl.create(createFor(t));
+      applyStep(t);
+    },
+    [vfoCtl, applyStep],
   );
 
   // A plain click on the spectrum creates the first VFO instead of moving the device centre.
@@ -178,17 +192,15 @@ export function useReceiver(device: string) {
     const name = suggestName(matchBandPlan(builtinBandPlan(), freqHz));
     bookmarks.openEditor({
       kind: "create",
-      draft: {
+      draft: newInput({
         name: name || `${formatFrequency(freqHz).slice(0, -4)} MHz`,
         freqHz,
         mode: selected?.mode ?? null,
         bandwidthHz: selected?.bandwidthHz ?? null,
-        tags: [],
-        color: null,
-        notes: null,
-      },
+        ...receiverState(selected, selected !== null && autoSquelch.isAuto(selected), step),
+      }),
     });
-  }, [bookmarks, selected, centerHz]);
+  }, [bookmarks, selected, centerHz, autoSquelch, step]);
   const errors = [spectrumError, tuningSnap.error, vfoSnap.error, audioSnap.error].filter(
     (e): e is string => e !== null,
   );
@@ -228,6 +240,7 @@ export function useReceiver(device: string) {
     bookmarks,
     bookmarkSnap,
     tuneTo,
+    tuneNew,
     startBookmark,
     errors,
   };

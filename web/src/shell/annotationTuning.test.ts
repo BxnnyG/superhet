@@ -30,3 +30,38 @@ it("creates a VFO with the target's mode or the default for the frequency", () =
     bandwidthHz: 12_500,
   });
 });
+
+it("applies squelch and the CTCSS tone squelch, the tone only to NFM and AM", () => {
+  const target = {
+    freqHz: 145_500_000,
+    mode: "nfm" as const,
+    squelchDbfs: -80,
+    toneSquelchHz: 88.5,
+  };
+  expect(patchFor({ mode: "nfm" }, target)).toEqual({
+    freqHz: 145_500_000,
+    squelchDbfs: -80,
+    toneSquelchHz: 88.5,
+  });
+  // Switching from WFM to NFM: the tone rides along with the mode change.
+  expect(patchFor({ mode: "wfm" }, target)).toMatchObject({ mode: "nfm", toneSquelchHz: 88.5 });
+  // A WFM target has no tone squelch.
+  expect(
+    patchFor({ mode: "nfm" }, { freqHz: 100_100_000, mode: "wfm", toneSquelchHz: null }),
+  ).toEqual({ freqHz: 100_100_000, mode: "wfm", bandwidthHz: null });
+  // "No tone" switches a left-over tone squelch off.
+  expect(patchFor({ mode: "nfm" }, { freqHz: 1, toneSquelchHz: null })).toEqual({
+    freqHz: 1,
+    toneSquelchHz: null,
+  });
+  expect(createFor(target)).toEqual({
+    freqHz: 145_500_000,
+    mode: "nfm",
+    squelchDbfs: -80,
+    toneSquelchHz: 88.5,
+  });
+  expect(createFor({ freqHz: 100_100_000, toneSquelchHz: 88.5 })).toEqual({
+    freqHz: 100_100_000,
+    mode: "wfm",
+  });
+});

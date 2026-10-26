@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  exportChirp,
   exportGqrx,
   exportSuperhet,
+  parseChirp,
+  parseCsvLine,
   parseGqrx,
   parseImport,
   parseSdrpp,
   parseSuperhet,
 } from "./formats";
-import { newBookmarks, parseTags, type BookmarkInput } from "./model";
+import { newBookmarks, newInput, parseTags, type BookmarkInput } from "./model";
 
 const GQRX = `# Tag name          ; color
 Untagged            ;  #c0c0c0
@@ -108,7 +111,7 @@ describe("SDR++ frequency manager", () => {
 
 describe("Superhet JSON", () => {
   const sample: BookmarkInput[] = [
-    {
+    newInput({
       name: "Home",
       freqHz: 433_500_000,
       mode: "nfm",
@@ -116,21 +119,13 @@ describe("Superhet JSON", () => {
       tags: ["ham", "local"],
       color: "#fbbf24",
       notes: "calling",
-    },
-    {
-      name: "FM",
-      freqHz: 100_100_000,
-      mode: null,
-      bandwidthHz: null,
-      tags: [],
-      color: null,
-      notes: null,
-    },
+    }),
+    newInput({ name: "FM", freqHz: 100_100_000 }),
   ];
 
   it("round-trips and ignores server ids", () => {
     const text = exportSuperhet(sample.map((b) => ({ ...b })));
-    expect(JSON.parse(text)).toMatchObject({ format: "superhet-bookmarks", v: 1 });
+    expect(JSON.parse(text)).toMatchObject({ format: "superhet-bookmarks", v: 2 });
     const r = parseImport(text);
     expect(r.format).toBe("superhet");
     expect(r.bookmarks).toEqual(sample);
@@ -177,5 +172,88 @@ describe("helpers", () => {
     const fresh = newBookmarks(existing, incoming);
     expect(fresh).toHaveLength(incoming.length - 1);
     expect(fresh.some((b) => b.name === "ISS")).toBe(false);
+  });
+});
+
+describe("Superhet JSON v2", () => {
+  const full: BookmarkInput = newInput({
+    name: "Dispatch",
+    freqHz: 392_012_500,
+    mode: "nfm",
+    bandwidthHz: 25_000,
+    squelchDb: -75,
+    squelchAuto: true,
+    stepHz: 25_000,
+    toneMode: "dcs",
+    dcsCode: 23,
+    dcsPolarity: "R",
+    digital: {
+      protocol: "tetra",
+      timeslot: 3,
+      talkgroup: 262_001,
+      colourCode: null,
+      mcc: 262,
+      mnc: 1,
+      decoderPluginId: "tetra-kit",
+    },
+    groupId: "g1",
+    favourite: true,
+    scan: { include: true, priority: 2, dwellMs: 3000 },
+  });
+
+  it("round-trips every field and carries groups by name", () => {
+    const text = exportSuperhet([full], [{ id: "g1", name: "TETRA", position: 0 }]);
+    const parsed = JSON.parse(text) as { groups: unknown; bookmarks: Record<string, unknown>[] };
+    expect(parsed.groups).toEqual([{ name: "TETRA" }]);
+    expect(parsed.bookmarks[0]).toMatchObject({ group: "TETRA", dcs_code: 23, tone_mode: "dcs" });
+    expect(parsed.bookmarks[0]).not.toHaveProperty("group_id");
+    const r = parseImport(text);
+    // The group id is the server's; the import carries the name instead.
+    expect(r.bookmarks).toEqual([{ ...full, groupId: null, groupName: "TETRA" }]);
+  });
+});
+
+describe("CHIRP CSV", () => {
+  const CHIRP = `Location,Name,Frequency,Duplex,Offset,Tone,rToneFreq,cToneFreq,DtcsCode,DtcsPolarity,RxDtcsCode,CrossMode,Mode,TStep,Skip,Power,Comment,URCALL,RPT1CALL,RPT2CALL,DVCODE
+0,DB0XY,438.650000,-,7.600000,TSQL,88.5,88.5,023,NN,023,Tone->Tone,FM,12.50,,5.0W,"Local, repeater",,,,
+1,Digi,145.500000,,0.600000,DTCS,88.5,88.5,047,NR,047,Tone->Tone,NFM,5.00,S,5.0W,,,,,
+2,Plain,446.006250,,0.600000,,88.5,88.5,023,NN,023,Tone->Tone,DV,6.25,,5.0W,,,,,
+3,Bad,x,,,,,,,,,,FM,,,,,,,,
+`;
+
+  it("imports tones, step, scan skip and comment", () => {
+    const r = parseImport(CHIRP);
+    expect(r.format).toBe("chirp");
+    expect(r.bookmarks).toHaveLength(3);
+    expect(r.skipped).toBe(1);
+    expect(r.unsupportedMode).toBe(1);
+    expect(r.bookmarks[0]).toMatchObject({
+      name: "DB0XY",
+      freqHz: 438_650_000,
+      mode: "nfm",
+      toneMode: "ctcss",
+      ctcssHz: 88.5,
+      stepHz: 12_500,
+      notes: "Local, repeater",
+      scan: { include: true },
+    });
+    expect(r.bookmarks[1]).toMatchObject({
+      toneMode: "dcs",
+      dcsCode: 47,
+      dcsPolarity: "R",
+      scan: { include: false },
+    });
+    expect(r.bookmarks[2]).toMatchObject({ toneMode: null, mode: null, stepHz: 6_250 });
+  });
+
+  it("exports a file it can read back", () => {
+    const back = parseChirp(exportChirp(parseChirp(CHIRP).bookmarks));
+    expect(back.bookmarks).toHaveLength(3);
+    expect(back.bookmarks[0]).toMatchObject({ toneMode: "ctcss", ctcssHz: 88.5, stepHz: 12_500 });
+    expect(back.bookmarks[1]).toMatchObject({ toneMode: "dcs", dcsCode: 47, dcsPolarity: "R" });
+  });
+
+  it("splits quoted CSV cells", () => {
+    expect(parseCsvLine('a,"b,c","d ""e""",')).toEqual(["a", "b,c", 'd "e"', ""]);
   });
 });

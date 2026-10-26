@@ -44,6 +44,8 @@ export interface VfoCreate {
   mode: VfoMode;
   bandwidthHz?: number;
   squelchDbfs?: number | null;
+  /** NFM and AM only, one of the standard CTCSS tones. */
+  toneSquelchHz?: number | null;
 }
 
 /** Partial update; `null` resets bandwidth (mode default) or switches the squelch off. */
@@ -178,6 +180,7 @@ export function createBody(req: VfoCreate): Rec {
   const body: Rec = { v: 1, freq_hz: req.freqHz, mode: req.mode };
   if (req.bandwidthHz !== undefined) body.bandwidth_hz = req.bandwidthHz;
   if (req.squelchDbfs !== undefined) body.squelch_dbfs = req.squelchDbfs;
+  if (req.toneSquelchHz !== undefined) body.tone_squelch_hz = req.toneSquelchHz;
   return body;
 }
 
