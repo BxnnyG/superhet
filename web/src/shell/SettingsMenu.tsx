@@ -13,6 +13,7 @@ import {
   UserIcon,
 } from "../ui";
 import { type ThemePreference } from "../ui/theme";
+import { OPEN_SETTINGS_EVENT, useAppEvent } from "./appEvents";
 import { getWheelMode, setWheelMode, subscribeWheelMode } from "../spectrum/wheelMode";
 
 interface Props {
@@ -29,6 +30,7 @@ export function SettingsMenu({ theme, onTheme, onShortcuts }: Props) {
   const [passwordOpen, setPasswordOpen] = useState(false);
   const auth = useAuth();
   const rootRef = useRef<HTMLDivElement>(null);
+  useAppEvent(OPEN_SETTINGS_EVENT, () => setOpen(true));
 
   useEffect(() => {
     if (!open) return;

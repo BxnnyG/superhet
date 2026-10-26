@@ -1,5 +1,7 @@
 import { useCallback, useState } from "react";
 import { BookmarkEditorHost } from "./bookmarks/BookmarkEditor";
+import { PaletteHost } from "./palette/PaletteHost";
+import { EDIT_FREQUENCY_EVENT, emitAppEvent } from "./shell/appEvents";
 import { Inspector } from "./shell/Inspector";
 import { useInspector } from "./shell/inspector";
 import { MobileTabBar } from "./shell/MobileTabBar";
@@ -8,7 +10,7 @@ import { StatusBar } from "./shell/StatusBar";
 import { TopBar } from "./shell/TopBar";
 import { TuningStrip } from "./shell/TuningStrip";
 import { useReceiver } from "./shell/useReceiver";
-import { useShortcuts } from "./shell/useShortcuts";
+import { useShortcuts, type ShortcutContext } from "./shell/useShortcuts";
 import { VfoTabs } from "./shell/VfoTabs";
 import { SpectrumView } from "./spectrum/SpectrumView";
 import { Toaster } from "./ui";
@@ -29,8 +31,12 @@ export function App({ device = "dev0" }: Props) {
   const inspector = useInspector();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const openPalette = useCallback(() => setPaletteOpen(true), []);
+  const closePalette = useCallback(() => setPaletteOpen(false), []);
+  const togglePalette = useCallback(() => setPaletteOpen((o) => !o), []);
 
-  useShortcuts({
+  const shortcutCtx: ShortcutContext = {
     vfoCtl: r.vfoCtl,
     audio: r.audio,
     autoSquelch: r.autoSquelch,
@@ -42,7 +48,11 @@ export function App({ device = "dev0" }: Props) {
     startBookmark: r.startBookmark,
     openHelp: openShortcuts,
     toggleInspector: inspector.toggle,
-  });
+    focusFrequency: () => emitAppEvent(EDIT_FREQUENCY_EVENT),
+    openPalette,
+    togglePalette,
+  };
+  useShortcuts(shortcutCtx);
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-surface-0 text-fg">
@@ -51,6 +61,7 @@ export function App({ device = "dev0" }: Props) {
         theme={theme}
         onTheme={setTheme}
         onShortcuts={openShortcuts}
+        onPalette={openPalette}
         inspector={inspector}
       />
       {r.errors.length > 0 && (
@@ -92,6 +103,9 @@ export function App({ device = "dev0" }: Props) {
       <MobileTabBar inspector={inspector} />
       <StatusBar audio={r.audio} metrics={r.metrics} />
       <BookmarkEditorHost store={r.bookmarks} />
+      {paletteOpen && (
+        <PaletteHost r={r} inspector={inspector} shortcutCtx={shortcutCtx} onClose={closePalette} />
+      )}
       {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       <Toaster />
     </div>

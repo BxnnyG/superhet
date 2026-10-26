@@ -39,6 +39,16 @@ export function exportUrl(device: string, filter: LogFilter): string {
   return `${BASE}/export.csv?${filterParams(device, filter).toString()}`;
 }
 
+/** Start the browser download of the CSV export (also used by the command palette). */
+export function downloadEventLog(device: string, filter: LogFilter): void {
+  const a = document.createElement("a");
+  a.href = exportUrl(device, filter);
+  a.download = "superhet-decoder-events.csv";
+  document.body.append(a);
+  a.click();
+  a.remove();
+}
+
 export function parsePage(raw: unknown): EventPage {
   if (!isRec(raw) || !Array.isArray(raw.events)) throw new ApiError("invalid event list");
   const events: DecoderEvent[] = [];

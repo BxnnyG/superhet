@@ -22,6 +22,7 @@ import {
 import { BandwidthSelect, ModeSelect, SquelchControl } from "../vfo/controls";
 import { SMeter } from "../vfo/SMeter";
 import type { VfoPatch } from "../vfo/api";
+import { EDIT_FREQUENCY_EVENT } from "./appEvents";
 import { CentrePill } from "./CentrePill";
 import { PHONE_QUERY, useMediaQuery } from "./useMediaQuery";
 import type { Receiver } from "./useReceiver";
@@ -113,6 +114,7 @@ function ActiveVfo({
           label="VFO frequency"
           valueHz={vfo.freqHz}
           onChange={(hz) => onUpdate(vfo.id, { freqHz: hz })}
+          editEvent={EDIT_FREQUENCY_EVENT}
         />
         <IconButton
           label="Up one step"

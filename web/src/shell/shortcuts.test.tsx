@@ -2,7 +2,14 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Vfo } from "../vfo/api";
 import { toasts } from "../ui";
-import { shortcutFor, ignoresShortcuts, type KeyLike } from "./shortcuts";
+import {
+  SHORTCUT_GROUPS,
+  SHORTCUTS,
+  ignoresShortcuts,
+  shortcutFor,
+  shortcutKeys,
+  type KeyLike,
+} from "./shortcuts";
 import { runShortcut, useShortcuts, type ShortcutContext } from "./useShortcuts";
 
 const key = (k: string, extra: Partial<KeyLike> = {}): KeyLike => ({
@@ -42,6 +49,9 @@ function context(vfos: Vfo[], selectedId: number | null, patch: Partial<Shortcut
     startBookmark: vi.fn(),
     openHelp: vi.fn(),
     toggleInspector: vi.fn(),
+    focusFrequency: vi.fn(),
+    openPalette: vi.fn(),
+    togglePalette: vi.fn(),
   };
   const ctx: ShortcutContext = {
     vfoCtl: {
@@ -65,6 +75,9 @@ function context(vfos: Vfo[], selectedId: number | null, patch: Partial<Shortcut
     startBookmark: calls.startBookmark,
     openHelp: calls.openHelp,
     toggleInspector: calls.toggleInspector,
+    focusFrequency: calls.focusFrequency,
+    openPalette: calls.openPalette,
+    togglePalette: calls.togglePalette,
     ...patch,
   };
   return { ctx, calls };
@@ -225,5 +238,61 @@ describe("actions", () => {
     expect(calls.startBookmark).toHaveBeenCalled();
     expect(calls.toggle).toHaveBeenCalled();
     expect(calls.openHelp).toHaveBeenCalled();
+  });
+
+  it("selects the nth VFO, types a frequency and opens the palette", () => {
+    const { ctx, calls } = context(vfos, 1);
+    expect(runShortcut({ type: "vfoAt", index: 2 }, ctx)).toBe(true);
+    expect(calls.select).toHaveBeenLastCalledWith(3);
+    expect(runShortcut({ type: "vfoAt", index: 8 }, ctx)).toBe(false);
+    runShortcut({ type: "focusFrequency" }, ctx);
+    runShortcut({ type: "palette" }, ctx);
+    expect(calls.focusFrequency).toHaveBeenCalled();
+    expect(calls.openPalette).toHaveBeenCalled();
+    const none = context([], null);
+    expect(runShortcut({ type: "focusFrequency" }, none.ctx)).toBe(false);
+  });
+});
+
+describe("palette and frequency keys", () => {
+  it("maps F, / and Alt+digit", () => {
+    expect(shortcutFor(key("f"))).toEqual({ type: "focusFrequency" });
+    expect(shortcutFor(key("/"))).toEqual({ type: "palette" });
+    expect(shortcutFor(key("1", { altKey: true }))).toEqual({ type: "vfoAt", index: 0 });
+    expect(shortcutFor(key("¡", { altKey: true, code: "Digit1" }))).toEqual({
+      type: "vfoAt",
+      index: 0,
+    });
+    expect(shortcutFor(key("9", { altKey: true }))).toEqual({ type: "vfoAt", index: 8 });
+    expect(shortcutFor(key("0", { altKey: true }))).toBeNull();
+  });
+
+  it("Ctrl+K toggles the palette even while typing, but not over another dialog", () => {
+    const { ctx, calls } = context([vfo(1)], 1);
+    function Harness() {
+      useShortcuts(ctx);
+      return <input aria-label="field" />;
+    }
+    render(<Harness />);
+    fireEvent.keyDown(screen.getByLabelText("field"), { key: "k", ctrlKey: true });
+    fireEvent.keyDown(document.body, { key: "K", metaKey: true });
+    expect(calls.togglePalette).toHaveBeenCalledTimes(2);
+    const modal = document.createElement("div");
+    modal.setAttribute("aria-modal", "true");
+    document.body.append(modal);
+    fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+    expect(calls.togglePalette).toHaveBeenCalledTimes(2);
+    modal.setAttribute("data-palette", "");
+    fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+    expect(calls.togglePalette).toHaveBeenCalledTimes(3);
+    modal.remove();
+  });
+
+  it("lists every registered shortcut once and finds key caps by id", () => {
+    const ids = SHORTCUTS.map((s) => s.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(shortcutKeys("newVfo")).toEqual(["N"]);
+    expect(shortcutKeys("nope")).toBeNull();
+    expect(SHORTCUT_GROUPS.flatMap((g) => g.items)).toHaveLength(SHORTCUTS.length);
   });
 });

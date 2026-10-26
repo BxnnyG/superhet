@@ -18,7 +18,7 @@ import {
   type BadgeTone,
 } from "../ui";
 import { vfoColor } from "../vfo/model";
-import { exportUrl } from "./api";
+import { downloadEventLog } from "./api";
 import {
   KIND_CHIPS,
   KIND_HINT,
@@ -138,14 +138,7 @@ export function EventLog({ store, device, onTune }: Props) {
     }
   };
 
-  const download = () => {
-    const a = document.createElement("a");
-    a.href = exportUrl(device, filter);
-    a.download = "superhet-decoder-events.csv";
-    document.body.append(a);
-    a.click();
-    a.remove();
-  };
+  const download = () => downloadEventLog(device, filter);
 
   const filtering = filter.kinds.length > 0 || filter.q.trim() !== "";
   return (

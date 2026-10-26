@@ -16,7 +16,7 @@ notes and tokens: `docs/ui-design.md`.
 ## Target layout (desktop, 900 px and wider; the page never scrolls, only panel bodies do)
 
 - **Top bar** (h-12): logo, device switcher (driver, rate, connection dot), spacer, "Search or
-  jump... Cmd+K" trigger (placeholder until the command palette lands), audio on/off with the
+  jump... Cmd+K" command palette trigger (see below), audio on/off with the
   master volume, inspector toggle, settings. No frequencies.
 - **Primary tuning strip** (h-16, directly above the spectrum, full width). It is the only big
   frequency on screen.
@@ -65,8 +65,16 @@ notes and tokens: `docs/ui-design.md`.
   double-click = edit, a "Near current frequency" section and import/export in a "..." menu.
 - Migration: old bookmarks map 1:1, new fields stay empty.
 
+## Command palette and shortcuts
+
+- Palette (`web/src/palette/`): Ctrl/Cmd+K (also while typing) or `/` opens it; fuzzy search over a
+  typed tune command ("433.92", "145.5m", "100,1 wfm", "446.00625 nfm ctcss 88.5"), bookmarks
+  (name, tag, frequency), recent palette frequencies, VFOs and actions. Enter runs, Alt+Enter tunes
+  in a new VFO. Modal combobox/listbox with `aria-activedescendant`, focus trapped in the field.
+- One shortcut registry (`web/src/shell/shortcuts.ts`, `SHORTCUTS`) feeds the `?` overlay and the
+  key hints in the palette. New keys: `F` types a frequency, `Alt+1..9` selects a VFO, `/` palette.
+  Nothing fires while typing in a field or while a dialog is open.
+
 ## Later
 
-- Command palette (cmdk style): frequency parsing such as "433.92 nfm", bookmarks and actions;
-  shortcuts Cmd+K, `/`, F.
 - Mobile sheets polish and the scanner UI (the scanner backend needs an ADR first).
