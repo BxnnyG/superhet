@@ -14,6 +14,7 @@ use superhet_dsp::{SpectrumConfig, SpectrumError, SpectrumProcessor};
 
 use crate::audio::IqTap;
 use crate::config::SpectrumSettings;
+use crate::overload::OverloadMonitor;
 use crate::zoom::ZoomEngine;
 
 /// Blocks buffered between device thread and DSP thread.
@@ -100,6 +101,7 @@ impl Pipeline {
                 let mut settle = 0usize;
                 let mut last_report = std::time::Instant::now();
                 let mut reported_drops = 0;
+                let mut overload = OverloadMonitor::new();
                 while let Ok(block) = stream.blocks.recv() {
                     let block = Arc::new(block);
                     if let Some(tap) = &tap {
@@ -123,6 +125,7 @@ impl Pipeline {
                         settle -= 1;
                         continue;
                     }
+                    overload.observe(&block.samples);
                     if let Some(zoom) = &mut zoom {
                         zoom.process(&block.samples, block.center_hz, block.sample_rate);
                     }

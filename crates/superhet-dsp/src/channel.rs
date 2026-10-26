@@ -682,6 +682,16 @@ impl Channel {
         self.chain.wfm.as_ref().map_or(0, |w| w.rds.revision())
     }
 
+    /// Valid and invalid RDS blocks seen while in block sync since the last reset (the ratio is
+    /// a quality measure of the 57 kHz reception).
+    #[must_use]
+    pub fn rds_block_counts(&self) -> (u64, u64) {
+        self.chain
+            .wfm
+            .as_ref()
+            .map_or((0, 0), |w| w.rds.block_counts())
+    }
+
     fn rebuild(&mut self, cfg: ChannelConfig) -> Result<(), DspError> {
         validate_offset(cfg.offset_hz, cfg.input_rate)?;
         let bw = cfg
