@@ -1,6 +1,6 @@
 # ADR-0008: Local admin authentication
 
-**Status:** accepted (2026-10-20)
+**Status:** accepted (2026-10-20), partially superseded by [ADR-0011](0011-users-roles-and-guest-access.md) (single admin, no roles, no anonymous mode)
 
 ## Context
 
