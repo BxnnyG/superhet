@@ -30,7 +30,13 @@ fn status(port: u16, cookie: Option<&str>) -> Value {
     let headers: Vec<(&str, &str)> = cookie.map(|c| ("Cookie", c)).into_iter().collect();
     let reply = http(port, "GET", "/api/v1/auth/status", &headers, "");
     assert_eq!(reply.status, 200, "{reply:?}");
-    reply.json()
+    // The three fields of the original contract; the rest is covered by multiuser_live.
+    let full = reply.json();
+    json!({
+        "setup_required": full["setup_required"],
+        "authenticated": full["authenticated"],
+        "username": full["username"],
+    })
 }
 
 fn get(port: u16, path: &str, cookie: Option<&str>) -> Reply {

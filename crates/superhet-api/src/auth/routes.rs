@@ -12,10 +12,13 @@ use axum::{
     routing::{get, post},
 };
 use serde::Deserialize;
+use superhet_bus::audit::Outcome;
+use superhet_db::users::Role;
 
 use super::{
     AuthState, ClientInfo, error, internal, password, token, unauthenticated, unavailable,
 };
+use crate::audit::{ActorKind, Who};
 
 /// Request bodies are tiny JSON documents; passwords are capped at 1024 characters.
 const MAX_BODY_BYTES: usize = 8 * 1024;
@@ -23,6 +26,7 @@ const MAX_BODY_BYTES: usize = 8 * 1024;
 /// Routes of the auth API (their own state; mounted outside the session check).
 pub fn router(auth: AuthState) -> Router {
     Router::new()
+        .merge(super::accounts::router())
         .route("/api/v1/auth/status", get(status))
         .route("/api/v1/auth/setup", post(setup))
         .route("/api/v1/auth/login", post(login))
@@ -51,29 +55,29 @@ struct PasswordBody {
     new_password: String,
 }
 
-type Reply = Result<Response, Response>;
+pub(crate) type Reply = Result<Response, Response>;
 
-fn flatten(reply: Reply) -> Response {
+pub(crate) fn flatten(reply: Reply) -> Response {
     match reply {
         Ok(r) | Err(r) => r,
     }
 }
 
-fn invalid(message: &str) -> Response {
+pub(crate) fn invalid(message: &str) -> Response {
     error(StatusCode::BAD_REQUEST, "invalid", Some(message))
 }
 
-fn invalid_credentials() -> Response {
+pub(crate) fn invalid_credentials() -> Response {
     error(StatusCode::UNAUTHORIZED, "invalid_credentials", None)
 }
 
-fn db_failed(err: superhet_db::Error) -> Response {
+pub(crate) fn db_failed(err: superhet_db::Error) -> Response {
     tracing::warn!(%err, "auth database error");
     unavailable()
 }
 
 /// CSRF protection for state-changing routes: the browser `Origin` must be allowed.
-fn guard_origin(auth: &AuthState, headers: &HeaderMap) -> Result<(), Response> {
+pub(crate) fn guard_origin(auth: &AuthState, headers: &HeaderMap) -> Result<(), Response> {
     if auth.0.origins.allows(headers) {
         Ok(())
     } else {
@@ -86,7 +90,7 @@ fn guard_origin(auth: &AuthState, headers: &HeaderMap) -> Result<(), Response> {
     }
 }
 
-fn parse_json<T: serde::de::DeserializeOwned>(
+pub(crate) fn parse_json<T: serde::de::DeserializeOwned>(
     headers: &HeaderMap,
     body: &Bytes,
 ) -> Result<T, Response> {
@@ -106,7 +110,7 @@ fn parse_json<T: serde::de::DeserializeOwned>(
         .map_err(|_| invalid("body is not valid JSON of the expected shape"))
 }
 
-fn rate_limited(wait: std::time::Duration) -> Response {
+pub(crate) fn rate_limited(wait: std::time::Duration) -> Response {
     let secs = wait.as_secs() + u64::from(wait.subsec_nanos() > 0);
     let mut response = error(StatusCode::TOO_MANY_REQUESTS, "rate_limited", None);
     response
@@ -115,31 +119,70 @@ fn rate_limited(wait: std::time::Duration) -> Response {
     response
 }
 
-fn check_rate(auth: &AuthState, client: &ClientInfo) -> Result<(), Response> {
+pub(crate) fn check_rate(auth: &AuthState, client: &ClientInfo) -> Result<(), Response> {
     auth.0
         .limiter
         .check(client.ip, Instant::now())
         .map_err(rate_limited)
 }
 
-fn record_failure(auth: &AuthState, client: &ClientInfo) {
+pub(crate) fn record_failure(auth: &AuthState, client: &ClientInfo) {
     auth.0.limiter.record_failure(client.ip, Instant::now());
 }
 
-fn no_content(cookie: &str) -> Reply {
-    let value = HeaderValue::try_from(cookie).map_err(|_| internal())?;
-    Ok((
+pub(crate) fn no_content(cookie: &str) -> Reply {
+    no_content_cookies(&[cookie])
+}
+
+/// 204 with several `Set-Cookie` headers.
+pub(crate) fn no_content_cookies(cookies: &[&str]) -> Reply {
+    let mut response = (
         StatusCode::NO_CONTENT,
+        [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
+    )
+        .into_response();
+    for cookie in cookies {
+        let value = HeaderValue::try_from(*cookie).map_err(|_| internal())?;
+        response.headers_mut().append(header::SET_COOKIE, value);
+    }
+    Ok(response)
+}
+
+/// A JSON body with `no-store`.
+pub(crate) fn json_reply(status: StatusCode, body: &serde_json::Value) -> Response {
+    (
+        status,
         [
-            (header::SET_COOKIE, value),
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            ),
             (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
         ],
+        body.to_string(),
     )
-        .into_response())
+        .into_response()
+}
+
+/// The audit actor for an account that just authenticated (or tried to).
+pub(crate) fn account_who(
+    client: &ClientInfo,
+    id: Option<i64>,
+    name: &str,
+    role: Option<Role>,
+) -> Who {
+    Who {
+        kind: ActorKind::User,
+        id: id.map(|i| i.to_string()),
+        name: Some(name.chars().take(64).collect()),
+        role,
+        ip: client.ip,
+        user_agent: client.user_agent.clone(),
+    }
 }
 
 /// Persist a new session for `user_id` and return the `Set-Cookie` value for it.
-async fn start_session(
+pub(super) async fn start_session(
     auth: &AuthState,
     user_id: i64,
     client: &ClientInfo,
@@ -162,11 +205,11 @@ async fn start_session(
     Ok(token::session_cookie(&raw, client.secure))
 }
 
-async fn status(State(auth): State<AuthState>, headers: HeaderMap) -> Response {
-    flatten(status_inner(&auth, &headers).await)
+async fn status(State(auth): State<AuthState>, client: ClientInfo, headers: HeaderMap) -> Response {
+    flatten(status_inner(&auth, &client, &headers).await)
 }
 
-async fn status_inner(auth: &AuthState, headers: &HeaderMap) -> Reply {
+async fn status_inner(auth: &AuthState, client: &ClientInfo, headers: &HeaderMap) -> Reply {
     let db = auth.db()?;
     let setup_required = if auth.0.setup_done.load(Ordering::Relaxed) {
         false
@@ -176,24 +219,31 @@ async fn status_inner(auth: &AuthState, headers: &HeaderMap) -> Reply {
     } else {
         true
     };
-    let session = auth.authenticate(headers).await.map_err(db_failed)?;
+    let principal = auth
+        .resolve_principal(headers, client)
+        .await
+        .map_err(db_failed)?;
+    let guest = auth.settings().guest_policy().await;
+    let (user_id, username) = match principal.as_ref().map(|p| &p.actor) {
+        Some(crate::access::Actor::User(id)) => {
+            (Some(*id), principal.as_ref().map(|p| p.name.clone()))
+        }
+        _ => (None, None),
+    };
     let body = serde_json::json!({
         "setup_required": setup_required,
-        "authenticated": session.is_some(),
-        "username": session.map(|s| s.username),
+        "authenticated": principal.is_some(),
+        "username": username,
+        "user_id": user_id,
+        "role": principal.as_ref().map(|p| p.role.as_str()),
+        "kind": principal.as_ref().map(|p| if p.is_guest() { "guest" } else { "user" }),
+        "must_change_password": principal.as_ref().is_some_and(|p| p.must_change_password),
+        "guest": {
+            "enabled": guest.enabled,
+            "privacy_text": guest.enabled.then_some(guest.privacy_text),
+        },
     });
-    Ok((
-        StatusCode::OK,
-        [
-            (
-                header::CONTENT_TYPE,
-                HeaderValue::from_static("application/json"),
-            ),
-            (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
-        ],
-        body.to_string(),
-    )
-        .into_response())
+    Ok(json_reply(StatusCode::OK, &body))
 }
 
 async fn setup(
@@ -249,6 +299,15 @@ async fn setup_inner(
         .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     auth.0.limiter.record_success(client.ip);
     tracing::info!(username = %req.username, "admin account created");
+    auth.audit()
+        .log(
+            &account_who(client, Some(user_id), &req.username, Some(Role::Admin)),
+            "auth.setup",
+            Some(&req.username),
+            Outcome::Ok,
+            serde_json::json!({}),
+        )
+        .await;
 
     let cookie = start_session(auth, user_id, client).await?;
     no_content(&cookie)
@@ -272,7 +331,23 @@ async fn login_inner(
     guard_origin(auth, headers)?;
     let db = auth.db()?;
     let req: LoginBody = parse_json(headers, body)?;
-    check_rate(auth, client)?;
+    let who = account_who(client, None, &req.username, None);
+    let blocked = check_rate(auth, client).and_then(|()| {
+        auth.0
+            .name_limiter
+            .check(&req.username, Instant::now())
+            .map_err(rate_limited)
+    });
+    if let Err(response) = blocked {
+        auth.audit().log_coalesced(
+            &who,
+            "auth.login_failed",
+            Some(&who.name.clone().unwrap_or_default()),
+            Outcome::Denied,
+            serde_json::json!({"reason": "rate_limited"}),
+        );
+        return Err(response);
+    }
     // Oversized input cannot be a valid credential; do not feed it to Argon2.
     if req.username.len() > password::USERNAME_MAX
         || req.password.chars().count() > password::PASSWORD_MAX
@@ -284,17 +359,44 @@ async fn login_inner(
     let user = superhet_db::auth::find_user_by_name(db, &req.username)
         .await
         .map_err(db_failed)?;
-    // Always run a verification, against a dummy hash for unknown users.
+    // Always run a verification, against a dummy hash for unknown users; a disabled account
+    // is only rejected afterwards, so it costs the same time as a wrong password.
     let ok = auth
         .verify_password(req.password, user.as_ref().map(|u| u.password_hash.clone()))
         .await;
-    let Some(user) = user.filter(|_| ok) else {
+    let disabled = user.as_ref().is_some_and(|u| u.disabled);
+    let Some(user) = user.filter(|u| ok && !u.disabled) else {
         record_failure(auth, client);
+        auth.0
+            .name_limiter
+            .record_failure(&req.username, Instant::now());
         tracing::warn!(ip = ?client.ip, "login failed");
+        auth.audit()
+            .log(
+                &who,
+                "auth.login_failed",
+                Some(&req.username),
+                Outcome::Denied,
+                serde_json::json!({"reason": if ok && disabled { "disabled" } else { "bad_credentials" }}),
+            )
+            .await;
         return Err(invalid_credentials());
     };
     auth.0.limiter.record_success(client.ip);
+    auth.0.name_limiter.record_success(&req.username);
     let cookie = start_session(auth, user.id, client).await?;
+    if let Err(err) = superhet_db::users::mark_login(db, user.id).await {
+        tracing::warn!(%err, "could not record the login time");
+    }
+    auth.audit()
+        .log(
+            &account_who(client, Some(user.id), &user.username, Some(user.role)),
+            "auth.login",
+            Some(&user.username),
+            Outcome::Ok,
+            serde_json::json!({}),
+        )
+        .await;
     no_content(&cookie)
 }
 
@@ -305,12 +407,34 @@ async fn logout(State(auth): State<AuthState>, client: ClientInfo, headers: Head
 async fn logout_inner(auth: &AuthState, client: &ClientInfo, headers: &HeaderMap) -> Reply {
     guard_origin(auth, headers)?;
     let db = auth.db()?;
+    // Resolve first (it also refreshes a guest), then end whatever sessions the cookies name.
+    if let Some(principal) = auth
+        .resolve_principal(headers, client)
+        .await
+        .map_err(db_failed)?
+    {
+        auth.audit()
+            .log(
+                &principal.who(),
+                "auth.logout",
+                None,
+                Outcome::Ok,
+                serde_json::json!({}),
+            )
+            .await;
+    }
     if let Some(raw) = token::token_from_headers(headers) {
         superhet_db::auth::delete_session(db, &token::hash_token(&raw))
             .await
             .map_err(db_failed)?;
     }
-    no_content(&token::clearing_cookie(client.secure))
+    if let Some(raw) = token::guest_token_from_headers(headers) {
+        auth.registry().guest_remove(&token::hash_token(&raw));
+    }
+    no_content_cookies(&[
+        &token::clearing_cookie(client.secure),
+        &token::clearing_guest_cookie(client.secure),
+    ])
 }
 
 async fn change_password(
@@ -349,9 +473,24 @@ async fn change_password_inner(
     let ok = auth
         .verify_password(req.current_password, user.map(|u| u.password_hash))
         .await;
+    let who = account_who(
+        client,
+        Some(session.user_id),
+        &session.username,
+        Some(session.role),
+    );
     if !ok {
         record_failure(auth, client);
         tracing::warn!(ip = ?client.ip, "password change: wrong current password");
+        auth.audit()
+            .log(
+                &who,
+                "auth.password_change",
+                None,
+                Outcome::Denied,
+                serde_json::json!({"reason": "bad_credentials"}),
+            )
+            .await;
         return Err(invalid_credentials());
     }
     auth.0.limiter.record_success(client.ip);
@@ -362,6 +501,15 @@ async fn change_password_inner(
             .await
             .map_err(db_failed)?;
     tracing::info!(revoked, "password changed, other sessions revoked");
+    auth.audit()
+        .log(
+            &who,
+            "auth.password_change",
+            None,
+            Outcome::Ok,
+            serde_json::json!({"revoked_sessions": revoked}),
+        )
+        .await;
     Ok((
         StatusCode::NO_CONTENT,
         [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],

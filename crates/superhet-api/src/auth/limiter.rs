@@ -17,6 +17,9 @@ pub struct Limits {
     pub per_ip: usize,
     /// Failures from all clients within the window before everyone is blocked.
     pub global: usize,
+    /// Failed logins for one user name (from any address) within the window before that name
+    /// is locked for logins; unknown names count too, so this does not reveal which exist.
+    pub per_name: usize,
     /// Upper bound on tracked client addresses (memory cap).
     pub max_tracked_ips: usize,
 }
@@ -27,6 +30,7 @@ impl Default for Limits {
             window: Duration::from_secs(15 * 60),
             per_ip: 5,
             global: 50,
+            per_name: 10,
             max_tracked_ips: 10_000,
         }
     }
@@ -133,15 +137,101 @@ impl Limiter {
     }
 }
 
+/// Failure counter per (case-insensitive) user name. Slows down guessing against one account
+/// from many addresses, which the per-address limiter cannot see.
+pub struct NameLimiter {
+    window: Duration,
+    max: usize,
+    failures: Mutex<HashMap<String, VecDeque<Instant>>>,
+}
+
+/// Upper bound on tracked names (memory cap against random-name floods).
+const MAX_TRACKED_NAMES: usize = 10_000;
+
+impl NameLimiter {
+    /// A limiter allowing `max` failures per name within `window`.
+    #[must_use]
+    pub fn new(window: Duration, max: usize) -> Self {
+        Self {
+            window,
+            max,
+            failures: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, VecDeque<Instant>>> {
+        self.failures.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// `Ok` if a login for `name` may proceed, otherwise the time until it may.
+    pub fn check(&self, name: &str, now: Instant) -> Result<(), Duration> {
+        let mut map = self.lock();
+        let key = name.to_lowercase();
+        let Some(queue) = map.get_mut(&key) else {
+            return Ok(());
+        };
+        expire(queue, now, self.window);
+        let wait = if queue.len() >= self.max {
+            retry_after(queue, now, self.window)
+        } else {
+            Duration::ZERO
+        };
+        if queue.is_empty() {
+            map.remove(&key);
+        }
+        if wait.is_zero() { Ok(()) } else { Err(wait) }
+    }
+
+    /// Count a failed login for `name`.
+    pub fn record_failure(&self, name: &str, now: Instant) {
+        let mut map = self.lock();
+        if map.len() >= MAX_TRACKED_NAMES && !map.contains_key(&name.to_lowercase()) {
+            let window = self.window;
+            map.retain(|_, q| {
+                expire(q, now, window);
+                !q.is_empty()
+            });
+            if map.len() >= MAX_TRACKED_NAMES {
+                return;
+            }
+        }
+        map.entry(name.to_lowercase()).or_default().push_back(now);
+    }
+
+    /// Forget the failures of `name` after a successful login.
+    pub fn record_success(&self, name: &str) {
+        self.lock().remove(&name.to_lowercase());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_are_throttled_across_addresses_and_case() {
+        let l = NameLimiter::new(Duration::from_secs(60), 3);
+        let now = Instant::now();
+        assert!(l.check("Alice", now).is_ok());
+        for _ in 0..3 {
+            l.record_failure("alice", now);
+        }
+        assert!(l.check("ALICE", now).is_err());
+        assert!(l.check("bob", now).is_ok());
+        assert!(
+            l.check("alice", now + Duration::from_secs(61)).is_ok(),
+            "window passed"
+        );
+        l.record_success("alice");
+        assert!(l.check("alice", now).is_ok());
+    }
 
     fn small() -> Limiter {
         Limiter::new(Limits {
             window: Duration::from_secs(60),
             per_ip: 3,
             global: 5,
+            per_name: 10,
             max_tracked_ips: 2,
         })
     }

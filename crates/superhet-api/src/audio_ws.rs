@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use axum::{
-    Router,
+    Extension, Router,
     extract::{
         Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -18,16 +18,19 @@ use axum::{
 use serde::Deserialize;
 use tokio::sync::Semaphore;
 
+use crate::access::Principal;
 use crate::audio_hub::{AudioHub, HubError, Session};
+use crate::devices::{DevicesState, ctl_state};
 use crate::origin::OriginPolicy;
+use crate::registry::ConnGuard;
 use crate::ws::send;
 
 /// Route path of the audio gateway.
 pub const PATH: &str = "/api/v1/ws/audio";
 /// Maximum size of a client control message.
 const MAX_CONTROL_BYTES: usize = 1024;
-/// Maximum number of VFOs one client may listen to (the daemon runs at most this many).
-pub const MAX_VFOS: usize = 8;
+/// Maximum number of VFOs one client may listen to (the daemon runs at most 64).
+pub const MAX_VFOS: usize = 64;
 /// Maximum concurrent audio clients.
 const MAX_CLIENTS: usize = 32;
 
@@ -37,16 +40,19 @@ pub struct AudioState {
     hub: Arc<AudioHub>,
     origins: Arc<OriginPolicy>,
     slots: Arc<Semaphore>,
+    devices: DevicesState,
 }
 
 impl AudioState {
-    /// Create the state from a hub and an origin policy.
+    /// Create the state from a hub, an origin policy and the device routes' state (used to look
+    /// up VFO owners and to register connections).
     #[must_use]
-    pub fn new(hub: Arc<AudioHub>, origins: OriginPolicy) -> Self {
+    pub fn new(hub: Arc<AudioHub>, origins: OriginPolicy, devices: DevicesState) -> Self {
         Self {
             hub,
             origins: Arc::new(origins),
             slots: Arc::new(Semaphore::new(MAX_CLIENTS)),
+            devices,
         }
     }
 }
@@ -93,7 +99,7 @@ pub fn parse_subscribe(text: &str) -> Result<BTreeSet<u32>, &'static str> {
         return Err("invalid vfo id");
     }
     if vfos.len() > MAX_VFOS {
-        return Err("too many vfos (at most 8)");
+        return Err("too many vfos (at most 64)");
     }
     Ok(vfos)
 }
@@ -104,6 +110,7 @@ fn error_text(reason: &str) -> Message {
 
 async fn audio_ws(
     State(state): State<AudioState>,
+    Extension(principal): Extension<Principal>,
     Query(query): Query<AudioQuery>,
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
@@ -122,12 +129,25 @@ async fn audio_ws(
             _ => StatusCode::SERVICE_UNAVAILABLE,
         }
     })?;
+    let conn = state
+        .devices
+        .auth
+        .registry()
+        .connect(
+            &principal.session_key,
+            &principal.who(),
+            "audio",
+            &query.dev,
+        )
+        .await;
+    let devices = state.devices.clone();
+    let device = query.dev;
     Ok(upgrade
         .max_message_size(MAX_CONTROL_BYTES)
         .max_frame_size(MAX_CONTROL_BYTES)
         .on_upgrade(move |socket| async move {
             let _client = crate::metrics::track_client("audio");
-            let dropped = serve_client(socket, session).await;
+            let dropped = serve_client(socket, session, conn, &principal, &devices, &device).await;
             if dropped > 0 {
                 tracing::info!(dropped, "audio client disconnected after dropped frames");
             }
@@ -135,16 +155,61 @@ async fn audio_ws(
         }))
 }
 
+/// Whether `principal` may listen to every VFO in `wanted`: operators and admins hear all;
+/// everybody else only their own and shared (ownerless) VFOs. An id the daemon does not know is
+/// refused too, so nobody can pre-subscribe to a VFO somebody else creates later.
+async fn may_listen(
+    devices: &DevicesState,
+    principal: &Principal,
+    device: &str,
+    wanted: &BTreeSet<u32>,
+) -> Result<(), &'static str> {
+    if principal.sees_all_vfos() || wanted.is_empty() {
+        return Ok(());
+    }
+    let doc = ctl_state(devices, device)
+        .await
+        .map_err(|_| "audio stream unavailable")?;
+    let me = principal.owner_id();
+    let vfos = doc
+        .get("vfos")
+        .and_then(serde_json::Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    for id in wanted {
+        let vfo = vfos
+            .iter()
+            .find(|v| v.get("id").and_then(serde_json::Value::as_u64) == Some(u64::from(*id)));
+        match vfo {
+            None => return Err("forbidden"),
+            Some(v) => match v.get("owner").and_then(serde_json::Value::as_str) {
+                Some(owner) if owner != me => return Err("forbidden"),
+                _ => {}
+            },
+        }
+    }
+    Ok(())
+}
+
 /// Serve one client until it leaves; returns the number of frames dropped for it.
-async fn serve_client(mut socket: WebSocket, mut session: Session) -> u64 {
+async fn serve_client(
+    mut socket: WebSocket,
+    mut session: Session,
+    mut kill: ConnGuard,
+    principal: &Principal,
+    devices: &DevicesState,
+    device: &str,
+) -> u64 {
     let queue = Arc::clone(session.queue());
     loop {
         tokio::select! {
+            () = kill.killed() => break,
             incoming = socket.recv() => match incoming {
                 None | Some(Err(_) | Ok(Message::Close(_))) => break,
                 Some(Ok(Message::Text(text))) => {
                     let reply = match parse_subscribe(text.as_str()) {
-                        Ok(wanted) => match session.set(&wanted).await {
+                        Ok(wanted) => match may_listen(devices, principal, device, &wanted).await {
+                            Err(reason) => error_text(reason),
+                            Ok(()) => match session.set(&wanted).await {
                             Ok(()) => Message::text(
                                 serde_json::json!({
                                     "v": 1,
@@ -157,6 +222,7 @@ async fn serve_client(mut socket: WebSocket, mut session: Session) -> u64 {
                                 tracing::warn!(%err, "audio ws: subscribe failed");
                                 error_text("audio stream unavailable")
                             }
+                            },
                         },
                         Err(reason) => error_text(reason),
                     };
@@ -211,6 +277,9 @@ mod tests {
         );
         let eight = r#"{"type":"subscribe","vfos":[1,2,3,4,5,6,7,8]}"#;
         assert_eq!(parse_subscribe(eight).map(|s| s.len()), Ok(8));
+        let sixty_four: Vec<u32> = (1..=64).collect();
+        let msg = serde_json::json!({"type": "subscribe", "vfos": sixty_four}).to_string();
+        assert_eq!(parse_subscribe(&msg).map(|s| s.len()), Ok(64));
         // Duplicates do not count towards the limit.
         let dup = r#"{"type":"subscribe","vfos":[1,1,1,1,1,1,1,1,1,1]}"#;
         assert_eq!(parse_subscribe(dup), Ok(set(&[1])));
@@ -230,10 +299,6 @@ mod tests {
                 "unsupported protocol version",
             ),
             (r#"{"type":"subscribe","vfos":[0]}"#, "invalid vfo id"),
-            (
-                r#"{"type":"subscribe","vfos":[1,2,3,4,5,6,7,8,9]}"#,
-                "too many vfos (at most 8)",
-            ),
         ] {
             assert_eq!(parse_subscribe(text), Err(reason), "{text}");
         }
@@ -259,7 +324,11 @@ mod tests {
 
     async fn start(hub: AudioHub, origins: OriginPolicy) -> Server {
         let hub = Arc::new(hub);
-        let app = router(AudioState::new(Arc::clone(&hub), origins));
+        let app = crate::access::as_test_principal(router(AudioState::new(
+            Arc::clone(&hub),
+            origins,
+            DevicesState::for_tests(),
+        )));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind");
@@ -414,13 +483,14 @@ mod tests {
     async fn invalid_messages_get_an_error_and_keep_the_connection() {
         let server = start(AudioHub::local(), OriginPolicy::default()).await;
         let mut client = connect(&server, "?dev=dev0", None).await.expect("connect");
+        let too_many: Vec<u32> = (1..=65).collect();
         assert_eq!(
             subscribe(
                 &mut client,
-                r#"{"type":"subscribe","vfos":[1,2,3,4,5,6,7,8,9]}"#
+                &serde_json::json!({"type": "subscribe", "vfos": too_many}).to_string()
             )
             .await,
-            serde_json::json!({"v":1,"type":"error","error":"too many vfos (at most 8)"})
+            serde_json::json!({"v":1,"type":"error","error":"too many vfos (at most 64)"})
         );
         let reply = subscribe(&mut client, "nope").await;
         assert_eq!(reply["type"], "error");

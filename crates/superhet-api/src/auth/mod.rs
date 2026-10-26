@@ -1,17 +1,20 @@
-//! Local authentication: one admin account, server-side sessions in PostgreSQL.
+//! Local authentication: accounts with roles, server-side sessions in PostgreSQL, optional
+//! anonymous guest sessions.
 //!
-//! Design and policy: docs/adr/0008-local-auth.md, wire contract: docs/api-auth.md.
-//! Everything except `/healthz`, `/readyz` and the `/api/v1/auth/*` endpoints sits behind
-//! [`protect`]; there is no anonymous mode.
+//! Design and policy: docs/adr/0008-local-auth.md and docs/adr/0011-users-roles-and-guest-access.md,
+//! wire contract: docs/api-auth.md. Everything except `/healthz`, `/readyz` and the
+//! `/api/v1/auth/*` endpoints sits behind [`protect`], which resolves the caller to a
+//! [`Principal`] and checks the route's declared access (`access::RULES`).
 
 // Handlers use `Result<_, Response>` so `?` short-circuits straight into the HTTP answer; the
 // error path is cold and the size is irrelevant there.
 #![allow(clippy::result_large_err)]
 
+mod accounts;
 mod limiter;
-mod password;
+pub(crate) mod password;
 mod routes;
-mod token;
+pub(crate) mod token;
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,17 +23,23 @@ use std::time::Duration;
 
 use axum::{
     Router,
-    extract::{ConnectInfo, FromRequestParts, Request, State},
-    http::{HeaderMap, HeaderValue, StatusCode, Uri, header, request::Parts},
+    extract::{ConnectInfo, FromRequestParts, MatchedPath, Request, State},
+    http::{Extensions, HeaderMap, HeaderValue, StatusCode, Uri, header, request::Parts},
     middleware::{self, Next},
     response::{IntoResponse, Response},
 };
+use superhet_bus::audit::Outcome;
 use superhet_db::{PgPool, auth::Lifetimes};
 use tokio::sync::Semaphore;
 
+use crate::access::{self, Actor, Principal, Role};
+use crate::audit::Audit;
 use crate::origin::OriginPolicy;
+use crate::registry::Registry;
+use crate::settings::SettingsStore;
 pub use limiter::Limits;
 pub use routes::router;
+pub(crate) use routes::{Reply, db_failed, flatten, guard_origin, invalid, json_reply, parse_json};
 
 /// Environment variable: `auto` (default), `true` or `false`.
 pub const ENV_COOKIE_SECURE: &str = "SUPERHET_COOKIE_SECURE";
@@ -143,6 +152,11 @@ struct Inner {
     dummy_hash: String,
     setup_token: Mutex<Option<String>>,
     setup_done: AtomicBool,
+    /// Failed logins per user name, across all addresses.
+    name_limiter: limiter::NameLimiter,
+    settings: Arc<SettingsStore>,
+    audit: Audit,
+    registry: Registry,
 }
 
 /// Shared state of the auth layer (cheap to clone).
@@ -158,6 +172,10 @@ pub struct Session {
     pub username: String,
     /// SHA-256 of the cookie token (the database key).
     pub token_hash: [u8; 32],
+    /// Role of the owner.
+    pub role: Role,
+    /// The owner still has to change the password.
+    pub must_change_password: bool,
 }
 
 impl AuthState {
@@ -172,8 +190,12 @@ impl AuthState {
         config: AuthConfig,
     ) -> Result<Self, String> {
         let dummy_hash = password::hash(DUMMY_PASSWORD)?;
+        let settings = Arc::new(SettingsStore::new(db.clone()));
+        let audit = Audit::new(db.clone(), Arc::clone(&settings));
+        let registry = Registry::new(audit.clone());
         Ok(Self(Arc::new(Inner {
             limiter: limiter::Limiter::new(config.limits),
+            name_limiter: limiter::NameLimiter::new(config.limits.window, config.limits.per_name),
             db,
             origins,
             config,
@@ -181,7 +203,35 @@ impl AuthState {
             dummy_hash,
             setup_token: Mutex::new(None),
             setup_done: AtomicBool::new(false),
+            settings,
+            audit,
+            registry,
         })))
+    }
+
+    /// An auth layer without database for unit tests of single routes.
+    #[cfg(test)]
+    #[must_use]
+    pub fn for_tests() -> Self {
+        Self::new(None, OriginPolicy::default(), AuthConfig::default()).expect("auth state")
+    }
+
+    /// The audit writer.
+    #[must_use]
+    pub fn audit(&self) -> &Audit {
+        &self.0.audit
+    }
+
+    /// The admin-editable settings.
+    #[must_use]
+    pub fn settings(&self) -> &SettingsStore {
+        &self.0.settings
+    }
+
+    /// Guest sessions and live connections.
+    #[must_use]
+    pub fn registry(&self) -> &Registry {
+        &self.0.registry
     }
 
     /// First-run housekeeping: if no admin exists yet, arm the setup token and log it.
@@ -240,7 +290,7 @@ impl AuthState {
         });
     }
 
-    fn db(&self) -> Result<&PgPool, Response> {
+    pub(crate) fn db(&self) -> Result<&PgPool, Response> {
         self.0.db.as_ref().ok_or_else(unavailable)
     }
 
@@ -267,11 +317,53 @@ impl AuthState {
             user_id: active.user_id,
             username: active.username,
             token_hash,
+            role: active.role,
+            must_change_password: active.must_change_password,
+        }))
+    }
+
+    /// Resolve the caller of a request: an account session first, then a guest session (only
+    /// while guest mode is on). `None` means unauthenticated.
+    async fn resolve_principal(
+        &self,
+        headers: &HeaderMap,
+        client: &ClientInfo,
+    ) -> Result<Option<Principal>, superhet_db::Error> {
+        if let Some(session) = self.authenticate(headers).await? {
+            return Ok(Some(Principal {
+                actor: Actor::User(session.user_id),
+                name: session.username,
+                role: session.role,
+                session_key: token::hex(&session.token_hash),
+                ip: client.ip,
+                user_agent: client.user_agent.clone(),
+                must_change_password: session.must_change_password,
+            }));
+        }
+        let Some(raw) = token::guest_token_from_headers(headers) else {
+            return Ok(None);
+        };
+        let policy = self.0.settings.guest_policy().await;
+        if !policy.enabled {
+            return Ok(None);
+        }
+        let idle = Duration::from_secs(policy.idle_timeout_secs);
+        let Some(guest) = self.0.registry.guest_touch(&token::hash_token(&raw), idle) else {
+            return Ok(None);
+        };
+        Ok(Some(Principal {
+            session_key: crate::registry::guest_key(&guest.id),
+            actor: Actor::Guest(guest.id),
+            name: "guest".to_owned(),
+            role: Role::Listener,
+            ip: client.ip,
+            user_agent: client.user_agent.clone(),
+            must_change_password: false,
         }))
     }
 
     /// Hash on the blocking pool, at most [`MAX_CONCURRENT_HASHES`] at a time.
-    async fn hash_password(&self, plain: String) -> Result<String, Response> {
+    pub(crate) async fn hash_password(&self, plain: String) -> Result<String, Response> {
         let _slot = self.0.hash_slots.acquire().await.map_err(|_| internal())?;
         tokio::task::spawn_blocking(move || password::hash(&plain))
             .await
@@ -339,6 +431,33 @@ fn is_secure(config: &AuthConfig, headers: &HeaderMap, uri: &Uri) -> bool {
     }
 }
 
+impl ClientInfo {
+    fn from_request(
+        config: &AuthConfig,
+        extensions: &Extensions,
+        headers: &HeaderMap,
+        uri: &Uri,
+    ) -> Self {
+        let peer = extensions
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|c| c.0.ip());
+        let ip = if config.trust_proxy {
+            forwarded_ip(headers).or(peer)
+        } else {
+            peer
+        };
+        let user_agent = headers
+            .get(header::USER_AGENT)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.chars().take(USER_AGENT_MAX).collect());
+        Self {
+            ip,
+            user_agent,
+            secure: is_secure(config, headers, uri),
+        }
+    }
+}
+
 impl FromRequestParts<AuthState> for ClientInfo {
     type Rejection = std::convert::Infallible;
 
@@ -346,31 +465,17 @@ impl FromRequestParts<AuthState> for ClientInfo {
         parts: &mut Parts,
         state: &AuthState,
     ) -> Result<Self, Self::Rejection> {
-        let config = &state.0.config;
-        let peer = parts
-            .extensions
-            .get::<ConnectInfo<SocketAddr>>()
-            .map(|c| c.0.ip());
-        let ip = if config.trust_proxy {
-            forwarded_ip(&parts.headers).or(peer)
-        } else {
-            peer
-        };
-        let user_agent = parts
-            .headers
-            .get(header::USER_AGENT)
-            .and_then(|v| v.to_str().ok())
-            .map(|v| v.chars().take(USER_AGENT_MAX).collect());
-        Ok(Self {
-            ip,
-            user_agent,
-            secure: is_secure(config, &parts.headers, &parts.uri),
-        })
+        Ok(Self::from_request(
+            &state.0.config,
+            &parts.extensions,
+            &parts.headers,
+            &parts.uri,
+        ))
     }
 }
 
 /// JSON error body `{"error": code[, "message": ...]}`; never cached.
-fn error(status: StatusCode, code: &str, message: Option<&str>) -> Response {
+pub(crate) fn error(status: StatusCode, code: &str, message: Option<&str>) -> Response {
     let body = match message {
         Some(m) => serde_json::json!({"error": code, "message": m}),
         None => serde_json::json!({"error": code}),
@@ -393,31 +498,65 @@ fn unauthenticated() -> Response {
     error(StatusCode::UNAUTHORIZED, "unauthenticated", None)
 }
 
-fn unavailable() -> Response {
+pub(crate) fn unavailable() -> Response {
     error(StatusCode::SERVICE_UNAVAILABLE, "unavailable", None)
 }
 
-fn internal() -> Response {
+pub(crate) fn internal() -> Response {
     error(StatusCode::INTERNAL_SERVER_ERROR, "internal", None)
 }
 
-/// Middleware: only requests with a valid session reach the inner router.
-async fn require_session(
-    State(auth): State<AuthState>,
-    mut request: Request,
-    next: Next,
-) -> Response {
-    match auth.authenticate(request.headers()).await {
-        Ok(Some(session)) => {
-            request.extensions_mut().insert(session);
-            next.run(request).await
-        }
-        Ok(None) => unauthenticated(),
+fn forbidden() -> Response {
+    error(StatusCode::FORBIDDEN, "forbidden", None)
+}
+
+/// Middleware: resolve the caller, look the route up in the access table and let only
+/// permitted requests through (the [`Principal`] travels as a request extension).
+async fn enforce(State(auth): State<AuthState>, mut request: Request, next: Next) -> Response {
+    let client = ClientInfo::from_request(
+        &auth.0.config,
+        request.extensions(),
+        request.headers(),
+        request.uri(),
+    );
+    let principal = match auth.resolve_principal(request.headers(), &client).await {
+        Ok(Some(principal)) => principal,
+        Ok(None) => return unauthenticated(),
         Err(err) => {
             tracing::warn!(%err, "session lookup failed");
-            unavailable()
+            return unavailable();
         }
+    };
+    // Unknown paths have no matched route: let the fallback answer 404 (the caller is signed in).
+    let Some(pattern) = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|p| p.as_str().to_owned())
+    else {
+        return next.run(request).await;
+    };
+    let Some(rule) = access::find_rule(request.method(), &pattern) else {
+        tracing::error!(method = %request.method(), path = pattern, "route has no access rule: refused");
+        return forbidden();
+    };
+    if principal.must_change_password {
+        return error(StatusCode::FORBIDDEN, "password_change_required", None);
     }
+    let guests_see_decoder_events = principal.is_guest()
+        && rule.access == access::Access::GuestDecoder
+        && auth.0.settings.guest_policy().await.show_decoder_events;
+    if !rule.access.allows(&principal, guests_see_decoder_events) {
+        auth.0.audit.log_coalesced(
+            &principal.who(),
+            "access.denied",
+            Some(&format!("{} {}", rule.method, rule.path)),
+            Outcome::Denied,
+            serde_json::json!({}),
+        );
+        return forbidden();
+    }
+    request.extensions_mut().insert(principal);
+    next.run(request).await
 }
 
 async fn not_found() -> Response {
@@ -429,7 +568,7 @@ async fn not_found() -> Response {
 pub fn protect(routes: Router, auth: AuthState) -> Router {
     routes
         .fallback(not_found)
-        .layer(middleware::from_fn_with_state(auth, require_session))
+        .layer(middleware::from_fn_with_state(auth, enforce))
 }
 
 #[cfg(test)]

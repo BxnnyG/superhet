@@ -204,6 +204,17 @@ fn header<'a>(reply: &'a Reply, name: &str) -> Option<&'a str> {
 }
 
 /// What a profile covers, ids/epoch/windows aside.
+/// The VFO list as the daemon stores it: the per-viewer `mine` flag is added by the API only.
+fn without_mine(vfos: &Value) -> Value {
+    let mut vfos = vfos.clone();
+    for vfo in vfos.as_array_mut().into_iter().flatten() {
+        if let Some(object) = vfo.as_object_mut() {
+            object.remove("mine");
+        }
+    }
+    vfos
+}
+
 fn essence(state: &Value) -> Value {
     let vfos: Vec<Value> = state["vfos"]
         .as_array()
@@ -212,6 +223,11 @@ fn essence(state: &Value) -> Value {
         .map(|v| {
             let mut v = v.clone();
             v["id"] = Value::Null;
+            // Ownership differs between VFOs created by a user and those a profile restores.
+            if let Some(object) = v.as_object_mut() {
+                object.remove("owner");
+                object.remove("mine");
+            }
             v
         })
         .collect();
@@ -519,7 +535,8 @@ async fn lock_and_free_tuning_over_rest() {
     assert_eq!(refused.status, 409);
     assert_eq!(refused.body["code"], "locked");
     assert_eq!(refused.body["holders"][0]["kind"], "user");
-    assert_eq!(refused.body["holders"][0]["id"], "user");
+    assert_eq!(refused.body["holders"][0]["id"], "u:1");
+    assert_eq!(refused.body["holders"][0]["name"], "admin");
     let repeated = stack.tune(json!({"center_hz": center})).await;
     assert_eq!(
         repeated.status, 200,
@@ -769,7 +786,7 @@ async fn sdrd_restores_its_state_after_a_restart() {
         if let Some(saved) = store.get(&key).await.expect("kv get") {
             let saved: Value = serde_json::from_slice(&saved).expect("json");
             if saved["locks"].as_array().is_some_and(|l| l.len() == 1)
-                && saved["vfos"] == before["vfos"]
+                && saved["vfos"] == without_mine(&before["vfos"])
             {
                 break;
             }

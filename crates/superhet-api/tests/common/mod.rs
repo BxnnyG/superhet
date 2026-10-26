@@ -279,3 +279,114 @@ pub async fn ws_connect_with_cookie(
         .await
         .map(|(ws, _)| ws)
 }
+
+// ---- helpers of the multi-user tests ------------------------------------------------
+
+use serde_json::{Value, json};
+
+pub const UA: &str = "sh-test/1";
+pub const ADMIN_PW2: &str = "a different long passphrase";
+
+pub fn req(
+    port: u16,
+    method: &str,
+    path: &str,
+    cookie: Option<&str>,
+    body: Option<&Value>,
+) -> Reply {
+    let mut headers: Vec<(&str, &str)> = vec![("User-Agent", UA)];
+    if let Some(c) = cookie {
+        headers.push(("Cookie", c));
+    }
+    if body.is_some() {
+        headers.push(("Content-Type", "application/json"));
+    }
+    let text = body.map(Value::to_string).unwrap_or_default();
+    http(port, method, path, &headers, &text)
+}
+
+pub fn login(port: u16, user: &str, password: &str) -> Reply {
+    req(
+        port,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(&json!({"username": user, "password": password})),
+    )
+}
+
+/// Create a user through the admin API, log in with the one-time password, replace it and
+/// return the session cookie of the new, fully usable account.
+pub fn make_user(port: u16, admin: &str, name: &str, role: &str) -> String {
+    let created = req(
+        port,
+        "POST",
+        "/api/v1/admin/users",
+        Some(admin),
+        Some(&json!({"username": name, "role": role})),
+    );
+    assert_eq!(created.status, 201, "{created:?}");
+    let first = created.json()["password"]
+        .as_str()
+        .expect("generated password")
+        .to_owned();
+    let cookie = login(port, name, &first)
+        .session_cookie()
+        .expect("login cookie");
+    // Until the password is replaced nothing else works.
+    let blocked = req(port, "GET", "/api/v1/bookmarks", Some(&cookie), None);
+    assert_eq!(
+        (blocked.status, blocked.json()["error"].clone()),
+        (403, json!("password_change_required"))
+    );
+    let changed = req(
+        port,
+        "POST",
+        "/api/v1/auth/password",
+        Some(&cookie),
+        Some(&json!({"current_password": first, "new_password": format!("{name}-{ADMIN_PW2}")})),
+    );
+    assert_eq!(changed.status, 204, "{changed:?}");
+    cookie
+}
+
+pub fn guest_session(port: u16) -> Option<String> {
+    let reply = req(port, "POST", "/api/v1/auth/guest", None, None);
+    assert!([200, 404, 429, 503].contains(&reply.status), "{reply:?}");
+    (reply.status == 200).then(|| reply.session_cookie().expect("guest cookie"))
+}
+
+pub fn put(port: u16, cookie: &str, path: &str, body: &Value) -> Reply {
+    req(port, "PUT", path, Some(cookie), Some(body))
+}
+
+pub fn enable_guests(port: u16, admin: &str, extra: Value) {
+    let mut policy = json!({"enabled": true});
+    if let (Some(base), Some(more)) = (policy.as_object_mut(), extra.as_object()) {
+        base.extend(more.clone());
+    }
+    let reply = put(port, admin, "/api/v1/admin/guest-policy", &policy);
+    assert_eq!(reply.status, 200, "{reply:?}");
+}
+
+/// Audit events (newest first) matching the query string.
+pub fn audit(port: u16, admin: &str, query: &str) -> Vec<Value> {
+    let reply = req(
+        port,
+        "GET",
+        &format!("/api/v1/admin/audit?limit=500&{query}"),
+        Some(admin),
+        None,
+    );
+    assert_eq!(reply.status, 200, "{reply:?}");
+    reply.json()["events"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+pub fn one(port: u16, admin: &str, action: &str) -> Value {
+    let events = audit(port, admin, &format!("action={action}"));
+    assert_eq!(events.len(), 1, "exactly one {action}: {events:?}");
+    events.into_iter().next().expect("one")
+}
