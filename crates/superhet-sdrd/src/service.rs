@@ -344,8 +344,8 @@ async fn handle_message(
                 let controller = Arc::clone(controller);
                 let payload = message.payload.clone();
                 move || {
-                    control::parse_empty(&payload)?;
-                    Ok(ok_reply(&controller.set_user_lock(acquire)))
+                    let request = control::parse_lock(&payload, acquire)?;
+                    Ok(ok_reply(&controller.change_lock(&request)))
                 }
             })
             .await;

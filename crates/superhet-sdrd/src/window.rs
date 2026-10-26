@@ -95,6 +95,7 @@ mod tests {
             stereo: None,
             tones: None,
             tone_squelch_hz: None,
+            owner: None,
         }
     }
 

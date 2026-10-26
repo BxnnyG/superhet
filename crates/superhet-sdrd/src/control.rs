@@ -165,24 +165,73 @@ fn parse_gain(value: &serde_json::Value) -> Result<Gain, CtlError> {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct EmptyWire {
+struct LockWire {
     v: u32,
+    holder: Option<String>,
+    name: Option<String>,
+    force: Option<bool>,
 }
 
-/// Parse a request whose body carries nothing but the protocol version (`ctl.lock.*`).
+/// A validated `ctl.lock.acquire` / `ctl.lock.release` request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LockRequest {
+    /// Take the lock as `id` (shown as `name`).
+    Acquire {
+        /// Holder id (`user` when the sender names none, otherwise e.g. `u:3`).
+        id: String,
+        /// Display name.
+        name: Option<String>,
+    },
+    /// Drop the lock of holder `id`.
+    Release {
+        /// Holder id.
+        id: String,
+    },
+    /// Drop every user lock (admin override).
+    ReleaseAll,
+}
+
+/// Longest accepted holder display name, in characters.
+const HOLDER_NAME_MAX: usize = 64;
+
+/// Parse a `ctl.lock.acquire` (`acquire == true`) or `ctl.lock.release` body. An empty body
+/// (`{"v":1}`) addresses the anonymous holder `user`, as before accounts existed.
 ///
 /// # Errors
-/// [`ErrorCode::Invalid`] for malformed JSON, unknown fields or a wrong version.
-pub fn parse_empty(payload: &[u8]) -> Result<(), CtlError> {
-    let wire: EmptyWire = serde_json::from_slice(payload)
+/// [`ErrorCode::Invalid`] for malformed JSON, unknown fields, a wrong version, a bad holder or
+/// `force` on an acquire.
+pub fn parse_lock(payload: &[u8], acquire: bool) -> Result<LockRequest, CtlError> {
+    let wire: LockWire = serde_json::from_slice(payload)
         .map_err(|e| CtlError::invalid(format!("malformed request: {e}")))?;
-    if wire.v == VERSION {
-        Ok(())
-    } else {
-        Err(CtlError::invalid(format!(
+    if wire.v != VERSION {
+        return Err(CtlError::invalid(format!(
             "unsupported protocol version {}",
             wire.v
-        )))
+        )));
+    }
+    let id = wire.holder.unwrap_or_else(|| "user".to_owned());
+    crate::vfo::check_owner(&id)?;
+    if let Some(name) = &wire.name
+        && (name.is_empty()
+            || name.chars().count() > HOLDER_NAME_MAX
+            || name.chars().any(char::is_control))
+    {
+        return Err(CtlError::invalid(
+            "holder name must be 1-64 printable characters",
+        ));
+    }
+    if acquire {
+        if wire.force.is_some() {
+            return Err(CtlError::invalid("force only applies to release"));
+        }
+        Ok(LockRequest::Acquire {
+            id,
+            name: wire.name,
+        })
+    } else if wire.force == Some(true) {
+        Ok(LockRequest::ReleaseAll)
+    } else {
+        Ok(LockRequest::Release { id })
     }
 }
 
@@ -254,7 +303,7 @@ struct StateWire<'a> {
     bias_tee: bool,
     tuning_epoch: u64,
     gains_db: &'a [f32],
-    vfos: Vec<VfoWire>,
+    vfos: Vec<VfoWire<'a>>,
     locks: &'a [Holder],
     window: WindowWire,
     overload: OverloadWire,

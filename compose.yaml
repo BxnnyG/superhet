@@ -96,6 +96,7 @@ services:
       # dongle); the daemon exits (and compose restarts it) when the device cannot be opened.
       SUPERHET_DEVICE: ${SUPERHET_DEVICE-rtlsdr:0}
       SUPERHET_DEVICE_ID: ${SUPERHET_DEVICE_ID:-dev0}
+      SUPERHET_MAX_VFOS: ${SUPERHET_MAX_VFOS:-8}
     depends_on:
       nats: { condition: service_healthy }
     # RTL-SDR access (docs/setup-host.md): the USB tree is bind-mounted and the USB character

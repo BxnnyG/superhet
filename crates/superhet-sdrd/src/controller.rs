@@ -13,7 +13,9 @@ use superhet_bus::profile::{self, ProfileData};
 use superhet_device::{DeviceControl, DeviceState, Gain, TuneRequest};
 use tokio::sync::watch;
 
-use crate::control::{CtlError, Retune, VERSION, error_reply, ok_reply, state_json, vfo_reply};
+use crate::control::{
+    CtlError, LockRequest, Retune, VERSION, error_reply, ok_reply, state_json, vfo_reply,
+};
 use crate::lock::{Holder, HolderKind, LockSet};
 use crate::overload::OverloadStatus;
 use crate::vfo::{self, Tuning, Vfo, VfoCreate, VfoMode, VfoRegistry, VfoShared};
@@ -204,16 +206,34 @@ impl Controller {
         }
     }
 
-    /// Take or drop the user lock (idempotent) and return the new state.
+    /// Take or drop the anonymous user lock (idempotent) and return the new state.
+    #[cfg(test)]
     pub fn set_user_lock(&self, held: bool) -> Arc<str> {
-        let mut locks = self.gate();
-        let changed = if held {
-            locks.acquire(Holder::user())
+        self.change_lock(&if held {
+            LockRequest::Acquire {
+                id: "user".into(),
+                name: None,
+            }
         } else {
-            locks.release(HolderKind::User, "user")
+            LockRequest::Release { id: "user".into() }
+        })
+    }
+
+    /// Apply a lock request (idempotent) and return the new state.
+    pub fn change_lock(&self, request: &LockRequest) -> Arc<str> {
+        let mut locks = self.gate();
+        let changed = match request {
+            LockRequest::Acquire { id, name } if id == "user" && name.is_none() => {
+                locks.acquire(Holder::user())
+            }
+            LockRequest::Acquire { id, name } => {
+                locks.acquire(Holder::named_user(id, name.as_deref()))
+            }
+            LockRequest::Release { id } => locks.release(HolderKind::User, id),
+            LockRequest::ReleaseAll => locks.release_kind(HolderKind::User),
         };
         if changed {
-            tracing::info!(held, "user tuning lock changed");
+            tracing::info!(?request, "tuning lock changed");
         }
         self.publish(&locks, &self.control.state())
     }
@@ -231,8 +251,8 @@ impl Controller {
         let rate = before.sample_rate;
         let (affected, moved) = match command {
             "vfo.create" => {
-                let request = vfo::parse_create(payload)?;
-                let vfo = self.vfos.with(|r| r.create(request, rate))?;
+                let (request, owner) = vfo::parse_create_owned(payload)?;
+                let vfo = self.vfos.with(|r| r.create_owned(request, owner, rate))?;
                 tracing::info!(id = vfo.id, freq_hz = vfo.freq_hz, mode = ?vfo.mode, "vfo created");
                 (Some(vfo), true)
             }
@@ -446,21 +466,38 @@ impl Controller {
                 .map(|v| v["id"].as_u64().and_then(|id| u32::try_from(id).ok()))
                 .collect::<Vec<_>>()
         });
-        let saved: Vec<(u32, VfoCreate)> = ids
+        let owners: Vec<Option<String>> = doc["vfos"].as_array().map_or_else(Vec::new, |vfos| {
+            vfos.iter()
+                .map(|v| v["owner"].as_str().map(str::to_owned))
+                .collect()
+        });
+        let saved: Vec<(u32, VfoCreate, Option<String>)> = ids
             .into_iter()
             .zip(&data.vfos)
-            .filter_map(|(id, vfo)| Some((id?, vfo.into())))
+            .zip(owners)
+            .filter_map(|((id, vfo), owner)| Some((id?, vfo.into(), owner)))
             .collect();
         let wanted = saved.len();
         let dropped = self.vfos.with(|r| r.restore(saved, applied.sample_rate));
         if dropped > 0 {
             tracing::warn!(dropped, "some saved VFOs could not be restored");
         }
-        if let Some(lock) = doc["locks"]
+        for lock in doc["locks"]
             .as_array()
-            .and_then(|l| l.iter().find(|h| h["kind"] == "user"))
+            .into_iter()
+            .flatten()
+            .filter(|h| h["kind"] == "user")
         {
-            locks.acquire(Holder::user_since(lock["since_ms"].as_u64().unwrap_or(0)));
+            let since_ms = lock["since_ms"].as_u64().unwrap_or(0);
+            let id = lock["id"].as_str().unwrap_or("user");
+            let name = lock["name"].as_str();
+            let mut holder = if id == "user" && name.is_none() {
+                Holder::user_since(since_ms)
+            } else {
+                Holder::named_user(id, name)
+            };
+            holder.since_ms = since_ms;
+            locks.acquire(holder);
         }
         tracing::info!(
             center_hz = applied.center_hz,
@@ -685,6 +722,76 @@ mod tests {
         assert_eq!(reply["retune"], "none");
         assert_eq!(state(&c)["center_hz"], 102_000_000u64 + 212_500);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn vfo_owner_and_named_lock_holders_appear_in_the_state() {
+        let c = controller(Mock::new());
+        let reply = vfo_call(
+            &c,
+            "vfo.create",
+            json!({"v": 1, "freq_hz": 100_100_000u64, "mode": "nfm", "owner": "u:3"}),
+        )
+        .expect("create");
+        assert_eq!(reply["vfo"]["owner"], "u:3");
+        assert_eq!(state(&c)["vfos"][0]["owner"], "u:3");
+
+        let acquire = |id: &str, name: Option<&str>| LockRequest::Acquire {
+            id: id.into(),
+            name: name.map(Into::into),
+        };
+        c.change_lock(&acquire("u:3", Some("alice")));
+        c.change_lock(&acquire("u:4", Some("bob")));
+        assert_eq!(state(&c)["locks"][0]["id"], "u:3");
+        assert_eq!(state(&c)["locks"][0]["name"], "alice");
+        let err = tune(&c, &center(101_000_000)).expect_err("locked");
+        assert_eq!(err.code, crate::control::ErrorCode::Locked);
+        assert_eq!(err.message, "tuning is locked by: user alice, user bob");
+        assert_eq!(err.holders[1].name.as_deref(), Some("bob"));
+
+        // A holder releases only its own lock; force drops all of them.
+        c.change_lock(&LockRequest::Release { id: "u:3".into() });
+        assert_eq!(state(&c)["locks"].as_array().map(Vec::len), Some(1));
+        c.change_lock(&LockRequest::ReleaseAll);
+        assert_eq!(state(&c)["locks"].as_array().map(Vec::len), Some(0));
+        assert!(tune(&c, &center(101_000_000)).is_ok());
+    }
+
+    #[test]
+    fn lock_requests_parse_with_legacy_defaults() {
+        use crate::control::parse_lock;
+        assert_eq!(
+            parse_lock(br#"{"v":1}"#, true),
+            Ok(LockRequest::Acquire {
+                id: "user".into(),
+                name: None
+            })
+        );
+        assert_eq!(
+            parse_lock(br#"{"v":1,"holder":"u:3","name":"alice"}"#, true),
+            Ok(LockRequest::Acquire {
+                id: "u:3".into(),
+                name: Some("alice".into())
+            })
+        );
+        assert_eq!(
+            parse_lock(br#"{"v":1,"holder":"u:3"}"#, false),
+            Ok(LockRequest::Release { id: "u:3".into() })
+        );
+        assert_eq!(
+            parse_lock(br#"{"v":1,"force":true}"#, false),
+            Ok(LockRequest::ReleaseAll)
+        );
+        for (body, acquire) in [
+            (r#"{"v":2}"#, true),
+            (r#"{"v":1,"force":true}"#, true),
+            (r#"{"v":1,"holder":"a b"}"#, true),
+            (r#"{"v":1,"name":""}"#, true),
+            (r#"{"v":1,"extra":1}"#, false),
+            ("nope", false),
+        ] {
+            assert!(parse_lock(body.as_bytes(), acquire).is_err(), "{body}");
+        }
     }
 
     #[test]
