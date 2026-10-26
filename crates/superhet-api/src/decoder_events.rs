@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use async_nats::{Subscriber, connection::State as Connection};
 use axum::{
-    Router,
+    Extension, Router,
     body::Body,
     extract::{
         Query, State,
@@ -219,7 +219,7 @@ async fn clear_events(State(state): State<EventsState>, headers: HeaderMap) -> R
 }
 
 /// `YYYY-MM-DDTHH:MM:SS.mmmZ` for Unix milliseconds (proleptic Gregorian, UTC).
-fn iso(ts_ms: i64) -> String {
+pub(crate) fn iso(ts_ms: i64) -> String {
     let ms = ts_ms.rem_euclid(1000);
     let secs = ts_ms.div_euclid(1000);
     let days = secs.div_euclid(86_400);
@@ -244,7 +244,7 @@ fn iso(ts_ms: i64) -> String {
 
 /// One CSV field. Text that a spreadsheet would run as a formula gets a leading quote (RadioText
 /// comes from the air, anybody can send it).
-fn csv_field(raw: &str) -> String {
+pub(crate) fn csv_field(raw: &str) -> String {
     let mut text = raw.replace(['\r', '\n'], " ");
     if text.starts_with(['=', '+', '-', '@', '\t']) {
         text.insert(0, '\'');
@@ -330,6 +330,7 @@ struct WsQuery {
 
 async fn events_ws(
     State(state): State<EventsState>,
+    Extension(principal): Extension<crate::access::Principal>,
     Query(query): Query<WsQuery>,
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
@@ -350,12 +351,23 @@ async fn events_ws(
         tracing::warn!(%err, "events ws: subscribe failed");
         StatusCode::SERVICE_UNAVAILABLE
     })?;
+    let conn = state
+        .devices
+        .auth
+        .registry()
+        .connect(
+            &principal.session_key,
+            &principal.who(),
+            "events",
+            &query.dev,
+        )
+        .await;
     Ok(upgrade
         .max_message_size(MAX_CLIENT_BYTES)
         .max_frame_size(MAX_CLIENT_BYTES)
         .on_upgrade(move |socket| async move {
             let _client = crate::metrics::track_client("events");
-            serve_client(socket, updates).await;
+            serve_client(socket, updates, conn).await;
             drop(permit);
         }))
 }
@@ -368,9 +380,14 @@ fn envelope(doc: &str) -> Option<String> {
     is_object.then(|| format!(r#"{{"v":1,"type":"decoder_event","event":{doc}}}"#))
 }
 
-async fn serve_client(mut socket: WebSocket, mut updates: Subscriber) {
+async fn serve_client(
+    mut socket: WebSocket,
+    mut updates: Subscriber,
+    mut kill: crate::registry::ConnGuard,
+) {
     loop {
         tokio::select! {
+            () = kill.killed() => break,
             incoming = socket.recv() => match incoming {
                 None | Some(Err(_) | Ok(Message::Close(_))) => break,
                 // One-way feed; anything the client sends is ignored.

@@ -88,7 +88,9 @@ cookie and the `400`/`403`/`503` refusals work as for the spectrum socket (`400`
 ## Server to client
 
 Text frames only, JSON, always `{"v":1,"type":"state","state":{...}}` with the complete state
-object. There are no diffs: the newest frame replaces everything the client knew.
+object. There are no diffs: the newest frame replaces everything the client knew. The document is
+prepared for the viewer as in `GET /api/v1/devices/{dev}/state` (`docs/api-users.md`): every VFO
+has `"mine"`, `owner` only for operators/admins, lock holder names and ids are removed for guests.
 
 - The first frame is the current state (asked from the daemon, falling back to the last known
   one in KV). If the device has no state yet (daemon not running), no frame is sent until it
@@ -102,4 +104,6 @@ object. There are no diffs: the newest frame replaces everything the client knew
   own request failures (`503` on control routes) or the missing 30 s re-publish.
 
 A client that cannot accept a frame for 5 s is disconnected. Text sent by the client is ignored.
+All sockets of a session are closed by the server when an admin kicks the session, disables or
+deletes the account, or resets its password, and when a guest session ends.
 Spectrum frames stay on `/api/v1/ws/spectrum`; audio on `/api/v1/ws/audio`.

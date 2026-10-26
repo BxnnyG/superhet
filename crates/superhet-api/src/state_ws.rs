@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use async_nats::{Client, Subscriber, connection::State as Connection};
 use axum::{
-    Router,
+    Extension, Router,
     extract::{
         Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -22,7 +22,9 @@ use serde::Deserialize;
 use superhet_bus::subjects;
 use tokio::sync::Semaphore;
 
+use crate::access::{Principal, view_state};
 use crate::devices::{DevicesState, ctl_state, read_kv};
+use crate::registry::ConnGuard;
 use crate::ws::send;
 
 /// Route path of the state feed.
@@ -62,6 +64,7 @@ struct StateQuery {
 
 async fn state_ws(
     State(state): State<StateWsState>,
+    Extension(principal): Extension<Principal>,
     Query(query): Query<StateQuery>,
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
@@ -84,13 +87,19 @@ async fn state_ws(
         StatusCode::SERVICE_UNAVAILABLE
     })?;
     let device = query.dev;
+    let conn = state
+        .devices
+        .auth
+        .registry()
+        .connect(&principal.session_key, &principal.who(), "state", &device)
+        .await;
     Ok(upgrade
         .max_message_size(MAX_CLIENT_BYTES)
         .max_frame_size(MAX_CLIENT_BYTES)
         .on_upgrade(move |socket| async move {
             let _client = crate::metrics::track_client("state");
             let initial = current_state(&state.devices, &client, &device).await;
-            serve_client(socket, updates, initial).await;
+            serve_client(socket, updates, initial, &principal, conn).await;
             drop(permit);
         }))
 }
@@ -106,6 +115,7 @@ async fn current_state(devices: &DevicesState, client: &Client, device: &str) ->
 }
 
 /// `{"v":1,"type":"state","state":<doc>}` for a document that is a JSON object.
+#[cfg(test)]
 fn envelope(doc: &str) -> Option<String> {
     let is_object = serde_json::from_str::<serde_json::Value>(doc)
         .ok()
@@ -113,14 +123,32 @@ fn envelope(doc: &str) -> Option<String> {
     is_object.then(|| format!(r#"{{"v":1,"type":"state","state":{doc}}}"#))
 }
 
-async fn serve_client(mut socket: WebSocket, mut updates: Subscriber, initial: Option<String>) {
-    if let Some(frame) = initial.as_deref().and_then(envelope)
+/// The envelope with the document prepared for this viewer (owners and names hidden as
+/// needed, `mine` added per VFO).
+fn viewer_envelope(doc: &str, viewer: &Principal) -> Option<String> {
+    let mut value: serde_json::Value = serde_json::from_str(doc).ok()?;
+    if !value.is_object() {
+        return None;
+    }
+    view_state(&mut value, viewer);
+    Some(serde_json::json!({"v": 1, "type": "state", "state": value}).to_string())
+}
+
+async fn serve_client(
+    mut socket: WebSocket,
+    mut updates: Subscriber,
+    initial: Option<String>,
+    viewer: &Principal,
+    mut kill: ConnGuard,
+) {
+    if let Some(frame) = initial.as_deref().and_then(|d| viewer_envelope(d, viewer))
         && !send(&mut socket, Message::text(frame)).await
     {
         return;
     }
     loop {
         tokio::select! {
+            () = kill.killed() => break,
             incoming = socket.recv() => match incoming {
                 None | Some(Err(_) | Ok(Message::Close(_))) => break,
                 // The feed is one-way; anything the client sends is ignored.
@@ -128,7 +156,7 @@ async fn serve_client(mut socket: WebSocket, mut updates: Subscriber, initial: O
             },
             update = updates.next() => {
                 let Some(update) = update else { break };
-                let Some(frame) = std::str::from_utf8(&update.payload).ok().and_then(envelope) else {
+                let Some(frame) = std::str::from_utf8(&update.payload).ok().and_then(|d| viewer_envelope(d, viewer)) else {
                     continue;
                 };
                 if !send(&mut socket, Message::text(frame)).await {

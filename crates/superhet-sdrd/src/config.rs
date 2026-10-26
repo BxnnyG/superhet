@@ -2,6 +2,8 @@
 
 use superhet_bus::subjects;
 
+use crate::vfo::{DEFAULT_MAX_VFOS, MAX_VFOS_LIMIT};
+
 /// Errors in the environment configuration.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -39,6 +41,8 @@ pub struct Config {
     pub device_id: String,
     /// Spectrum settings.
     pub spectrum: SpectrumSettings,
+    /// Most VFOs the device runs at once (`SUPERHET_MAX_VFOS`, default 8, at most 64).
+    pub max_vfos: usize,
 }
 
 fn parse<T: std::str::FromStr>(
@@ -87,10 +91,18 @@ impl Config {
                 reason: "must be below SUPERHET_SPECTRUM_MAX_DB".into(),
             });
         }
+        let max_vfos: usize = parse(&get, "SUPERHET_MAX_VFOS", DEFAULT_MAX_VFOS)?;
+        if !(1..=MAX_VFOS_LIMIT).contains(&max_vfos) {
+            return Err(ConfigError::Invalid {
+                var: "SUPERHET_MAX_VFOS",
+                reason: format!("must be between 1 and {MAX_VFOS_LIMIT}"),
+            });
+        }
         Ok(Self {
             device_spec: get("SUPERHET_DEVICE").filter(|s| !s.trim().is_empty()),
             device_id,
             spectrum,
+            max_vfos,
         })
     }
 }
@@ -115,6 +127,19 @@ mod tests {
         assert_eq!(c.device_id, "dev0");
         assert_eq!(c.spectrum.fft_size, 4096);
         assert_eq!(c.spectrum.bins, 2048);
+        assert_eq!(c.max_vfos, 8);
+    }
+
+    #[test]
+    fn max_vfos_is_configurable_within_bounds() {
+        let c = Config::from_lookup(lookup(&[("SUPERHET_MAX_VFOS", "16")])).expect("valid");
+        assert_eq!(c.max_vfos, 16);
+        for bad in ["0", "65", "many"] {
+            assert!(
+                Config::from_lookup(lookup(&[("SUPERHET_MAX_VFOS", bad)])).is_err(),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

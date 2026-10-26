@@ -898,13 +898,12 @@ async fn order_groups(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::origin::OriginPolicy;
     use axum::http::Request;
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
     async fn call(request: Request<Body>) -> (StatusCode, serde_json::Value) {
-        let devices = DevicesState::new(None, OriginPolicy::default());
+        let devices = DevicesState::for_tests();
         let app = router(BookmarksState::new(devices, None));
         let response = app.oneshot(request).await.expect("infallible");
         let status = response.status();

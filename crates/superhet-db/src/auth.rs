@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use sqlx::Row;
 
+use crate::users::Role;
 use crate::{Error, PgPool};
 
 /// A user as stored in the database.
@@ -18,18 +19,45 @@ pub struct User {
     pub username: String,
     /// PHC-formatted Argon2id hash.
     pub password_hash: String,
+    /// Role.
+    pub role: Role,
+    /// Disabled accounts cannot log in.
+    pub disabled: bool,
+    /// The user has to set a new password before anything else.
+    pub must_change_password: bool,
 }
 
-/// A valid (unexpired) session joined with its user.
+/// A valid (unexpired) session joined with its (enabled) user.
 #[derive(Debug, Clone)]
 pub struct ActiveSession {
     /// Owner of the session.
     pub user_id: i64,
     /// Login name of the owner.
     pub username: String,
+    /// Role of the owner right now (changes apply to the next request).
+    pub role: Role,
+    /// Whether the owner still has to change the password.
+    pub must_change_password: bool,
     /// Whether `last_seen_at` is older than the refresh interval and should be touched.
     pub needs_touch: bool,
 }
+
+const USER_SELECT: &str = "SELECT id, username, password_hash, role, \
+    disabled_at IS NOT NULL AS disabled, must_change_password FROM superhet.users";
+
+fn user_of(r: &sqlx::postgres::PgRow) -> User {
+    User {
+        id: r.get("id"),
+        username: r.get("username"),
+        password_hash: r.get("password_hash"),
+        role: Role::parse(r.get::<&str, _>("role")).unwrap_or(Role::Listener),
+        disabled: r.get("disabled"),
+        must_change_password: r.get("must_change_password"),
+    }
+}
+
+/// Serialises first-run setups (advisory lock key, arbitrary but fixed).
+const SETUP_LOCK: i64 = 0x5348_5f53_4554_5550;
 
 /// Session lifetime policy.
 #[derive(Debug, Clone, Copy)]
@@ -54,23 +82,30 @@ pub async fn has_user(pool: &PgPool) -> Result<bool, Error> {
     )
 }
 
-/// Create the admin account. Returns `None` if one already exists (also under a race).
+/// Create the first admin account (first-run setup). Returns `None` if any account exists
+/// already, also under a race: concurrent setups are serialised by an advisory lock.
 ///
 /// # Errors
-/// Fails if the query fails for any reason other than the uniqueness constraints.
+/// Fails if a query fails.
 pub async fn create_admin(
     pool: &PgPool,
     username: &str,
     password_hash: &str,
 ) -> Result<Option<i64>, Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(SETUP_LOCK)
+        .execute(&mut *tx)
+        .await?;
     let row = sqlx::query(
-        "INSERT INTO superhet.users (username, password_hash) VALUES ($1, $2) \
-         ON CONFLICT DO NOTHING RETURNING id",
+        "INSERT INTO superhet.users (username, password_hash, role) \
+         SELECT $1, $2, 'admin' WHERE NOT EXISTS (SELECT 1 FROM superhet.users) RETURNING id",
     )
     .bind(username)
     .bind(password_hash)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(row.map(|r| r.get("id")))
 }
 
@@ -79,17 +114,12 @@ pub async fn create_admin(
 /// # Errors
 /// Fails if the query fails.
 pub async fn find_user_by_name(pool: &PgPool, username: &str) -> Result<Option<User>, Error> {
-    let row = sqlx::query(
-        "SELECT id, username, password_hash FROM superhet.users WHERE lower(username) = lower($1)",
-    )
-    .bind(username)
-    .fetch_optional(pool)
-    .await?;
-    Ok(row.map(|r| User {
-        id: r.get("id"),
-        username: r.get("username"),
-        password_hash: r.get("password_hash"),
-    }))
+    let sql = format!("{USER_SELECT} WHERE lower(username) = lower($1)");
+    let row = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(username)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.as_ref().map(user_of))
 }
 
 /// Look a user up by id.
@@ -97,15 +127,12 @@ pub async fn find_user_by_name(pool: &PgPool, username: &str) -> Result<Option<U
 /// # Errors
 /// Fails if the query fails.
 pub async fn find_user_by_id(pool: &PgPool, id: i64) -> Result<Option<User>, Error> {
-    let row = sqlx::query("SELECT id, username, password_hash FROM superhet.users WHERE id = $1")
+    let sql = format!("{USER_SELECT} WHERE id = $1");
+    let row = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .fetch_optional(pool)
         .await?;
-    Ok(row.map(|r| User {
-        id: r.get("id"),
-        username: r.get("username"),
-        password_hash: r.get("password_hash"),
-    }))
+    Ok(row.as_ref().map(user_of))
 }
 
 /// Store a new session.
@@ -142,10 +169,10 @@ pub async fn find_active_session(
     lifetimes: Lifetimes,
 ) -> Result<Option<ActiveSession>, Error> {
     let row = sqlx::query(
-        "SELECT s.user_id, u.username, \
+        "SELECT s.user_id, u.username, u.role, u.must_change_password, \
                 s.last_seen_at < now() - make_interval(secs => $4) AS needs_touch \
          FROM superhet.sessions s JOIN superhet.users u ON u.id = s.user_id \
-         WHERE s.id = $1 \
+         WHERE s.id = $1 AND u.disabled_at IS NULL \
            AND s.last_seen_at > now() - make_interval(secs => $2) \
            AND s.created_at > now() - make_interval(secs => $3)",
     )
@@ -159,6 +186,8 @@ pub async fn find_active_session(
         return Ok(Some(ActiveSession {
             user_id: r.get("user_id"),
             username: r.get("username"),
+            role: Role::parse(r.get::<&str, _>("role")).unwrap_or(Role::Listener),
+            must_change_password: r.get("must_change_password"),
             needs_touch: r.get("needs_touch"),
         }));
     }
@@ -212,11 +241,13 @@ pub async fn change_password(
     keep_session: &[u8],
 ) -> Result<u64, Error> {
     let mut tx = pool.begin().await?;
-    sqlx::query("UPDATE superhet.users SET password_hash = $2 WHERE id = $1")
-        .bind(user_id)
-        .bind(password_hash)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "UPDATE superhet.users SET password_hash = $2, must_change_password = false WHERE id = $1",
+    )
+    .bind(user_id)
+    .bind(password_hash)
+    .execute(&mut *tx)
+    .await?;
     let revoked = sqlx::query("DELETE FROM superhet.sessions WHERE user_id = $1 AND id <> $2")
         .bind(user_id)
         .bind(keep_session)

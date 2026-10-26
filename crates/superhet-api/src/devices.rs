@@ -12,15 +12,19 @@ use std::time::Duration;
 
 use async_nats::{Client, RequestErrorKind, connection::State as Connection, jetstream};
 use axum::{
-    Router,
+    Extension, Router,
     body::{Body, Bytes},
-    extract::{DefaultBodyLimit, Path, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::Response,
     routing::{get, post},
 };
-use superhet_bus::subjects;
+use serde_json::{Map, Value, json};
+use superhet_bus::{audit::Outcome, subjects};
+use superhet_db::users::Role;
 
+use crate::access::{Principal, view_state};
+use crate::auth::AuthState;
 use crate::origin::OriginPolicy;
 
 /// Largest accepted request body.
@@ -33,16 +37,28 @@ const BUS_TIMEOUT: Duration = Duration::from_secs(2);
 pub struct DevicesState {
     pub(crate) nats: Option<Client>,
     pub(crate) origins: Arc<OriginPolicy>,
+    pub(crate) auth: AuthState,
 }
 
 impl DevicesState {
-    /// Create the state from the bus client (if configured) and the origin policy.
+    /// Create the state from the bus client (if configured), the origin policy and the auth
+    /// layer (audit log, settings, live registry).
     #[must_use]
-    pub fn new(nats: Option<Client>, origins: OriginPolicy) -> Self {
+    pub fn new(nats: Option<Client>, origins: OriginPolicy, auth: AuthState) -> Self {
         Self {
             nats,
             origins: Arc::new(origins),
+            auth,
         }
+    }
+}
+
+#[cfg(test)]
+impl DevicesState {
+    /// A state without bus and database for unit tests of single routes.
+    #[must_use]
+    pub fn for_tests() -> Self {
+        Self::new(None, OriginPolicy::default(), AuthState::for_tests())
     }
 }
 
@@ -175,6 +191,7 @@ fn prepare_object(body: &[u8]) -> Result<serde_json::Map<String, serde_json::Val
 }
 
 /// Parse a tune body into the bus request: a JSON object, `"v"` defaulting to 1.
+#[cfg(test)]
 fn prepare_tune(body: &[u8]) -> Result<Vec<u8>, &'static str> {
     Ok(serde_json::Value::Object(prepare_object(body)?)
         .to_string()
@@ -182,7 +199,7 @@ fn prepare_tune(body: &[u8]) -> Result<Vec<u8>, &'static str> {
 }
 
 /// Parse a VFO update body and bind it to the id of the URL (a differing `"id"` is an error).
-fn prepare_vfo_update(body: &[u8], id: u32) -> Result<Vec<u8>, &'static str> {
+fn prepare_vfo_patch(body: &[u8], id: u32) -> Result<Map<String, Value>, &'static str> {
     let mut object = prepare_object(body)?;
     match object.get("id") {
         None => {}
@@ -190,7 +207,172 @@ fn prepare_vfo_update(body: &[u8], id: u32) -> Result<Vec<u8>, &'static str> {
         Some(_) => return Err("body id does not match the URL"),
     }
     object.insert("id".into(), id.into());
-    Ok(serde_json::Value::Object(object).to_string().into_bytes())
+    Ok(object)
+}
+
+#[cfg(test)]
+fn prepare_vfo_update(body: &[u8], id: u32) -> Result<Vec<u8>, &'static str> {
+    Ok(Value::Object(prepare_vfo_patch(body, id)?)
+        .to_string()
+        .into_bytes())
+}
+
+fn forbidden(code: &str, message: &str) -> Response {
+    failure(StatusCode::FORBIDDEN, code, message)
+}
+
+/// The VFO objects of a state document.
+fn vfos_of(doc: &Value) -> &[Value] {
+    doc.get("vfos")
+        .and_then(Value::as_array)
+        .map_or(&[], Vec::as_slice)
+}
+
+/// The most VFOs `principal` may own at once (`0` = no limit beyond the daemon's cap).
+async fn vfo_limit(state: &DevicesState, principal: &Principal) -> u32 {
+    if principal.is_guest() {
+        return state
+            .auth
+            .settings()
+            .guest_policy()
+            .await
+            .max_vfos_per_guest;
+    }
+    let limits = state.auth.settings().limits().await;
+    match principal.role {
+        Role::Listener => limits.listener_max_vfos,
+        Role::Operator => limits.operator_max_vfos,
+        Role::Admin => 0,
+    }
+}
+
+/// Guest policy for a requested mode / frequency (`None` fields are not requested).
+async fn check_guest_request(
+    state: &DevicesState,
+    principal: &Principal,
+    object: &Map<String, Value>,
+) -> Result<(), Box<Response>> {
+    if !principal.is_guest() {
+        return Ok(());
+    }
+    let policy = state.auth.settings().guest_policy().await;
+    if let Some(mode) = object.get("mode").and_then(Value::as_str)
+        && !policy.allows_mode(mode)
+    {
+        return Err(Box::new(forbidden(
+            "mode_not_allowed",
+            "this mode is not allowed for guests",
+        )));
+    }
+    if let Some(freq) = object.get("freq_hz").and_then(Value::as_u64)
+        && !policy.allows_freq(freq)
+    {
+        return Err(Box::new(forbidden(
+            "frequency_not_allowed",
+            "this frequency is outside the range allowed for guests",
+        )));
+    }
+    Ok(())
+}
+
+/// Role, guest policy and quota checks before a VFO is created. Must run under the VFO gate.
+async fn check_vfo_create(
+    state: &DevicesState,
+    principal: &Principal,
+    device: &str,
+    object: &Map<String, Value>,
+) -> Result<(), Box<Response>> {
+    check_guest_request(state, principal, object).await?;
+    let limit = vfo_limit(state, principal).await;
+    let only_without_lock =
+        principal.is_guest() && state.auth.settings().guest_policy().await.only_without_lock;
+    if limit == 0 && !only_without_lock {
+        return Ok(());
+    }
+    let doc = ctl_state(state, device).await?;
+    if only_without_lock
+        && doc
+            .get("locks")
+            .and_then(Value::as_array)
+            .is_some_and(|l| !l.is_empty())
+    {
+        return Err(Box::new(forbidden(
+            "locked",
+            "guests cannot create VFOs while the tuning is locked",
+        )));
+    }
+    let me = principal.owner_id();
+    let owned = vfos_of(&doc)
+        .iter()
+        .filter(|v| v.get("owner").and_then(Value::as_str) == Some(me.as_str()))
+        .count();
+    if limit > 0 && owned >= limit as usize {
+        return Err(Box::new(forbidden(
+            "vfo_limit",
+            &format!("at most {limit} VFOs per client"),
+        )));
+    }
+    Ok(())
+}
+
+/// Ownership and guest policy before a VFO is changed or deleted.
+async fn check_vfo_modify(
+    state: &DevicesState,
+    principal: &Principal,
+    device: &str,
+    id: u32,
+    patch: Option<&Map<String, Value>>,
+) -> Result<(), Box<Response>> {
+    if principal.sees_all_vfos() {
+        return Ok(());
+    }
+    let doc = ctl_state(state, device).await?;
+    let me = principal.owner_id();
+    let Some(vfo) = vfos_of(&doc)
+        .iter()
+        .find(|v| v.get("id").and_then(Value::as_u64) == Some(u64::from(id)))
+    else {
+        return Err(Box::new(failure(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            &format!("no VFO with id {id}"),
+        )));
+    };
+    if vfo.get("owner").and_then(Value::as_str) != Some(me.as_str()) {
+        return Err(Box::new(forbidden(
+            "not_owner",
+            "this VFO belongs to somebody else",
+        )));
+    }
+    if let Some(patch) = patch {
+        check_guest_request(state, principal, patch).await?;
+    }
+    Ok(())
+}
+
+/// Audit a refused or failed mutation.
+fn audit_refusal(
+    state: &DevicesState,
+    principal: &Principal,
+    action: &str,
+    target: &str,
+    response: &Response,
+) {
+    let outcome = if matches!(
+        response.status(),
+        StatusCode::FORBIDDEN | StatusCode::CONFLICT | StatusCode::NOT_FOUND
+    ) {
+        Outcome::Denied
+    } else {
+        Outcome::Error
+    };
+    state.auth.audit().log_coalesced(
+        &principal.who(),
+        action,
+        Some(target),
+        outcome,
+        json!({"status": response.status().as_u16()}),
+    );
 }
 
 /// The VFO id of a URL segment.
@@ -257,6 +439,7 @@ pub(crate) async fn call_daemon(
 
 async fn post_tune(
     State(state): State<DevicesState>,
+    Extension(principal): Extension<Principal>,
     Path(device): Path<String>,
     headers: HeaderMap,
     body: Bytes,
@@ -267,13 +450,29 @@ async fn post_tune(
     let Ok(subject) = subjects::ctl(&device, "tune") else {
         return failure(StatusCode::BAD_REQUEST, "invalid", "invalid device id");
     };
-    let payload = match prepare_tune(&body) {
-        Ok(payload) => payload,
+    let object = match prepare_object(&body) {
+        Ok(object) => object,
         Err(message) => return failure(StatusCode::BAD_REQUEST, "invalid", message),
     };
+    state.auth.registry().note_device(&device);
+    let payload = Value::Object(object.clone()).to_string().into_bytes();
     match call_daemon(&state, subject, payload).await {
-        Ok(reply) => json(StatusCode::OK, reply),
-        Err(response) => *response,
+        Ok(reply) => {
+            let mut details = object;
+            details.remove("v");
+            state.auth.audit().log_coalesced(
+                &principal.who(),
+                "device.tune",
+                Some(&device),
+                Outcome::Ok,
+                Value::Object(details),
+            );
+            json(StatusCode::OK, reply)
+        }
+        Err(response) => {
+            audit_refusal(&state, &principal, "device.tune", &device, &response);
+            *response
+        }
     }
 }
 
@@ -281,40 +480,85 @@ async fn post_tune(
 /// state like `/tune`.
 async fn set_lock(
     state: &DevicesState,
+    principal: &Principal,
     device: &str,
     headers: &HeaderMap,
-    action: &str,
+    acquire: bool,
+    force: bool,
 ) -> Response {
     if let Err(response) = guard_mutation(state, headers, false) {
         return *response;
     }
-    let Ok(subject) = subjects::ctl_lock(device, action) else {
+    let Ok(subject) = subjects::ctl_lock(device, if acquire { "acquire" } else { "release" })
+    else {
         return failure(StatusCode::BAD_REQUEST, "invalid", "invalid device id");
     };
-    match call_daemon(state, subject, br#"{"v":1}"#.to_vec()).await {
-        Ok(reply) => json(StatusCode::OK, reply),
-        Err(response) => *response,
+    if force && (acquire || principal.role < Role::Admin) {
+        return forbidden("forbidden", "only an admin may release the locks of others");
     }
+    let payload = if force {
+        json!({"v": 1, "force": true})
+    } else if acquire {
+        json!({"v": 1, "holder": principal.owner_id(), "name": principal.name})
+    } else {
+        json!({"v": 1, "holder": principal.owner_id()})
+    };
+    state.auth.registry().note_device(device);
+    let action = if acquire {
+        "device.lock"
+    } else {
+        "device.unlock"
+    };
+    match call_daemon(state, subject, payload.to_string().into_bytes()).await {
+        Ok(reply) => {
+            state
+                .auth
+                .audit()
+                .log(
+                    &principal.who(),
+                    action,
+                    Some(device),
+                    Outcome::Ok,
+                    json!({"force": force}),
+                )
+                .await;
+            json(StatusCode::OK, reply)
+        }
+        Err(response) => {
+            audit_refusal(state, principal, action, device, &response);
+            *response
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct LockQuery {
+    #[serde(default)]
+    force: bool,
 }
 
 async fn post_lock(
     State(state): State<DevicesState>,
+    Extension(principal): Extension<Principal>,
     Path(device): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    set_lock(&state, &device, &headers, "acquire").await
+    set_lock(&state, &principal, &device, &headers, true, false).await
 }
 
 async fn delete_lock(
     State(state): State<DevicesState>,
+    Extension(principal): Extension<Principal>,
     Path(device): Path<String>,
+    Query(query): Query<LockQuery>,
     headers: HeaderMap,
 ) -> Response {
-    set_lock(&state, &device, &headers, "release").await
+    set_lock(&state, &principal, &device, &headers, false, query.force).await
 }
 
 async fn post_vfo(
     State(state): State<DevicesState>,
+    Extension(principal): Extension<Principal>,
     Path(device): Path<String>,
     headers: HeaderMap,
     body: Bytes,
@@ -325,14 +569,42 @@ async fn post_vfo(
     let Ok(subject) = subjects::ctl_vfo(&device, "create") else {
         return failure(StatusCode::BAD_REQUEST, "invalid", "invalid device id");
     };
-    let payload = match prepare_tune(&body) {
-        Ok(payload) => payload,
+    let mut object = match prepare_object(&body) {
+        Ok(object) => object,
         Err(message) => return failure(StatusCode::BAD_REQUEST, "invalid", message),
     };
+    // The owner is always the caller; a client-supplied value is discarded.
+    object.insert("owner".into(), principal.owner_id().into());
+    state.auth.registry().note_device(&device);
+    let target = format!("{device}/new");
+    // Count-then-create must not interleave with another create.
+    let _gate = state.auth.registry().vfo_gate().await;
+    if let Err(response) = check_vfo_create(&state, &principal, &device, &object).await {
+        audit_refusal(&state, &principal, "vfo.create", &target, &response);
+        return *response;
+    }
+    let payload = Value::Object(object.clone()).to_string().into_bytes();
     let reply = match call_daemon(&state, subject, payload).await {
         Ok(reply) => reply,
-        Err(response) => return *response,
+        Err(response) => {
+            audit_refusal(&state, &principal, "vfo.create", &target, &response);
+            return *response;
+        }
     };
+    let created = serde_json::from_slice::<Value>(&reply)
+        .ok()
+        .and_then(|v| v["vfo"]["id"].as_u64());
+    state
+        .auth
+        .audit()
+        .log(
+            &principal.who(),
+            "vfo.create",
+            Some(&format!("{device}/{}", created.unwrap_or(0))),
+            Outcome::Ok,
+            json!({"freq_hz": object.get("freq_hz"), "mode": object.get("mode")}),
+        )
+        .await;
     let mut response = json(StatusCode::CREATED, reply.clone());
     if let Some(id) = serde_json::from_slice::<serde_json::Value>(&reply)
         .ok()
@@ -347,6 +619,7 @@ async fn post_vfo(
 
 async fn patch_vfo(
     State(state): State<DevicesState>,
+    Extension(principal): Extension<Principal>,
     Path((device, id)): Path<(String, String)>,
     headers: HeaderMap,
     body: Bytes,
@@ -357,18 +630,43 @@ async fn patch_vfo(
     let Ok(subject) = subjects::ctl_vfo(&device, "update") else {
         return failure(StatusCode::BAD_REQUEST, "invalid", "invalid device id");
     };
-    let payload = match parse_vfo_id(&id).and_then(|id| prepare_vfo_update(&body, id)) {
-        Ok(payload) => payload,
+    let (vfo_id, patch) = match parse_vfo_id(&id)
+        .and_then(|vfo_id| prepare_vfo_patch(&body, vfo_id).map(|patch| (vfo_id, patch)))
+    {
+        Ok(parsed) => parsed,
         Err(message) => return failure(StatusCode::BAD_REQUEST, "invalid", message),
     };
+    let target = format!("{device}/{vfo_id}");
+    if let Err(response) = check_vfo_modify(&state, &principal, &device, vfo_id, Some(&patch)).await
+    {
+        audit_refusal(&state, &principal, "vfo.update", &target, &response);
+        return *response;
+    }
+    let payload = Value::Object(patch.clone()).to_string().into_bytes();
     match call_daemon(&state, subject, payload).await {
-        Ok(reply) => json(StatusCode::OK, reply),
-        Err(response) => *response,
+        Ok(reply) => {
+            let mut details = patch;
+            details.remove("v");
+            details.remove("id");
+            state.auth.audit().log_coalesced(
+                &principal.who(),
+                "vfo.update",
+                Some(&target),
+                Outcome::Ok,
+                Value::Object(details),
+            );
+            json(StatusCode::OK, reply)
+        }
+        Err(response) => {
+            audit_refusal(&state, &principal, "vfo.update", &target, &response);
+            *response
+        }
     }
 }
 
 async fn delete_vfo(
     State(state): State<DevicesState>,
+    Extension(principal): Extension<Principal>,
     Path((device, id)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Response {
@@ -382,16 +680,35 @@ async fn delete_vfo(
         Ok(id) => id,
         Err(message) => return failure(StatusCode::BAD_REQUEST, "invalid", message),
     };
+    let target = format!("{device}/{id}");
+    if let Err(response) = check_vfo_modify(&state, &principal, &device, id, None).await {
+        audit_refusal(&state, &principal, "vfo.delete", &target, &response);
+        return *response;
+    }
     let payload = serde_json::json!({"v": 1, "id": id})
         .to_string()
         .into_bytes();
     match call_daemon(&state, subject, payload).await {
         Ok(_) => {
+            state
+                .auth
+                .audit()
+                .log(
+                    &principal.who(),
+                    "vfo.delete",
+                    Some(&target),
+                    Outcome::Ok,
+                    json!({}),
+                )
+                .await;
             let mut response = Response::new(Body::empty());
             *response.status_mut() = StatusCode::NO_CONTENT;
             response
         }
-        Err(response) => *response,
+        Err(response) => {
+            audit_refusal(&state, &principal, "vfo.delete", &target, &response);
+            *response
+        }
     }
 }
 
@@ -462,20 +779,37 @@ async fn load_state(state: &DevicesState, device: &str) -> Result<Bytes, Box<Res
     }
 }
 
-async fn get_state(State(state): State<DevicesState>, Path(device): Path<String>) -> Response {
-    match load_state(&state, &device).await {
-        Ok(stored) => json(StatusCode::OK, stored),
-        Err(response) => *response,
+async fn get_state(
+    State(state): State<DevicesState>,
+    Extension(principal): Extension<Principal>,
+    Path(device): Path<String>,
+) -> Response {
+    state.auth.registry().note_device(&device);
+    let stored = match load_state(&state, &device).await {
+        Ok(stored) => stored,
+        Err(response) => return *response,
+    };
+    match serde_json::from_slice::<Value>(&stored) {
+        Ok(mut doc) if doc.is_object() => {
+            view_state(&mut doc, &principal);
+            json(StatusCode::OK, doc.to_string())
+        }
+        _ => failure(StatusCode::BAD_GATEWAY, "bus", "malformed device state"),
     }
 }
 
-async fn list_vfos(State(state): State<DevicesState>, Path(device): Path<String>) -> Response {
+async fn list_vfos(
+    State(state): State<DevicesState>,
+    Extension(principal): Extension<Principal>,
+    Path(device): Path<String>,
+) -> Response {
     let stored = match load_state(&state, &device).await {
         Ok(stored) => stored,
         Err(response) => return *response,
     };
     match serde_json::from_slice::<serde_json::Value>(&stored) {
-        Ok(value) if value.is_object() => {
+        Ok(mut value) if value.is_object() => {
+            view_state(&mut value, &principal);
             let vfos = value
                 .get("vfos")
                 .cloned()
@@ -497,7 +831,7 @@ mod tests {
     use tower::ServiceExt;
 
     async fn call(request: Request<Body>) -> (StatusCode, serde_json::Value) {
-        let app = router(DevicesState::new(None, OriginPolicy::default()));
+        let app = crate::access::as_test_principal(router(DevicesState::for_tests()));
         let response = app.oneshot(request).await.expect("infallible");
         let status = response.status();
         let bytes = response

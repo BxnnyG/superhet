@@ -28,6 +28,9 @@ pub struct Holder {
     pub id: String,
     /// Unix time in milliseconds when the lock was taken.
     pub since_ms: u64,
+    /// Display name of the holder (the user's login name), if the api supplied one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 impl Holder {
@@ -44,6 +47,18 @@ impl Holder {
             kind: HolderKind::User,
             id: "user".into(),
             since_ms,
+            name: None,
+        }
+    }
+
+    /// A user lock held by a concrete account (`id` such as `u:3`, shown as `name`).
+    #[must_use]
+    pub fn named_user(id: &str, name: Option<&str>) -> Self {
+        Self {
+            kind: HolderKind::User,
+            id: id.to_owned(),
+            since_ms: unix_ms(),
+            name: name.map(str::to_owned),
         }
     }
 }
@@ -81,6 +96,13 @@ impl LockSet {
         self.holders.len() != before
     }
 
+    /// Remove every holder of `kind`. Returns whether there was one.
+    pub fn release_kind(&mut self, kind: HolderKind) -> bool {
+        let before = self.holders.len();
+        self.holders.retain(|h| h.kind != kind);
+        self.holders.len() != before
+    }
+
     /// Whether any holder exists.
     #[must_use]
     pub fn is_locked(&self) -> bool {
@@ -99,8 +121,9 @@ impl LockSet {
         let names: Vec<String> = self
             .holders
             .iter()
-            .map(|h| match h.kind {
-                HolderKind::User => "user".to_owned(),
+            .map(|h| match (h.kind, &h.name) {
+                (HolderKind::User, Some(name)) => format!("user {name}"),
+                (HolderKind::User, None) => "user".to_owned(),
             })
             .collect();
         CtlError {
@@ -122,6 +145,11 @@ mod tests {
         assert!(locks.acquire(Holder::user()));
         assert!(!locks.acquire(Holder::user()));
         assert_eq!(locks.holders().len(), 1);
+        assert!(locks.acquire(Holder::named_user("u:3", Some("alice"))));
+        assert!(locks.release(HolderKind::User, "u:3"));
+        assert!(locks.release_kind(HolderKind::User));
+        assert!(!locks.release_kind(HolderKind::User));
+        assert!(locks.acquire(Holder::user()));
         assert!(locks.is_locked());
         assert!(locks.release(HolderKind::User, "user"));
         assert!(!locks.release(HolderKind::User, "user"));
@@ -136,5 +164,12 @@ mod tests {
         assert_eq!(err.code, ErrorCode::Locked);
         assert_eq!(err.message, "tuning is locked by: user");
         assert_eq!(err.holders, vec![Holder::user_since(5)]);
+
+        let mut named = LockSet::default();
+        named.acquire(Holder::named_user("u:3", Some("alice")));
+        assert_eq!(
+            named.error("tuning").message,
+            "tuning is locked by: user alice"
+        );
     }
 }

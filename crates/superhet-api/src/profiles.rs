@@ -313,6 +313,7 @@ struct LoadBody {
 /// refused) is passed through.
 async fn load_profile(
     State(state): State<ProfilesState>,
+    axum::Extension(principal): axum::Extension<crate::access::Principal>,
     Path(device): Path<String>,
     headers: HeaderMap,
     body: Bytes,
@@ -332,6 +333,19 @@ async fn load_profile(
             .to_string()
             .into_bytes();
         let reply = call_daemon(&state.devices, subject, payload).await?;
+        state.devices.auth.registry().note_device(&device);
+        state
+            .devices
+            .auth
+            .audit()
+            .log(
+                &principal.who(),
+                "profile.load",
+                Some(&device),
+                superhet_bus::audit::Outcome::Ok,
+                serde_json::json!({"profile": id}),
+            )
+            .await;
         Ok::<_, Box<Response>>(json(StatusCode::OK, reply))
     }
     .await;
@@ -341,14 +355,13 @@ async fn load_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::origin::OriginPolicy;
     use axum::http::Request;
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
     async fn call(request: Request<Body>) -> (StatusCode, serde_json::Value) {
-        let devices = DevicesState::new(None, OriginPolicy::default());
-        let app = router(ProfilesState::new(devices, None));
+        let devices = DevicesState::for_tests();
+        let app = crate::access::as_test_principal(router(ProfilesState::new(devices, None)));
         let response = app.oneshot(request).await.expect("infallible");
         let status = response.status();
         let bytes = response

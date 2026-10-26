@@ -174,7 +174,7 @@ async fn start_pipeline(
     let subject = superhet_bus::subjects::spectrum(&config.device_id)?;
     let device = superhet_device::open_from_spec(spec)?;
     tracing::info!(device = device.name(), %subject, "starting spectrum pipeline");
-    let vfos = Arc::new(vfo::VfoShared::default());
+    let vfos = Arc::new(vfo::VfoShared::with_max(config.max_vfos));
     let audio_sink = publish::spawn_audio_publisher(client.clone(), &config.device_id)?;
     let rds_sink = publish::spawn_rds_publisher(client.clone(), &config.device_id)?;
     let tones_sink = publish::spawn_tones_publisher(client.clone(), &config.device_id)?;

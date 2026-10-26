@@ -19,8 +19,12 @@ use superhet_dsp::{
 use crate::control::{CtlError, ErrorCode, MAX_CENTER_HZ, VERSION};
 use crate::window;
 
-/// Most VFOs one device can run.
-pub const MAX_VFOS: usize = 8;
+/// Default for the most VFOs one device can run (`SUPERHET_MAX_VFOS` overrides it).
+pub const DEFAULT_MAX_VFOS: usize = 8;
+/// Largest accepted `SUPERHET_MAX_VFOS`: a sanity bound, the real limit is the CPU budget.
+pub const MAX_VFOS_LIMIT: usize = 64;
+/// Longest accepted owner string.
+pub const OWNER_MAX: usize = 64;
 /// Accepted channel bandwidth in Hz (the channelizer applies its own, tighter limits).
 const BANDWIDTH_RANGE: std::ops::RangeInclusive<u32> = 100..=1_000_000;
 /// Accepted squelch threshold in dBFS.
@@ -102,6 +106,9 @@ pub struct Vfo {
     pub tones: Option<bool>,
     /// CTCSS tone squelch (NFM and AM only, a standard tone); `None` = off.
     pub tone_squelch_hz: Option<f32>,
+    /// Who created the VFO (`u:<user id>` or `g:<guest id>`, set by the api); `None` = shared
+    /// (default VFO, profile load).
+    pub owner: Option<String>,
 }
 
 /// Tuning of the device a VFO is evaluated against.
@@ -210,7 +217,7 @@ impl Vfo {
 
     /// Encode for the state document and replies.
     #[must_use]
-    pub fn wire(&self, tuning: Tuning) -> VfoWire {
+    pub fn wire(&self, tuning: Tuning) -> VfoWire<'_> {
         let deemphasis = match self.dsp_mode() {
             Mode::Wfm { deemphasis } | Mode::Nfm { deemphasis } => Some(deemphasis.into()),
             Mode::Am | Mode::Usb | Mode::Lsb | Mode::Cw { .. } => None,
@@ -230,6 +237,7 @@ impl Vfo {
             stereo: (self.mode == VfoMode::Wfm).then(|| self.stereo_enabled()),
             tones: matches!(self.mode, VfoMode::Nfm | VfoMode::Am).then(|| self.tones_enabled()),
             tone_squelch_hz: self.tone_squelch_hz,
+            owner: self.owner.as_deref(),
             offset_hz: self.offset_hz(tuning.center_hz),
             status: self.status(tuning),
         }
@@ -238,7 +246,7 @@ impl Vfo {
 
 /// A VFO as published in the state document.
 #[derive(Debug, Serialize)]
-pub struct VfoWire {
+pub struct VfoWire<'a> {
     id: u32,
     freq_hz: u64,
     mode: VfoMode,
@@ -250,6 +258,8 @@ pub struct VfoWire {
     stereo: Option<bool>,
     tones: Option<bool>,
     tone_squelch_hz: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owner: Option<&'a str>,
     offset_hz: f64,
     status: Status,
 }
@@ -323,6 +333,7 @@ struct CreateWire {
     stereo: Option<bool>,
     tones: Option<bool>,
     tone_squelch_hz: Option<f32>,
+    owner: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -459,13 +470,41 @@ fn snap_tone(hz: Option<f32>) -> Result<Option<f32>, CtlError> {
     .transpose()
 }
 
-/// Parse and validate a `ctl.vfo.create` body.
+/// Parse and validate a `ctl.vfo.create` body, dropping the optional owner.
 ///
 /// # Errors
 /// [`ErrorCode::Invalid`] for malformed JSON, unknown fields, a wrong version or bad values.
+#[cfg(test)]
 pub fn parse_create(payload: &[u8]) -> Result<VfoCreate, CtlError> {
+    parse_create_owned(payload).map(|(request, _)| request)
+}
+
+/// A valid owner string: 1..=[`OWNER_MAX`] characters of `[A-Za-z0-9:._-]`.
+pub(crate) fn check_owner(owner: &str) -> Result<(), CtlError> {
+    let ok = (1..=OWNER_MAX).contains(&owner.len())
+        && owner
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b':' | b'.' | b'_' | b'-'));
+    if ok {
+        Ok(())
+    } else {
+        Err(CtlError::invalid(
+            "owner must be 1-64 characters of [A-Za-z0-9:._-]",
+        ))
+    }
+}
+
+/// Like [`parse_create`], returning the owner the api attached to the request.
+///
+/// # Errors
+/// As [`parse_create`], plus [`ErrorCode::Invalid`] for a malformed owner.
+pub fn parse_create_owned(payload: &[u8]) -> Result<(VfoCreate, Option<String>), CtlError> {
     let wire: CreateWire = serde_json::from_slice(payload).map_err(malformed)?;
     check_version(wire.v)?;
+    if let Some(owner) = &wire.owner {
+        check_owner(owner)?;
+    }
+    let owner = wire.owner.clone();
     let request = VfoCreate {
         freq_hz: wire.freq_hz,
         mode: wire.mode,
@@ -483,7 +522,7 @@ pub fn parse_create(payload: &[u8]) -> Result<VfoCreate, CtlError> {
     check_deemphasis(request.mode, request.deemphasis)?;
     check_cw_pitch(request.mode, request.cw_pitch_hz)?;
     check_stereo(request.mode, request.stereo)?;
-    Ok(request)
+    Ok((request, owner))
 }
 
 /// Parse and validate a `ctl.vfo.update` body.
@@ -540,11 +579,18 @@ pub fn parse_delete(payload: &[u8]) -> Result<u32, CtlError> {
 }
 
 /// The set of VFOs of one device.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct VfoRegistry {
     vfos: Vec<Vfo>,
     last_id: u32,
     revision: u64,
+    max_vfos: usize,
+}
+
+impl Default for VfoRegistry {
+    fn default() -> Self {
+        Self::with_max(DEFAULT_MAX_VFOS)
+    }
 }
 
 /// Reject a VFO the channelizer cannot realise at this sample rate (bandwidth too wide or too
@@ -566,10 +612,10 @@ fn not_found(id: u32) -> CtlError {
     CtlError::new(ErrorCode::NotFound, format!("no VFO with id {id}"))
 }
 
-fn too_many() -> CtlError {
+fn too_many(max: usize) -> CtlError {
     CtlError::new(
         ErrorCode::Unsupported,
-        format!("at most {MAX_VFOS} VFOs per device"),
+        format!("at most {max} VFOs per device"),
     )
 }
 
@@ -586,6 +632,7 @@ impl Vfo {
             stereo: request.stereo,
             tones: request.tones,
             tone_squelch_hz: request.tone_squelch_hz,
+            owner: None,
         }
     }
 }
@@ -641,6 +688,17 @@ impl From<&profile::Vfo> for VfoCreate {
 }
 
 impl VfoRegistry {
+    /// An empty registry that accepts at most `max` VFOs (clamped to 1..=[`MAX_VFOS_LIMIT`]).
+    #[must_use]
+    pub fn with_max(max: usize) -> Self {
+        Self {
+            vfos: Vec::new(),
+            last_id: 0,
+            revision: 0,
+            max_vfos: max.clamp(1, MAX_VFOS_LIMIT),
+        }
+    }
+
     /// All VFOs in creation order.
     #[must_use]
     pub fn list(&self) -> &[Vfo] {
@@ -656,13 +714,27 @@ impl VfoRegistry {
     /// Add a VFO.
     ///
     /// # Errors
-    /// [`ErrorCode::Unsupported`] when [`MAX_VFOS`] exist, [`ErrorCode::Invalid`] when the
+    /// [`ErrorCode::Unsupported`] when the VFO limit is reached, [`ErrorCode::Invalid`] when the
     /// channelizer cannot realise it at the device's sample rate.
     pub fn create(&mut self, request: VfoCreate, sample_rate: u32) -> Result<Vfo, CtlError> {
-        if self.vfos.len() >= MAX_VFOS {
-            return Err(too_many());
+        self.create_owned(request, None, sample_rate)
+    }
+
+    /// Like [`VfoRegistry::create`], recording who owns the VFO.
+    ///
+    /// # Errors
+    /// As [`VfoRegistry::create`].
+    pub fn create_owned(
+        &mut self,
+        request: VfoCreate,
+        owner: Option<String>,
+        sample_rate: u32,
+    ) -> Result<Vfo, CtlError> {
+        if self.vfos.len() >= self.max_vfos {
+            return Err(too_many(self.max_vfos));
         }
-        let vfo = Vfo::from_create(self.last_id.saturating_add(1), request);
+        let mut vfo = Vfo::from_create(self.last_id.saturating_add(1), request);
+        vfo.owner = owner;
         check_realisable(&vfo, sample_rate)?;
         self.last_id = vfo.id;
         self.vfos.push(vfo.clone());
@@ -730,15 +802,15 @@ impl VfoRegistry {
     /// registry is untouched. Fresh ids are assigned.
     ///
     /// # Errors
-    /// [`ErrorCode::Unsupported`] for more than [`MAX_VFOS`], [`ErrorCode::Invalid`] when one of
+    /// [`ErrorCode::Unsupported`] for more than the VFO limit, [`ErrorCode::Invalid`] when one of
     /// them cannot be realised at `sample_rate`.
     pub fn replace(
         &mut self,
         requests: Vec<VfoCreate>,
         sample_rate: u32,
     ) -> Result<Vec<Vfo>, CtlError> {
-        if requests.len() > MAX_VFOS {
-            return Err(too_many());
+        if requests.len() > self.max_vfos {
+            return Err(too_many(self.max_vfos));
         }
         let mut next = self.last_id;
         let mut vfos = Vec::with_capacity(requests.len());
@@ -761,7 +833,7 @@ impl VfoRegistry {
     /// # Errors
     /// Same as [`VfoRegistry::replace`].
     pub fn check_set(requests: &[VfoCreate], sample_rate: u32) -> Result<(), CtlError> {
-        Self::default()
+        Self::with_max(MAX_VFOS_LIMIT)
             .replace(requests.to_vec(), sample_rate)
             .map(|_| ())
     }
@@ -769,12 +841,17 @@ impl VfoRegistry {
     /// Replace the set with VFOs of a previous run, keeping their ids. Entries that are no
     /// longer valid (duplicate id, unrealisable at `sample_rate`, over the limit) are dropped;
     /// returns how many.
-    pub fn restore(&mut self, saved: Vec<(u32, VfoCreate)>, sample_rate: u32) -> usize {
+    pub fn restore(
+        &mut self,
+        saved: Vec<(u32, VfoCreate, Option<String>)>,
+        sample_rate: u32,
+    ) -> usize {
         let total = saved.len();
         let mut vfos: Vec<Vfo> = Vec::new();
-        for (id, request) in saved {
-            let vfo = Vfo::from_create(id, request);
-            if vfos.len() < MAX_VFOS
+        for (id, request, owner) in saved {
+            let mut vfo = Vfo::from_create(id, request);
+            vfo.owner = owner.filter(|o| check_owner(o).is_ok());
+            if vfos.len() < self.max_vfos
                 && id > 0
                 && !vfos.iter().any(|v| v.id == id)
                 && check_realisable(&vfo, sample_rate).is_ok()
@@ -813,6 +890,15 @@ pub struct VfoShared {
 }
 
 impl VfoShared {
+    /// An empty shared registry limited to `max` VFOs.
+    #[must_use]
+    pub fn with_max(max: usize) -> Self {
+        Self {
+            registry: Mutex::new(VfoRegistry::with_max(max)),
+            generation: AtomicU64::new(0),
+        }
+    }
+
     /// Run `f` on the registry; the generation follows the registry's revision.
     pub fn with<R>(&self, f: impl FnOnce(&mut VfoRegistry) -> R) -> R {
         let mut registry = self
@@ -993,6 +1079,68 @@ mod tests {
     }
 
     #[test]
+    fn owner_is_validated_recorded_and_restored() {
+        let (_, owner) =
+            parse_create_owned(br#"{"v":1,"freq_hz":100200000,"mode":"nfm","owner":"u:3"}"#)
+                .expect("valid");
+        assert_eq!(owner.as_deref(), Some("u:3"));
+        for bad in ["", "a b", "x/y", &"a".repeat(65)] {
+            let body = format!(r#"{{"v":1,"freq_hz":100200000,"mode":"nfm","owner":"{bad}"}}"#);
+            assert!(parse_create_owned(body.as_bytes()).is_err(), "{bad:?}");
+        }
+        let mut reg = VfoRegistry::default();
+        let mine = reg
+            .create_owned(simple(100_100_000), Some("g:ab12".into()), RATE)
+            .expect("owned");
+        let shared = reg.create(simple(100_200_000), RATE).expect("shared");
+        assert_eq!(mine.owner.as_deref(), Some("g:ab12"));
+        assert_eq!(shared.owner, None);
+        let wire = serde_json::to_value(mine.wire(T)).expect("json");
+        assert_eq!(wire["owner"], "g:ab12");
+        let wire = serde_json::to_value(shared.wire(T)).expect("json");
+        assert!(wire.get("owner").is_none());
+        // An update keeps the owner.
+        let patch = parse_update(br#"{"v":1,"id":1,"freq_hz":100150000}"#).expect("patch");
+        assert_eq!(
+            reg.update(&patch, RATE).expect("update").owner.as_deref(),
+            Some("g:ab12")
+        );
+        let dropped = reg.restore(
+            vec![
+                (7, simple(100_100_000), Some("u:1".into())),
+                (8, simple(100_100_000), Some("bad owner".into())),
+            ],
+            RATE,
+        );
+        assert_eq!(dropped, 0);
+        assert_eq!(reg.list()[0].owner.as_deref(), Some("u:1"));
+        assert_eq!(reg.list()[1].owner, None);
+    }
+
+    #[test]
+    fn the_vfo_limit_is_configurable() {
+        let mut reg = VfoRegistry::with_max(2);
+        reg.create(simple(100_100_000), RATE).expect("a");
+        reg.create(simple(100_200_000), RATE).expect("b");
+        let err = reg.create(simple(100_300_000), RATE).expect_err("limit");
+        assert_eq!(err.code, ErrorCode::Unsupported);
+        assert!(err.message.contains("at most 2"));
+        let mut big = VfoRegistry::with_max(12);
+        for i in 0..12 {
+            big.create(simple(100_100_000 + i * 1000), RATE)
+                .expect("fill");
+        }
+        assert!(big.create(simple(100_500_000), RATE).is_err());
+        // Out-of-range limits are clamped.
+        assert_eq!(
+            VfoRegistry::with_max(0)
+                .create(simple(100_100_000), RATE)
+                .map(|v| v.id),
+            Ok(1)
+        );
+    }
+
+    #[test]
     fn registry_assigns_monotonic_ids_and_enforces_limit() {
         let mut reg = VfoRegistry::default();
         let a = reg.create(simple(100_100_000), RATE).expect("a");
@@ -1000,10 +1148,10 @@ mod tests {
         assert_eq!((a.id, b.id), (1, 2));
         reg.delete(2).expect("delete");
         assert_eq!(reg.create(simple(100_300_000), RATE).expect("c").id, 3);
-        for _ in 0..MAX_VFOS - 2 {
+        for _ in 0..DEFAULT_MAX_VFOS - 2 {
             reg.create(simple(100_100_000), RATE).expect("fill");
         }
-        assert_eq!(reg.list().len(), MAX_VFOS);
+        assert_eq!(reg.list().len(), DEFAULT_MAX_VFOS);
         let err = reg.create(simple(100_100_000), RATE).expect_err("limit");
         assert_eq!(err.code, ErrorCode::Unsupported);
         assert_eq!(
@@ -1124,6 +1272,7 @@ mod tests {
             stereo: None,
             tones: None,
             tone_squelch_hz: None,
+            owner: None,
         };
         // The usable half span is 435.2 kHz (85 % of 1.024 MS/s); NFM default 12.5 kHz leaves
         // 428.95 kHz of offset.
@@ -1172,6 +1321,7 @@ mod tests {
             stereo: None,
             tones: None,
             tone_squelch_hz: None,
+            owner: None,
         };
         let value = serde_json::to_value(vfo.wire(T)).expect("json");
         assert_eq!(value["id"], 4);

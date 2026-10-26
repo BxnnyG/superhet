@@ -147,8 +147,11 @@ session check (`401` without a valid cookie, `docs/api-auth.md`).
 
 **Client to server** (text, at most 1024 bytes): `{"type":"subscribe","v":1,"vfos":[1,2]}`. The list
 replaces the previous set; an empty list means none (a new socket starts with none). `v` is
-optional. Duplicates collapse; at most 8 distinct VFO ids, ids are >= 1. Unknown fields are
-rejected. VFOs need not exist yet: frames flow once the daemon publishes them.
+optional. Duplicates collapse; at most 64 distinct VFO ids, ids are >= 1. Unknown fields are
+rejected. Operators and admins may subscribe to any VFO id (it need not exist yet: frames flow once
+the daemon publishes it). Listeners and guests may subscribe only to VFOs that exist and are their
+own or shared (no owner); anything else is answered with `{"v":1,"type":"error","error":
+"forbidden"}` and the previous set stays active (`docs/api-users.md`).
 
 **Server to client**
 - Text, always with `"v":1`: `{"v":1,"type":"ack","vfos":[...]}` (the applied set) after a valid

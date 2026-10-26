@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use axum::{
-    Router,
+    Extension, Router,
     extract::{
         Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -21,8 +21,11 @@ use serde::Deserialize;
 use tokio::sync::{Semaphore, broadcast};
 use tokio::time::Instant;
 
+use crate::access::Principal;
+use crate::auth::AuthState;
 use crate::hub::{Hub, HubError, Streams};
 use crate::origin::OriginPolicy;
+use crate::registry::ConnGuard;
 use crate::view::{View, covers, crop_decimate, parse_control};
 use superhet_bus::spectrum::SpectrumFrame;
 
@@ -49,16 +52,18 @@ pub struct WsState {
     hub: Arc<Hub>,
     origins: Arc<OriginPolicy>,
     slots: Arc<Semaphore>,
+    auth: AuthState,
 }
 
 impl WsState {
-    /// Create the state from a hub and an origin policy.
+    /// Create the state from a hub, an origin policy and the auth layer (connection registry).
     #[must_use]
-    pub fn new(hub: Arc<Hub>, origins: OriginPolicy) -> Self {
+    pub fn new(hub: Arc<Hub>, origins: OriginPolicy, auth: AuthState) -> Self {
         Self {
             hub,
             origins: Arc::new(origins),
             slots: Arc::new(Semaphore::new(MAX_CLIENTS)),
+            auth,
         }
     }
 }
@@ -77,6 +82,7 @@ struct SpectrumQuery {
 
 async fn spectrum_ws(
     State(state): State<WsState>,
+    Extension(principal): Extension<Principal>,
     Query(query): Query<SpectrumQuery>,
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
@@ -97,12 +103,22 @@ async fn spectrum_ws(
         }
     })?;
     let hub = Arc::clone(&state.hub);
+    let conn = state
+        .auth
+        .registry()
+        .connect(
+            &principal.session_key,
+            &principal.who(),
+            "spectrum",
+            &device,
+        )
+        .await;
     Ok(upgrade
         .max_message_size(MAX_CONTROL_BYTES)
         .max_frame_size(MAX_CONTROL_BYTES)
         .on_upgrade(move |socket| async move {
             let _client = crate::metrics::track_client("spectrum");
-            serve_client(socket, streams, &hub, &device).await;
+            serve_client(socket, streams, &hub, &device, conn).await;
             // The receivers were moved into `serve_client` and are dropped by now.
             hub.release(&device).await;
             drop(permit);
@@ -156,7 +172,13 @@ impl Session {
     }
 }
 
-async fn serve_client(mut socket: WebSocket, streams: Streams, hub: &Hub, device: &str) {
+async fn serve_client(
+    mut socket: WebSocket,
+    streams: Streams,
+    hub: &Hub,
+    device: &str,
+    mut kill: ConnGuard,
+) {
     let Streams {
         full: mut frames,
         zoom: mut zoom_frames,
@@ -166,6 +188,7 @@ async fn serve_client(mut socket: WebSocket, streams: Streams, hub: &Hub, device
     loop {
         let due = s.zoom_due;
         tokio::select! {
+            () = kill.killed() => break,
             incoming = socket.recv() => match incoming {
                 None | Some(Err(_) | Ok(Message::Close(_))) => break,
                 Some(Ok(Message::Text(text))) => {
@@ -261,7 +284,11 @@ mod tests {
 
     async fn start(hub: Hub, origins: OriginPolicy) -> Server {
         let hub = Arc::new(hub);
-        let app = router(WsState::new(Arc::clone(&hub), origins));
+        let app = crate::access::as_test_principal(router(WsState::new(
+            Arc::clone(&hub),
+            origins,
+            AuthState::for_tests(),
+        )));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind");

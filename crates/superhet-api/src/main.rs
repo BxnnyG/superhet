@@ -1,15 +1,21 @@
 //! Superhet API service (HTTP edge). Port 8073 by default.
 
+mod access;
+mod admin;
 mod audio_hub;
 mod audio_ws;
+mod audit;
 mod auth;
 mod bookmarks;
 mod decoder_events;
 mod devices;
 mod hub;
+mod maintenance;
 mod metrics;
 mod origin;
 mod profiles;
+mod registry;
+mod settings;
 mod state_ws;
 mod view;
 mod web;
@@ -59,6 +65,10 @@ fn app(
         .merge(profiles::router(profiles::ProfilesState::new(
             devices.clone(),
             deps.db.clone(),
+        )))
+        .merge(admin::router(admin::AdminState::new(
+            auth.clone(),
+            devices.clone(),
         )))
         .merge(devices::router(devices));
     Router::new()
@@ -118,12 +128,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth = auth::AuthState::new(db.clone(), origins.clone(), auth::AuthConfig::from_env()?)?;
     auth.prepare_setup().await?;
     auth.spawn_maintenance();
-    let ws = ws::WsState::new(Arc::new(hub::Hub::new(nats.clone())), origins.clone());
+    let ws = ws::WsState::new(
+        Arc::new(hub::Hub::new(nats.clone())),
+        origins.clone(),
+        auth.clone(),
+    );
+    let devices = devices::DevicesState::new(nats.clone(), origins.clone(), auth.clone());
     let audio = audio_ws::AudioState::new(
         Arc::new(audio_hub::AudioHub::new(nats.clone())),
-        origins.clone(),
+        origins,
+        devices.clone(),
     );
-    let devices = devices::DevicesState::new(nats.clone(), origins);
 
     let listen = std::env::var("SUPERHET_LISTEN").unwrap_or_else(|_| DEFAULT_LISTEN.to_owned());
     let addr: SocketAddr = listen.parse()?;
@@ -142,6 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
     let web = web::Web::from_env();
+    maintenance::spawn(auth.clone(), devices.clone());
     let app = app(web, Deps { db, nats }, auth, ws, audio, devices);
     axum::serve(
         listener,
@@ -169,21 +185,18 @@ mod tests {
     use tower::ServiceExt;
 
     async fn get_path(path: &str) -> (StatusCode, Vec<u8>) {
+        let auth = auth::AuthState::for_tests();
         let ws = ws::WsState::new(
             Arc::new(hub::Hub::new(None)),
             origin::OriginPolicy::default(),
+            auth.clone(),
         );
+        let devices = devices::DevicesState::for_tests();
         let audio = audio_ws::AudioState::new(
             Arc::new(audio_hub::AudioHub::new(None)),
             origin::OriginPolicy::default(),
+            devices.clone(),
         );
-        let devices = devices::DevicesState::new(None, origin::OriginPolicy::default());
-        let auth = auth::AuthState::new(
-            None,
-            origin::OriginPolicy::default(),
-            auth::AuthConfig::default(),
-        )
-        .expect("auth state");
         let response = app(
             web::Web::new(Path::new("/nonexistent")),
             Deps::default(),
