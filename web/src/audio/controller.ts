@@ -8,6 +8,7 @@ import type { AudioFrame } from "./frame";
 import { volumeToGain } from "./gain";
 import { DEFAULT_TARGET_MS } from "./jitter";
 import { loadSilent, saveSilent } from "./listen";
+import { clampMaster, loadMaster, saveMaster } from "./master";
 import { isEmptyRds, sameRds, type RdsState } from "./rds";
 import { AudioSocket, normalizeVfoIds } from "./socket";
 import { applyTones, isEmptyTones, sameTones, type ToneState, type TonesMessage } from "./tones";
@@ -30,6 +31,8 @@ export interface AudioSnapshot {
   error: string | null;
   socket: SocketStatus;
   targetMs: number;
+  /** Master output volume, 0..1, on top of the per-VFO volumes. */
+  master: number;
   levels: Readonly<Record<number, VfoLevel>>;
   /** Latest RDS state of the VFOs that have any. */
   rds: Readonly<Record<number, RdsState>>;
@@ -80,6 +83,7 @@ export class AudioController {
   private ids: number[] = [];
   private activeId: number | null = null;
   private readonly silent: Set<number>;
+  private master: number;
   private readonly storage: Storage | null | undefined;
   private readonly device: string;
   private subscribed = new Set<number>();
@@ -91,6 +95,7 @@ export class AudioController {
     this.device = opts.device;
     this.storage = opts.storage;
     this.silent = loadSilent(opts.device, opts.storage);
+    this.master = loadMaster(opts.storage);
     this.engine = opts.engine ?? new AudioEngine((m) => this.setError(m));
     const support = checkSupport();
     this.snapshot = {
@@ -100,6 +105,7 @@ export class AudioController {
       error: null,
       socket: "connecting",
       targetMs: DEFAULT_TARGET_MS,
+      master: this.master,
       levels: this.levels,
       rds: this.rds,
       tones: this.tones,
@@ -207,7 +213,7 @@ export class AudioController {
         listening: listening.has(id),
       };
       levels[id] = level;
-      if (level.listening) this.engine.setGain(id, volumeToGain(level.volume, level.muted));
+      if (level.listening) this.engine.setGain(id, this.gainOf(level));
     }
     this.levels = levels;
     this.publish({ levels });
@@ -238,6 +244,18 @@ export class AudioController {
     this.setLevel(id, { volume: Math.min(1, Math.max(0, volume)) });
   }
 
+  /** Master output volume (0..1); scales every VFO and is persisted in this browser. */
+  setMasterVolume(volume: number): void {
+    const next = clampMaster(volume);
+    if (next === this.master) return;
+    this.master = next;
+    saveMaster(next, this.storage);
+    for (const [key, level] of Object.entries(this.levels)) {
+      if (level.listening) this.engine.setGain(Number(key), this.gainOf(level));
+    }
+    this.publish({ master: next });
+  }
+
   setMuted(id: number, muted: boolean): void {
     this.setLevel(id, { muted });
   }
@@ -265,6 +283,11 @@ export class AudioController {
     return this.engine.debug();
   }
 
+  /** Linear gain of a VFO: its own volume curve times the master curve. */
+  private gainOf(level: VfoLevel): number {
+    return volumeToGain(level.volume, level.muted) * volumeToGain(this.master);
+  }
+
   private setLevel(id: number, change: Partial<VfoLevel>): void {
     const cur = this.levels[id] ?? {
       volume: DEFAULT_VOLUME,
@@ -273,7 +296,7 @@ export class AudioController {
     };
     const next = { ...cur, ...change };
     this.levels = { ...this.levels, [id]: next };
-    this.engine.setGain(id, volumeToGain(next.volume, next.muted));
+    this.engine.setGain(id, this.gainOf(next));
     this.publish({ levels: this.levels });
   }
 

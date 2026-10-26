@@ -257,3 +257,23 @@ it("exposes the stereo lock of the latest frame", () => {
   feed(frame(1, -50, false));
   expect(audio.getMeter(1)?.stereo).toBe(false);
 });
+
+it("the master volume scales every listened VFO and is persisted", () => {
+  const { audio, engine } = setup();
+  audio.setVfos([1, 2]);
+  audio.setVolume(1, 1);
+  expect(engine.setGain).toHaveBeenLastCalledWith(1, 1);
+  engine.setGain.mockClear();
+  audio.setMasterVolume(0.5);
+  expect(audio.getSnapshot().master).toBe(0.5);
+  // Both curves are squared: 1 * 0.25 for VFO 1, 0.64 * 0.25 for VFO 2 (default volume 0.8).
+  expect(engine.setGain).toHaveBeenCalledWith(1, 0.25);
+  expect(engine.setGain).toHaveBeenCalledWith(2, expect.closeTo(0.16, 6));
+  audio.setVolume(1, 0.5);
+  expect(engine.setGain).toHaveBeenLastCalledWith(1, 0.0625);
+  expect(window.localStorage.getItem("superhet.audio.master.v1")).toBe("0.5");
+  const reloaded = setup();
+  expect(reloaded.audio.getSnapshot().master).toBe(0.5);
+  reloaded.audio.setMasterVolume(1);
+  expect(window.localStorage.getItem("superhet.audio.master.v1")).toBeNull();
+});
