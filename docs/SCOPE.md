@@ -10,7 +10,8 @@ Legend:
 - **One device, one window.** All simultaneous VFOs/decoders must fit into ~2.0 MHz of usable bandwidth (2.4 MS/s minus filter roll-off and the DC spike area). Monitoring e.g. ACARS (131 MHz) and VDL2 (136 MHz) at the same time is impossible.
 - **HF (< 24 MHz) is not covered** by the R820T2. HF requires an upconverter (e.g. Ham It Up) or a different device. Direct-sampling mode is not a supported path for the v5 in Superhet. 10 m (28 MHz) and 6 m work with reduced performance.
 - **8-bit ADC:** strong local signals (broadcast FM, DVB-T, cell towers) cause overload/intermod. Manual gain and profile-stored gain are mandatory; AGC of the tuner is optional.
-- Exclusive decoders (ADS-B) pin the device to their frequency and sample rate.
+- Exclusive decoders (ADS-B, DAB/DAB+) pin the device to their frequency and sample rate.
+- With several users all of them share the single window (§8); only an operator/admin may retune it.
 
 ## 1. Reception & UI
 
@@ -74,6 +75,7 @@ Goal: everything a SDR# user relies on daily exists in Superhet, reachable by mo
 | Feature | Prio | Notes |
 |---|---|---|
 | Access from any browser (desktop, tablet, phone), several tabs/clients in sync | MVP | – |
+| Several users with roles and optional guest listening on one instance | v1 (P1.5) | §8 |
 | Instant Replay (audio always, IQ optional) | v1 (P4) | §5 |
 | Waterfall history: scroll back in time (from IQ ring buffer) | later | – |
 | Integrated decoders with event log, search, timeline, maps | v1 | – |
@@ -97,6 +99,7 @@ All decoders are plugins (separate processes). Without a codec plugin, voice dec
 | APRS / AX.25 (144.800 MHz) | v1 (P2) | ✅ | direwolf (GPL-2.0) | – |
 | ISM sensors 433/868 MHz | v1 (P2) | ✅ | rtl_433 (GPL-2.0), reads cu8/cs16 IQ from stdin | Needs wider channel (250 kHz–1 MHz) |
 | ADS-B 1090 MHz (exclusive) | v1 (P2) | ✅ | readsb (GPL-3.0) | Pins the device; needs a 1090 MHz antenna for decent range |
+| DAB / DAB+ (exclusive, whole ensemble): service list, DLS, slideshow (MOT), AAC → Opus audio | v1 (P2) | ✅ (1.536 MHz ensemble fits the 2.4 MS/s window; Band III antenna needed) | welle-cli / welle.io (GPL-2.0+), fallback eti-cmdline + dablin (ADR-0013) | Pins the device; AAC decoder licence (faad2 vs fdk-aac) shown at install; nothing vendored |
 | AIS 161.975/162.025 MHz | v1 (P2/P3) | ✅ | AIS-catcher (GPL-3.0) | – |
 | DMR Tier I/II (Tier III metadata) | v1 (P3) | ✅ | dsd-fme (ISC/GPL mix, verify) or digiham (GPL-3.0) | dsd-fme links mbelib at build time → frame output needs patching or the plugin itself is "fetch & build locally" (ADR-0005) |
 | D-Star | v1 (P3) | ✅ | digiham / dsd-fme | AMBE codec |
@@ -171,8 +174,9 @@ All decoders are plugins (separate processes). Without a codec plugin, voice dec
 
 | Feature | Prio | Notes |
 |---|---|---|
-| Local admin login (first-run setup, Argon2id) | MVP | Single user, but still required since it is network-exposed |
-| OIDC login (generic, tested against Zitadel) | later (P5) | Authorization Code + PKCE |
+| Local admin login (first-run setup, Argon2id) | MVP | First account is the admin; required since the instance is network-exposed |
+| Multi-user with roles, guest access, admin console, audit log | v1 (P1.5) | See §8, ADR-0011, ADR-0012 |
+| OIDC login (generic, tested against Zitadel), mapped to roles | later (P5) | Authorization Code + PKCE |
 | Persistent settings | MVP | PostgreSQL |
 | Health endpoints (`/healthz`, `/readyz`) | MVP | – |
 | Prometheus metrics (CPU, sample drops, USB overruns, decoder state) | later (P5) | Basic counters exist from P1 |
@@ -183,9 +187,27 @@ All decoders are plugins (separate processes). Without a codec plugin, voice dec
 | Install script Debian/Arch VM with systemd | later (P5) | USB passthrough to VM must be documented |
 | Multi-device operation | later (P5 prep, then own phase) | – |
 
+## 8. Users, roles, guest access, admin console (P1.5)
+
+Superhet can be shared: several accounts with roles on one instance, optional anonymous guest listening, and an admin console with an audit log. One SDR still means one capture window shared by everybody; per-user VFOs are server-side DDC channels inside it (OpenWebRX model). Decisions: ADR-0011 (users, roles, guests), ADR-0012 (audit log, admin console).
+
+| Feature | Prio | Notes |
+|---|---|---|
+| Roles `admin` / `operator` / `listener` | v1 (P1.5) | admin: everything; operator: tune centre/rate/gain, device settings, bookmarks, recordings; listener: own VFOs inside the window, own audio, decoder view |
+| Local accounts, per-user sessions, invite links, rate-limited login | v1 (P1.5) | Argon2id, ADR-0008 mechanics; no open self-registration |
+| Per-client VFOs with ownership and per-role limits | v1 (P1.5) | CPU scales per VFO; sdrd VFO cap becomes configurable |
+| Guest access without login (public page) | v1 (P1.5), **off by default** | Limits: max guests, VFOs per guest, allowed modes/frequency range, idle timeout, "only without operator lock"; decoder output with personal data hidden by default |
+| Audit log (`audit_events`, append-only) | v1 (P1.5) | Retention setting; guest IPs truncated and kept 7 days by default (GDPR) |
+| Admin console: users and invites, live sessions with kick, audit log with filter/CSV export, guest policy, plugins, system | v1 (P1.5) | Plugins and system sections grow with P2/P5 |
+| OIDC login mapping to roles | later (P5) | Local admin stays as fallback |
+
+Terminology: **plugin** means a process plugin of type `decoder`, `codec`, `lookup` or `ui` (ADR-0003). A browsable plugin catalog (listing first- and third-party plugins with licence, source and checksum, installable from the admin page) is planned after the plugin host exists (P3 install from Git URL, catalog as a later step); there is no separate "extension" concept.
+
 ## Explicit non-goals
 
 - Decryption of any encrypted traffic (TEA, ARC4/BP in DMR, etc.).
-- Public multi-user instances, user management, quotas.
+- Per-user capture windows or per-user devices on one SDR (all users share the one window; only VFOs are per user, ADR-0011).
+- Open self-registration; accounts are created by an admin or by invite link.
+- Billing, quotas beyond the admin-set guest/user limits, multi-tenant isolation between independent operators.
 - Transmit (TX) support.
 - Bundling of ETSI TETRA codec or AMBE/IMBE code.
