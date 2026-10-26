@@ -11,10 +11,12 @@
 //! - `sh.v1.dev.<dev>.tones.<vfo>` – CTCSS tone and DTMF digits of an NFM / AM VFO (JSON, see [`tones`])
 //! - `sh.v1.events.core.decoder.<dev>` – stored decoder history events (JSON, published by the worker)
 //! - `sh.v1.events.<plugin>.<type>` – plugin events
+//! - `sh.v1.audit.<source>` – system audit events (JSON, see [`audit`]; persisted by the worker)
 //! - `sh.v1.lookup.<key>` – lookup requests
 //! - `sh.v1.plugin.<id>.ctl` – plugin control
 
 pub mod audio;
+pub mod audit;
 pub mod config;
 pub mod metrics;
 #[cfg(feature = "opus")]

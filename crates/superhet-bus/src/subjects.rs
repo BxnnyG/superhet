@@ -23,6 +23,8 @@ pub const ALL_TONES: &str = "sh.v1.dev.*.tones.>";
 pub const ALL_EVENTS: &str = "sh.v1.events.>";
 /// Wildcard matching the decoder history events of every device.
 pub const ALL_DECODER_EVENTS: &str = "sh.v1.events.core.decoder.>";
+/// Wildcard matching the system audit events of every source (ADR-0012).
+pub const ALL_AUDIT: &str = "sh.v1.audit.>";
 /// Wildcard matching every lookup request.
 pub const ALL_LOOKUP: &str = "sh.v1.lookup.>";
 /// Wildcard matching the control subject of every plugin.
@@ -218,6 +220,15 @@ pub fn event(plugin: &str, event_type: &str) -> Result<String, InvalidToken> {
     Ok(format!("{PREFIX}.events.{plugin}.{event_type}"))
 }
 
+/// System audit event subject: `sh.v1.audit.<source>` (see [`crate::audit`]).
+///
+/// # Errors
+/// Fails if `source` is not a single valid token.
+pub fn audit(source: &str) -> Result<String, InvalidToken> {
+    check(source)?;
+    Ok(format!("{PREFIX}.audit.{source}"))
+}
+
 /// Lookup request subject: `sh.v1.lookup.<key>`.
 ///
 /// # Errors
@@ -247,6 +258,8 @@ mod tests {
             Ok("sh.v1.dev.rtl0.ctl.tune")
         );
         assert_eq!(state("rtl0").as_deref(), Ok("sh.v1.dev.rtl0.state"));
+        assert_eq!(audit("sdrd").as_deref(), Ok("sh.v1.audit.sdrd"));
+        assert!(audit("a.b").is_err());
         assert_eq!(ctl_all("rtl0").as_deref(), Ok("sh.v1.dev.rtl0.ctl.>"));
         assert_eq!(state_key("rtl-0_a").as_deref(), Ok("dev.rtl-0_a"));
         assert_eq!(spectrum("rtl0").as_deref(), Ok("sh.v1.dev.rtl0.spectrum"));

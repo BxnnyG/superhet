@@ -1,9 +1,12 @@
 //! PostgreSQL access layer shared by Superhet services.
 
+pub mod audit;
 pub mod auth;
 pub mod bookmarks;
 pub mod decoder_events;
 pub mod profiles;
+pub mod settings;
+pub mod users;
 
 use std::time::Duration;
 

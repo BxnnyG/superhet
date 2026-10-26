@@ -3,6 +3,7 @@
 //! Today it records the decoder history (DTMF bursts, tone changes, RDS changes) into PostgreSQL
 //! (`docs/api-decoder-events.md`).
 
+mod audit;
 mod consumer;
 mod metrics;
 mod recorder;
@@ -58,6 +59,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = stop_tx.send(true);
     });
 
+    // Audit upkeep needs only the database; system events arrive when the bus is there too.
+    let audit_task = db.clone().map(|pool| {
+        let mut stop = stop_rx.clone();
+        let client = nats.clone();
+        tokio::spawn(async move {
+            let wait = async move {
+                let _ = stop.wait_for(|stopped| *stopped).await;
+            };
+            audit::run(pool, client, wait).await;
+        })
+    });
+
     let recorder = match (db, nats) {
         (Some(pool), Some(client)) => {
             let mut stop = stop_rx.clone();
@@ -89,6 +102,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await?;
     if let Some(task) = recorder {
+        let _ = task.await;
+    }
+    if let Some(task) = audit_task {
         let _ = task.await;
     }
     Ok(())

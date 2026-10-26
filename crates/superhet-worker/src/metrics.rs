@@ -15,6 +15,24 @@ const MAX_KINDS: usize = 32;
 static INSERTED: Mutex<BTreeMap<String, u64>> = Mutex::new(BTreeMap::new());
 static INSERT_ERRORS: AtomicU64 = AtomicU64::new(0);
 static PRUNED: AtomicU64 = AtomicU64::new(0);
+static AUDIT_STORED: AtomicU64 = AtomicU64::new(0);
+static AUDIT_DROPPED: AtomicU64 = AtomicU64::new(0);
+static AUDIT_PRUNED: AtomicU64 = AtomicU64::new(0);
+
+/// Counts a system audit event stored in the database.
+pub fn audit_event_stored() {
+    AUDIT_STORED.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Counts a system audit event that was malformed or could not be stored.
+pub fn audit_event_dropped() {
+    AUDIT_DROPPED.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Counts audit events removed by the retention job.
+pub fn audit_pruned(count: u64) {
+    AUDIT_PRUNED.fetch_add(count, Ordering::Relaxed);
+}
 
 /// Counts a decoder event stored in the database.
 pub fn event_inserted(kind: &str) {
@@ -69,6 +87,24 @@ pub fn render() -> String {
         "Decoder history events removed by the retention job.",
         Kind::Counter,
         PRUNED.load(Ordering::Relaxed),
+    );
+    e.single_u64(
+        "superhet_worker_audit_events_stored_total",
+        "System audit events stored in PostgreSQL.",
+        Kind::Counter,
+        AUDIT_STORED.load(Ordering::Relaxed),
+    );
+    e.single_u64(
+        "superhet_worker_audit_events_dropped_total",
+        "System audit events that were malformed or could not be stored.",
+        Kind::Counter,
+        AUDIT_DROPPED.load(Ordering::Relaxed),
+    );
+    e.single_u64(
+        "superhet_worker_audit_events_pruned_total",
+        "Audit events removed by the retention job.",
+        Kind::Counter,
+        AUDIT_PRUNED.load(Ordering::Relaxed),
     );
     e.finish()
 }
