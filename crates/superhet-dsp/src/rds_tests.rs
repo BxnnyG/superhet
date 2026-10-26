@@ -47,6 +47,8 @@ struct Scenario {
     sine: bool,
     /// No signal at all, only the noise of the given level.
     silent: bool,
+    /// Take the PI from clean blocks only (no soft combining of block A).
+    hard_pi: bool,
 }
 
 impl Scenario {
@@ -60,6 +62,7 @@ impl Scenario {
             seed: 1,
             sine: false,
             silent: false,
+            hard_pi: false,
         }
     }
 
@@ -79,6 +82,8 @@ impl Scenario {
 struct Outcome {
     /// Seconds until PS and RadioText were both correct, if ever.
     full_at: Option<f64>,
+    /// Seconds until the PI was correct, if ever.
+    pi_at: Option<f64>,
     synced: bool,
     good: u64,
     bad: u64,
@@ -146,6 +151,7 @@ fn run(sc: Scenario) -> Outcome {
 
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ sc.seed.wrapping_mul(0x1234_5678_9ABC_DEF1));
     let mut dec = RdsDecoder::new(FS);
+    dec.set_hard_pi_only(sc.hard_pi);
     let mut phase = 0.7;
     let mut out = Outcome::default();
     let total = (FS * sc.seconds) as usize;
@@ -176,6 +182,9 @@ fn run(sc: Scenario) -> Outcome {
         let bad_rt = info.rt.as_deref().is_some_and(|r| !RT.starts_with(r));
         let bad_pi = info.pi.is_some_and(|p| p != PI);
         out.garbage |= bad_ps || bad_rt || bad_pi;
+        if out.pi_at.is_none() && info.pi == Some(PI) {
+            out.pi_at = Some(done as f64 / FS);
+        }
         if out.full_at.is_none() && info.ps.as_deref() == Some(PS) && info.rt.as_deref() == Some(RT)
         {
             out.full_at = Some(done as f64 / FS);
@@ -276,6 +285,72 @@ fn noise_alone_decodes_nothing() {
         assert!(o.ps.is_none() && o.rt.is_none(), "seed {seed}: {o:?}");
         assert!(!o.garbage, "seed {seed}");
         assert!(!o.synced, "seed {seed}");
+    }
+}
+
+/// Result of [`pi_acquisition`].
+#[derive(Debug)]
+struct PiStats {
+    /// Mean seconds until the PI was correct (runs that never got one count as the run length).
+    mean: f64,
+    /// Runs without a correct PI.
+    never: u64,
+    /// Runs in which a wrong PI was shown at some point.
+    wrong: u64,
+}
+
+fn pi_acquisition(ebn0_db: f64, hard_pi: bool, seeds: u64) -> PiStats {
+    let seconds = 8.0;
+    let (mut total, mut never, mut wrong) = (0.0, 0, 0);
+    for seed in 1..=seeds {
+        let o = run(Scenario {
+            seconds,
+            seed,
+            hard_pi,
+            ..Scenario::harsh(ebn0_db)
+        });
+        total += o.pi_at.unwrap_or(seconds);
+        never += u64::from(o.pi_at.is_none());
+        wrong += u64::from(o.garbage);
+    }
+    PiStats {
+        mean: total / seeds as f64,
+        never,
+        wrong,
+    }
+}
+
+#[test]
+fn soft_combining_never_hurts_the_pi_at_low_snr() {
+    // The PI is mostly limited by the block sync here, so the gain is small; the unit test in
+    // `rds.rs` shows the case soft combining is for.
+    let seeds = 8;
+    for ebn0 in [2.0, 1.0] {
+        let hard = pi_acquisition(ebn0, true, seeds);
+        let soft = pi_acquisition(ebn0, false, seeds);
+        eprintln!("Eb/N0 {ebn0}: PI hard {hard:?}, soft {soft:?}");
+        assert!(
+            soft.never <= hard.never,
+            "{ebn0} dB: soft combining lost PIs"
+        );
+        assert!(
+            soft.wrong <= hard.wrong,
+            "{ebn0} dB: soft combining shows wrong PIs"
+        );
+        assert!(soft.mean <= hard.mean + 0.05, "{ebn0} dB: PI came later");
+    }
+}
+
+#[test]
+fn soft_combining_does_not_invent_a_pi_from_noise() {
+    for seed in 1..=4 {
+        let o = run(Scenario {
+            silent: true,
+            seconds: 40.0,
+            seed,
+            ..Scenario::clean(6.0)
+        });
+        assert!(o.pi.is_none(), "seed {seed}: {o:?}");
     }
 }
 
