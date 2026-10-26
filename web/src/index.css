@@ -115,6 +115,7 @@
     "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono",
     monospace;
   --breakpoint-shell: 900px;
+  --breakpoint-phone: 600px;
 }
 
 @layer base {

@@ -1,37 +1,78 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { expect, it, vi } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { beforeEach, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { AuthContext } from "./auth/context";
+import { INSPECTOR_STORAGE_KEY } from "./shell/inspector";
 
-it("renders the SDR shell: top bar, sidebar sections, spectrum, receiver dock and status bar", () => {
+beforeEach(() => window.localStorage.removeItem(INSPECTOR_STORAGE_KEY));
+
+it("renders the shell: top bar, tuning strip, VFO row, spectrum, inspector and status bar", () => {
   render(<App />);
   expect(screen.getByText("Superhet")).toBeInTheDocument();
-  expect(screen.getByRole("group", { name: "Centre frequency" })).toBeInTheDocument();
-  expect(screen.getByRole("complementary", { name: "Controls" })).toBeInTheDocument();
-  for (const name of [
-    "Source",
-    "Profiles",
-    "VFOs",
-    "Bookmarks",
-    "Band plan",
-    "Display",
-    "Audio device",
-  ]) {
-    expect(screen.getByRole("button", { name })).toBeInTheDocument();
-  }
-  expect(screen.getByRole("region", { name: "Receiver" })).toBeInTheDocument();
+  // The top bar carries no frequency; the strip's create action is the only tuning entry point.
+  expect(screen.queryByRole("group", { name: "Centre frequency" })).toBeNull();
+  expect(screen.getByRole("region", { name: "Tuning" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Create receiver" })).toBeInTheDocument();
+  expect(screen.getByRole("group", { name: "VFOs" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Add VFO" })).toBeInTheDocument();
+  expect(screen.getByRole("complementary", { name: "Inspector" })).toBeInTheDocument();
+  expect(screen.getByRole("slider", { name: "Master volume" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Audio (on|off)/ })).toBeInTheDocument();
   expect(screen.getByRole("contentinfo", { name: "Status" })).toBeInTheDocument();
 });
 
-it("opens and closes the drawer from the menu button", () => {
+it("the inspector tabs reach every former sidebar section", () => {
   render(<App />);
-  const menu = screen.getByRole("button", { name: "Open controls" });
-  expect(menu).toHaveAttribute("aria-expanded", "false");
-  fireEvent.click(menu);
-  expect(menu).toHaveAttribute("aria-expanded", "true");
-  fireEvent.keyDown(window, { key: "Escape" });
-  expect(menu).toHaveAttribute("aria-expanded", "false");
+  const tabs = within(screen.getByRole("tablist", { name: "Inspector" }));
+  expect(tabs.getAllByRole("tab").map((t) => t.textContent)).toEqual([
+    "Receiver",
+    "Bookmarks",
+    "Decoders",
+    "Display",
+    "Source",
+  ]);
+  expect(tabs.getByRole("tab", { name: "Receiver" })).toHaveAttribute("aria-selected", "true");
+  fireEvent.click(tabs.getByRole("tab", { name: "Display" }));
+  expect(screen.getByRole("button", { name: "Levels and zoom" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Band plan" })).toBeInTheDocument();
+  expect(screen.getByRole("switch", { name: "Automatic levels" })).toBeInTheDocument();
+  fireEvent.click(tabs.getByRole("tab", { name: "Source" }));
+  for (const name of ["Source", "Profiles", "Audio device"]) {
+    expect(screen.getByRole("button", { name })).toBeInTheDocument();
+  }
+  expect(screen.getByLabelText("Centre frequency")).toBeInTheDocument();
+  fireEvent.click(tabs.getByRole("tab", { name: "Bookmarks" }));
+  expect(tabs.getByRole("tab", { name: "Bookmarks" })).toHaveAttribute("aria-selected", "true");
+  // Arrow keys move between tabs.
+  fireEvent.keyDown(tabs.getByRole("tab", { name: "Bookmarks" }), { key: "ArrowRight" });
+  expect(tabs.getByRole("tab", { name: "Decoders" })).toHaveAttribute("aria-selected", "true");
+});
+
+it("] and the top bar button hide and show the inspector, and the choice persists", () => {
+  const { unmount } = render(<App />);
+  expect(screen.getByRole("tablist", { name: "Inspector" })).toBeInTheDocument();
+  fireEvent.keyDown(window, { key: "]" });
+  expect(screen.queryByRole("tablist", { name: "Inspector" })).toBeNull();
+  expect(window.localStorage.getItem(INSPECTOR_STORAGE_KEY)).toBe("0");
+  unmount();
+  render(<App />);
+  expect(screen.queryByRole("tablist", { name: "Inspector" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Show inspector" }));
+  expect(screen.getByRole("tablist", { name: "Inspector" })).toBeInTheDocument();
+  expect(window.localStorage.getItem(INSPECTOR_STORAGE_KEY)).toBeNull();
+});
+
+it("] is ignored while typing in a field", () => {
+  render(<App />);
+  fireEvent.click(screen.getByRole("tab", { name: "Source" }));
+  fireEvent.keyDown(screen.getByLabelText("Centre frequency"), { key: "]" });
+  expect(screen.getByRole("tablist", { name: "Inspector" })).toBeInTheDocument();
+});
+
+it("lists the inspector shortcut in the shortcuts dialog", () => {
+  render(<App />);
+  fireEvent.keyDown(window, { key: "?" });
+  expect(screen.getByText("Show / hide the inspector")).toBeInTheDocument();
 });
 
 it("switches the theme from the settings menu", () => {

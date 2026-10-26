@@ -32,20 +32,20 @@ dark values again under `prefers-color-scheme: dark` unless `data-theme="light"`
 - Status: `success`, `warn`, `danger`, each with a `-soft` background.
 - Radius `rounded-sm/md/lg` = 6/8/12 px; spacing is Tailwind's 4 px scale; `shadow-pop` for overlays.
 - Fonts: `font-sans` (Inter, system-ui, ...), `font-mono` (JetBrains Mono, ui-monospace, ...).
-- Breakpoint `shell` = 900 px (sidebar becomes a drawer below it: `max-shell:`).
+- Breakpoints `shell` = 900 px (inspector becomes a right sheet below it: `max-shell:`) and
+  `phone` = 600 px (bottom sheet and tab bar below it: `max-phone:`).
 - Canvas colours live in `web/src/spectrum/palette.ts` and mirror the dark tokens.
 
 ## Layout
 
-1. Top bar: wordmark, connection pill with device id/tuner/rate, the digit-tunable frequency
-   readout of the **active VFO** (nudge arrows, tuning step select, paused badge), next to it a compact
-   "Centre" readout of the device centre (read-only while the tuning lock is held) with the padlock
-   (tuning lock, with a "Locked by ..." badge); settings menu (theme, mouse wheel zoom/tune, keyboard shortcuts list). With no VFO the big readout
-   tunes the centre and carries a "Centre" badge (the secondary readout is hidden then).
-2. Sidebar (320 px, collapsible sections, all open by default): Source, Profiles, VFOs (compact list
-   with select, listen toggle, delete and the paused hint), Bookmarks, Band plan, Display, Audio device. Below 900 px a slide-over drawer
-   opened from the menu button (Esc or backdrop closes it).
-3. Main: a column of the spectrum card and the receiver dock (see "Receiver dock"). The spectrum card
+1. Top bar (h-12, no frequencies): wordmark, device switcher (connection dot, device id, driver,
+   rate; popover with details), command palette trigger (placeholder), audio on/off with the master
+   volume (`AudioController.setMasterVolume`, persisted as `superhet.audio.master.v1`), inspector
+   toggle and the settings menu (theme, mouse wheel zoom/tune, keyboard shortcuts list, account).
+2. Tuning strip (h-16) and VFO tab row, see "Tuning strip, VFO tabs and inspector". The inspector
+   (320 px, tabs Receiver | Bookmarks | Decoders | Display | Source) sits right of the VFO row and
+   spectrum; below 900 px it is a right sheet, below 600 px a bottom sheet.
+3. Main: the VFO tab row above the spectrum card, which fills the rest of the column. The spectrum card
    holds spectrum above waterfall filling the remaining height, draggable splitter (keyboard:
    arrows, Home resets; stored in `localStorage`), VFO overlays with passband shading and label
    chips (paused VFOs dashed, faded, "(paused)"), the parts of the span outside the usable window
@@ -82,12 +82,15 @@ dark values again under `prefers-color-scheme: dark` unless `data-theme="light"`
 4. Status bar: buffer, drift, latency, underruns, dropped (audio samples replaced by silence),
    fps. The device-side `dropped_blocks` counter is not exposed to the browser yet.
 
-Responsive down to 375 px: the top bar wraps (readout on its own row), the audio button shrinks to
-an icon, the page never scrolls horizontally.
+Responsive down to 375 px: below 900 px the strip wraps into two rows and the inspector is a right
+sheet; below 600 px the strip keeps only the frequency, the inspector becomes a bottom sheet opened
+from a bottom tab bar (touch targets of at least 44 px). The page never scrolls, in either direction.
 
 ## Components (`web/src/ui/`)
 
-Button (primary / secondary / ghost / danger, sm / md / lg), Chip (selectable pill), IconButton (label + tooltip, pressed),
+Button (primary / secondary / ghost / danger, sm / md / lg), Chip (selectable pill), PlainButton (unstyled
+button with the focus ring for composite shell controls), Popover (anchored dialog, Esc / outside
+click closes), IconButton (label + tooltip, pressed),
 Tooltip (CSS only, hover and focus), Select (styled native), Slider (label, value, overlay slot for
 live markers), Toggle (switch), SegmentedControl (radio group, arrow keys), NumberField (typed
 value, optional parse/format, arrow stepping), Section (collapsible) and Panel, Badge, Meter (bar,
@@ -143,45 +146,51 @@ WebSocket returns the user to the login page; sockets do not reconnect while log
 move focus, digit keys overwrite, Enter/F2/double-click/pencil switch to typed entry with unit
 parsing. Pure arithmetic is in `ui/digits.ts`.
 
-## Receiver dock
+## Tuning strip, VFO tabs and inspector
 
-`vfo/ReceiverDock.tsx` sits under the spectrum card (`shrink-0`, the card takes the remaining height)
-and holds every operating control of the active VFO, so nothing needs a sidebar visit:
+The decided layout and its responsive rules are in `docs/design/ui-layout.md`. Code:
+`shell/TuningStrip.tsx`, `shell/CentrePill.tsx`, `shell/VfoTabs.tsx`, `shell/Inspector.tsx`,
+`shell/MobileTabBar.tsx`, `shell/inspector.ts` (state), `vfo/controls.tsx` (shared controls) and
+`vfo/ReceiverPanel.tsx` (Receiver and Decoders tabs).
 
-- VFO chips (selected = accent, paused = dimmed with a pause icon), each with a speaker toggle
-  (listen on/off), plus an add button. The frequency readout, nudges and step select live in the top
-  bar, not here.
-- Mode `SegmentedControl` (all modes; a change resets the bandwidth to the mode default) and bandwidth.
-- Squelch slider with the live channel-power tick and a compact signal meter (both update their DOM
-  outside React), an **Auto** button, volume, mute, audio on/off and delete of the active VFO.
-  Auto sets the squelch to the 20th percentile of the VFO's channel power over the last ~3 s plus
-  4 dB (clamped to the slider range; `vfo/model.autoSquelchDbfs`). It reads "auto" until the slider
-  moves; a second click clears the squelch. With too little data a toast says so.
+- **Strip**: the only big frequency. It always edits the selected VFO: digit wheel / typed entry,
+  step select, nudge arrows, bookmark star, paused badge; mode chips (a change resets the bandwidth
+  to the mode default), bandwidth, squelch with an **Auto** button and the live channel-power tick,
+  and an inline S-meter (the tick and meter update their DOM outside React). With no VFO it shows
+  "Create receiver". The centre pill opens the source settings popover (`shell/SourceSettings.tsx`,
+  also the top of the Source tab) with the tuning lock.
+- **VFO tabs**: selected = accent, paused = dimmed with a pause icon; each tab has a listen toggle
+  and a close button; "+" adds a VFO at the display centre (max 8).
+- **Inspector**: `]` or the top bar button toggles it on wide screens (`superhet.inspector.open.v1`,
+  guarded `localStorage`); below 900 px it is a transient sheet. Tabs follow the WAI-ARIA tab
+  pattern (arrow keys, Home/End); only the open tab body is mounted. Receiver: stereo switch with
+  lamp and de-emphasis (WFM), volume and mute, RDS (WFM) or CTCSS tone squelch and DTMF digits
+  (NFM, AM), remove VFO; below 600 px it also holds mode, bandwidth and squelch. Decoders: the same
+  decoder panels. Display: levels, zoom, band plan. Source: centre, rate, gain, ppm, lock, profiles,
+  audio device.
+- Auto squelch sets the squelch to the 20th percentile of the VFO's channel power over the last
+  ~3 s plus 4 dB (clamped to the slider range; `vfo/model.autoSquelchDbfs`). It reads "auto" until
+  the slider moves; a second click clears the squelch. With too little data a toast says so.
 
 The active VFO is always defined: `useReceiver` selects the first VFO whenever VFOs exist and none is
-selected (there is no deselect). The big top bar readout therefore tunes the active VFO; the centre
-is tuned with the compact "Centre" readout or the Source section. A plain click on the spectrum
-retunes the active VFO (SDR#-style); with no VFO it creates one at the click
-(`shell/spectrumTuning`, a view of the tuning controller handed to the spectrum). The tuning lock
-behaves as before: the centre is read-only, VFOs stay tunable and are paused outside the window.
+selected (there is no deselect). A plain click on the spectrum retunes the active VFO (SDR#-style);
+with no VFO it creates one at the click (`shell/spectrumTuning`, a view of the tuning controller
+handed to the spectrum). The tuning lock behaves as before: the centre is read-only, VFOs stay
+tunable and are paused outside the window.
 
 Listening is independent of the active VFO: several VFOs can play mixed. The audio socket subscribes
 to the listened VFOs plus the active one (so its meter and Auto squelch keep working), but only
 listened VFOs are decoded and played. New VFOs listen by default; the set of VFOs that do not is
 stored per device in `localStorage` (`superhet.listen.v1:<device>`) and pruned when a VFO is deleted.
 
-Layout uses a container query on the dock, not the viewport: the groups wrap inside two bands (VFO and
-tuning, then demodulator and audio). From 88 rem (about 1400 px) of dock width the bands sit side by
-side in one row; narrower, they stack in two rows; groups get a subtle vertical divider from 56 rem and
-simply wrap below that. On phones (below the 900 px shell breakpoint, where the sidebar becomes a
-drawer) the dock stays visible, wraps further and scrolls vertically (max 45 % of the viewport)
-rather than the page scrolling horizontally. With no VFOs the dock shrinks to the hint "Click the spectrum or press + to add a VFO" and a + button.
+The page itself never scrolls (`overflow-hidden` shell); the spectrum card takes the height left
+between the VFO row and the status bar, and only the inspector tab bodies scroll.
 
 ## Band plan and bookmarks
 
-Details in `docs/bandplan.md`. Sidebar: **Bookmarks** (switch "Show on spectrum", "Add bookmark...",
-search and tag filter, list with edit/delete, import/export buttons) and **Band plan** (master
-switch plus one switch per category with its colour swatch). The top bar has a star
+Details in `docs/bandplan.md`. Inspector: the **Bookmarks** tab (switch "Show on spectrum", "Add bookmark...",
+search and tag filter, list with edit/delete, import/export buttons) and, in the **Display** tab, **Band plan** (master
+switch plus one switch per category with its colour swatch). The tuning strip has a star
 ("Bookmark this frequency") next to the active VFO's tuning step; it opens the add dialog prefilled
 from the VFO and the band plan. Dialogs use the kit's `Dialog`/`ConfirmDialog`; the import dialog
 previews counts before anything is sent and offers Merge or Replace all.

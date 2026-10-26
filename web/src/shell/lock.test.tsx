@@ -5,7 +5,6 @@ import { TuningControls } from "../spectrum/TuningControls";
 import type { TuningSnapshot } from "../spectrum/tuning";
 import { toasts } from "../ui";
 import { noticeLocked, noticeRetune } from "./notices";
-import { ReceiverFrequency } from "./ReceiverFrequency";
 import { TuningLock } from "./TuningLock";
 
 const user: LockHolder = { kind: "user", id: "user", sinceMs: 1 };
@@ -42,26 +41,6 @@ it("TuningLock: names other holders", () => {
 it("TuningLock: disabled while a request runs", () => {
   render(<TuningLock holders={[]} disabled onToggle={() => undefined} />);
   expect(screen.getByRole("button", { name: "Lock tuning" })).toBeDisabled();
-});
-
-it("ReceiverFrequency: the centre readout is read-only while locked", () => {
-  const onCenter = vi.fn();
-  render(
-    <ReceiverFrequency
-      vfo={null}
-      step="auto"
-      onStep={() => undefined}
-      onVfo={() => undefined}
-      centerHz={100_000_000}
-      onCenter={onCenter}
-      centerLockedReason="Locked by you"
-    />,
-  );
-  const digit = screen.getAllByRole("spinbutton")[0]!;
-  expect(digit).toHaveAttribute("aria-disabled", "true");
-  fireEvent.keyDown(digit, { key: "ArrowUp" });
-  expect(onCenter).not.toHaveBeenCalled();
-  expect(screen.getByRole("button", { name: "Type a frequency" })).toBeDisabled();
 });
 
 const state: DeviceState = {

@@ -21,6 +21,7 @@ export interface ShortcutContext {
   centerHz: number | null;
   startBookmark: () => void;
   openHelp: () => void;
+  toggleInspector: () => void;
 }
 
 /** Run one shortcut; true when it did something (the caller then swallows the key event). */
@@ -96,6 +97,9 @@ export function runShortcut(action: ShortcutAction, ctx: ShortcutContext): boole
     }
     case "help":
       ctx.openHelp();
+      return true;
+    case "inspector":
+      ctx.toggleInspector();
       return true;
   }
 }

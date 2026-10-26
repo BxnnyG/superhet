@@ -1,0 +1,177 @@
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { beforeEach, expect, it, vi } from "vitest";
+import type { AudioController } from "../audio/controller";
+import type { DeviceState, LockHolder } from "../spectrum/api";
+import type { Vfo } from "../vfo/api";
+import { AutoSquelch } from "../vfo/autoSquelch";
+import { CentrePill } from "./CentrePill";
+import { TuningStrip } from "./TuningStrip";
+import type { Receiver } from "./useReceiver";
+import { VfoTabs } from "./VfoTabs";
+
+const vfo = (id: number, over: Partial<Vfo> = {}): Vfo => ({
+  id,
+  freqHz: 100e6 + id * 1e5,
+  mode: "nfm",
+  bandwidthHz: 12_500,
+  squelchDbfs: null,
+  deemphasis: null,
+  offsetHz: 0,
+  status: "active",
+  ...over,
+});
+
+const device: DeviceState = {
+  driver: "rtlsdr",
+  centerHz: 100e6,
+  sampleRate: 2_048_000,
+  gain: { mode: "auto", db: null },
+  gainsDb: [0, 10],
+  ppm: 0,
+  biasTee: false,
+  tuningEpoch: 1,
+  locks: [],
+  window: { startHz: 99e6, endHz: 101e6 },
+};
+
+const user: LockHolder = { kind: "user", id: "user", sinceMs: 1 };
+
+function fake(vfos: Vfo[], selectedId: number | null, locks: LockHolder[] = []) {
+  const fns = {
+    update: vi.fn(),
+    select: vi.fn(),
+    remove: vi.fn(),
+    createVfoAt: vi.fn(),
+    startBookmark: vi.fn(),
+    setStep: vi.fn(),
+    setListening: vi.fn(),
+    toggleLock: vi.fn(),
+    request: vi.fn(),
+  };
+  const state = { ...device, locks };
+  const r = {
+    device: "dev0",
+    selected: vfos.find((v) => v.id === selectedId) ?? null,
+    vfoSnap: { vfos, selectedId, busy: false, error: null, loaded: true },
+    tuningSnap: { state, display: state, busy: false, lockBusy: false, error: null },
+    audioSnap: { levels: { 1: { volume: 0.8, muted: false, listening: false } }, master: 1 },
+    audio: {
+      getMeter: () => null,
+      getRecentLevels: () => [],
+      setListening: fns.setListening,
+    } as unknown as AudioController,
+    autoSquelch: new AutoSquelch(),
+    vfoCtl: { update: fns.update, select: fns.select, remove: fns.remove },
+    tuning: { request: fns.request },
+    locks,
+    step: "auto",
+    setStep: fns.setStep,
+    createVfoAt: fns.createVfoAt,
+    startBookmark: fns.startBookmark,
+    toggleLock: fns.toggleLock,
+  } as unknown as Receiver;
+  return { r, fns };
+}
+
+beforeEach(() => vi.clearAllMocks());
+
+it("strip: one big frequency that tunes the selected VFO, plus step, nudge and bookmark", () => {
+  const { r, fns } = fake([vfo(1), vfo(2)], 2);
+  render(<TuningStrip r={r} />);
+  // The only frequency readout on screen is the VFO's; the centre is a pill, not an input.
+  expect(screen.getAllByRole("group", { name: /frequency$/ })).toHaveLength(1);
+  expect(screen.getByRole("group", { name: "VFO frequency" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Up one step" }));
+  expect(fns.update).toHaveBeenCalledWith(2, { freqHz: 100_212_500 });
+  fireEvent.click(screen.getByRole("button", { name: "Down one step" }));
+  expect(fns.update).toHaveBeenLastCalledWith(2, { freqHz: 100_187_500 });
+  fireEvent.click(screen.getByRole("button", { name: "Bookmark this frequency" }));
+  expect(fns.startBookmark).toHaveBeenCalled();
+  fireEvent.change(screen.getByRole("combobox", { name: "Tuning step" }), {
+    target: { value: "25000" },
+  });
+  expect(fns.setStep).toHaveBeenCalledWith(25_000);
+});
+
+it("strip: mode, bandwidth and squelch edit the selected VFO", () => {
+  const { r, fns } = fake([vfo(1), vfo(2)], 2);
+  render(<TuningStrip r={r} />);
+  fireEvent.click(screen.getByRole("radio", { name: "WFM" }));
+  expect(fns.update).toHaveBeenCalledWith(2, { mode: "wfm", bandwidthHz: null });
+  fireEvent.change(screen.getByRole("combobox", { name: "Bandwidth" }), {
+    target: { value: "default" },
+  });
+  expect(fns.update).toHaveBeenLastCalledWith(2, { bandwidthHz: null });
+  fireEvent.change(screen.getByRole("slider", { name: "Squelch" }), { target: { value: "-70" } });
+  expect(fns.update).toHaveBeenLastCalledWith(2, { squelchDbfs: -70 });
+});
+
+it("strip: without a VFO it offers to create one instead of tuning the centre", () => {
+  const { r, fns } = fake([], null);
+  render(<TuningStrip r={r} />);
+  expect(screen.queryByRole("spinbutton")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Create receiver" }));
+  expect(fns.createVfoAt).toHaveBeenCalledWith(100e6);
+});
+
+it("strip: marks a paused VFO", () => {
+  const { r } = fake([vfo(1, { status: "paused" })], 1);
+  render(<TuningStrip r={r} />);
+  expect(screen.getByText("paused")).toBeInTheDocument();
+});
+
+it("centre pill shows the centre and opens the source settings", () => {
+  const { r, fns } = fake([vfo(1)], 1);
+  render(<CentrePill r={r} />);
+  const pill = screen.getByRole("button", { name: /Centre 100\.000/ });
+  expect(screen.queryByRole("dialog", { name: "Source settings" })).toBeNull();
+  fireEvent.click(pill);
+  const dialog = screen.getByRole("dialog", { name: "Source settings" });
+  expect(within(dialog).getByLabelText("Centre frequency")).toBeInTheDocument();
+  expect(within(dialog).getByLabelText("Sample rate")).toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "Lock tuning" })).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lock tuning" }));
+  expect(fns.toggleLock).toHaveBeenCalledWith(true);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "Source settings" })).toBeNull();
+});
+
+it("centre pill shows the lock and the centre input is disabled while locked", () => {
+  const { r } = fake([vfo(1)], 1, [user]);
+  render(<CentrePill r={r} />);
+  fireEvent.click(screen.getByRole("button", { name: /Centre 100\.000, locked/ }));
+  expect(screen.getByLabelText("Centre frequency")).toBeDisabled();
+});
+
+it("tab row: selects, closes and toggles listening per VFO, and adds a VFO", () => {
+  const { r, fns } = fake([vfo(1), vfo(2)], 2);
+  render(<VfoTabs r={r} />);
+  expect(screen.getByRole("button", { name: /^VFO 1 NFM/ })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+  expect(screen.getByRole("button", { name: /^VFO 2 NFM/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  fireEvent.click(screen.getByRole("button", { name: /^VFO 1 / }));
+  expect(fns.select).toHaveBeenCalledWith(1);
+  expect(fns.setListening).not.toHaveBeenCalled();
+  const one = screen.getByRole("button", { name: "Listen to VFO 1" });
+  const two = screen.getByRole("button", { name: "Listen to VFO 2" });
+  expect(one).toHaveAttribute("aria-pressed", "false");
+  expect(two).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(one);
+  expect(fns.setListening).toHaveBeenCalledWith(1, true);
+  fireEvent.click(screen.getByRole("button", { name: "Delete VFO 2" }));
+  expect(fns.remove).toHaveBeenCalledWith(2);
+  fireEvent.click(screen.getByRole("button", { name: "Add VFO" }));
+  expect(fns.createVfoAt).toHaveBeenCalledWith(100e6);
+});
+
+it("tab row: the add button is disabled at the VFO limit", () => {
+  const vfos = Array.from({ length: 8 }, (_, i) => vfo(i + 1));
+  const { r } = fake(vfos, 1);
+  render(<VfoTabs r={r} />);
+  expect(screen.getByRole("button", { name: "Add VFO" })).toBeDisabled();
+});
