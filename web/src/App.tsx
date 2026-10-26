@@ -77,7 +77,7 @@ export function App({ device = "dev0" }: Props) {
                 createVfoAt={r.createVfoAt}
                 overlaySettings={r.overlay}
                 bookmarks={r.bookmarks}
-                onAnnotationTune={r.tuneTo}
+                onAnnotationTune={(t, newVfo) => (newVfo ? r.tuneNew(t) : r.tuneTo(t))}
                 metrics={r.metrics}
                 registerView={r.registerView}
                 onStatus={r.setStatus}

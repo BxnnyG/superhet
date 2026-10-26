@@ -159,12 +159,13 @@ function ActiveVfo({
         >
           <ModeSelect vfo={vfo} onUpdate={onUpdate} />
           <BandwidthSelect vfo={vfo} onUpdate={onUpdate} />
-          <div className="flex min-w-32 flex-1 flex-col gap-0.5 shell:max-w-72">
+          <div className="grid min-w-32 flex-1 grid-cols-[minmax(0,1fr)_auto] items-end gap-x-2 gap-y-1.5 shell:max-w-72">
             <SquelchControl
               vfo={vfo}
               audio={r.audio}
               autoSquelch={r.autoSquelch}
               onUpdate={onUpdate}
+              className="contents"
             />
             <SMeter audio={r.audio} vfoId={vfo.id} inline />
           </div>

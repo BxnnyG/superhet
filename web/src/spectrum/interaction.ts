@@ -87,8 +87,8 @@ export interface InteractionOptions {
   onVfoCreate: (hz: number) => void;
   /** Band plan strip and bookmarks; the owner feeds it data and calls `refresh()`. */
   annotations: AnnotationLayer;
-  /** A tunable channel or bookmark in the strip was clicked. */
-  onAnnotationTune: (target: AnnotationTarget) => void;
+  /** A tunable channel or bookmark in the strip was clicked (`newVfo`: Alt/Ctrl-click). */
+  onAnnotationTune: (target: AnnotationTarget, newVfo: boolean) => void;
   /** Wheel preference ("zoom" or "tune"), read on every wheel event. */
   getWheelMode: () => WheelMode;
   /** Wheel over the selected VFO: tune it by `steps` tuning steps (negative = down). */
@@ -106,6 +106,16 @@ export function wheelDelta(
   const d = e.shiftKey && e.deltaY === 0 ? e.deltaX : e.deltaY;
   // Lines and pages are converted to approximate pixels.
   return e.deltaMode === 1 ? d * 33 : e.deltaMode === 2 ? d * 400 : d;
+}
+
+/** A VFO label chip on the spectrum, laid out before drawing so close VFOs do not overlap. */
+interface VfoChip {
+  label: string;
+  color: string;
+  bx: number;
+  w: number;
+  selected: boolean;
+  paused: boolean;
 }
 
 interface Drag {
@@ -361,7 +371,7 @@ export class SpectrumInteraction {
     const annotation = hitTarget(this.annotationAt(e.clientX, e.clientY));
     if (annotation) {
       clearTimeout(this.clickTimer);
-      this.o.onAnnotationTune(annotation);
+      this.o.onAnnotationTune(annotation, d.create === true);
       return;
     }
     if (d.create) {
@@ -700,6 +710,9 @@ export class SpectrumInteraction {
     ctx.font = `${11 * dpr}px ${CANVAS_FONT}`;
     ctx.textBaseline = "middle";
     ctx.textAlign = "left";
+    const padX = 4 * dpr;
+    const h = 16 * dpr;
+    const chips: VfoChip[] = [];
     for (const m of this.markers) {
       const selected = m.id === this.selectedId;
       const color = vfoColor(m.id);
@@ -725,15 +738,25 @@ export class SpectrumInteraction {
       const label = `${m.id} ${MODE_LABEL[m.mode]}${m.paused ? " (paused)" : ""}${
         selected ? " " + formatFrequency(m.freqHz) : ""
       }`;
-      const padX = 4 * dpr;
       const w = ctx.measureText(label).width + padX * 2;
-      const h = 16 * dpr;
       const bx = Math.min(Math.max(left, xc + 3 * dpr), canvas.width - w);
-      ctx.globalAlpha = 0.9;
-      const chipY = (22 + this.o.annotations.inset) * dpr;
-      this.chip(ctx, bx, chipY, w, h, CHIP_BG, color);
-      ctx.fillStyle = color;
-      ctx.fillText(label, bx + padX, chipY + h / 2);
+      chips.push({ label, color, bx, w, selected, paused: m.paused });
+    }
+    // Labels of close VFOs would overprint each other: each takes the first row (stacked downwards)
+    // where it clears the chips already placed, so every label stays readable. The selected VFO's
+    // chip is placed first and stays on the top row.
+    chips.sort((p, q) => Number(q.selected) - Number(p.selected) || p.bx - q.bx);
+    const rowEnds: number[] = [];
+    const gap = 3 * dpr;
+    for (const c of chips) {
+      let row = rowEnds.findIndex((end) => c.bx >= end + gap);
+      if (row < 0) row = rowEnds.length;
+      rowEnds[row] = Math.max(rowEnds[row] ?? 0, c.bx + c.w);
+      const chipY = (22 + this.o.annotations.inset) * dpr + row * (h + 2 * dpr);
+      ctx.globalAlpha = c.paused ? 0.6 : 0.95;
+      this.chip(ctx, c.bx, chipY, c.w, h, CHIP_BG, c.color);
+      ctx.fillStyle = c.color;
+      ctx.fillText(c.label, c.bx + padX, chipY + h / 2);
     }
     ctx.restore();
   }

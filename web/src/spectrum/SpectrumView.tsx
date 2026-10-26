@@ -35,8 +35,8 @@ interface Props {
   /** Band plan / bookmark overlay settings and the bookmarks drawn on the spectrum. */
   overlaySettings: OverlayStore;
   bookmarks: BookmarkStore;
-  /** A tunable channel or bookmark in the overlay strip was clicked. */
-  onAnnotationTune: (target: AnnotationTarget) => void;
+  /** A tunable channel or bookmark in the overlay strip was clicked (`newVfo`: Alt/Ctrl-click). */
+  onAnnotationTune: (target: AnnotationTarget, newVfo: boolean) => void;
   metrics: SpectrumMetrics;
   registerView: (actions: ViewActions) => void;
   onStatus: (status: SocketStatus) => void;
@@ -183,7 +183,7 @@ export function SpectrumView({
       },
       onVfoCreate: (hz) => createVfoAt(hz),
       annotations,
-      onAnnotationTune: (target) => live.current.onAnnotationTune(target),
+      onAnnotationTune: (target, newVfo) => live.current.onAnnotationTune(target, newVfo),
       getWheelMode,
       onVfoStep: (id, steps) => {
         const v = vfoCtl.getSnapshot().vfos.find((x) => x.id === id);

@@ -44,7 +44,9 @@ export function SMeter({
       if (textRef.current) {
         textRef.current.textContent = live
           ? `${m.powerDbfs.toFixed(0)}${inline ? "" : " dBFS"}`
-          : "–";
+          : inline
+            ? ""
+            : "–";
       }
       if (dotRef.current) {
         dotRef.current.className = cn(
@@ -59,12 +61,16 @@ export function SMeter({
   }, [audio, vfoId, inline]);
 
   if (inline) {
+    // Two grid cells (the parent is a two-column grid): lamp and bar under the squelch slider, the
+    // level reading under the Auto button.
     return (
-      <div className="flex items-center gap-2">
-        <span ref={dotRef} title="Squelch open" className="inline-block size-2 rounded-full" />
-        <Meter barRef={barRef} aria-label="Signal strength" className="min-w-0 flex-1" />
-        <span ref={textRef} className="w-8 text-right font-mono text-xs text-fg num" />
-      </div>
+      <>
+        <div className="flex items-center gap-2">
+          <span ref={dotRef} title="Squelch open" className="inline-block size-2 rounded-full" />
+          <Meter barRef={barRef} aria-label="Signal strength" className="min-w-0 flex-1" />
+        </div>
+        <span ref={textRef} className="min-w-8 text-center font-mono text-xs text-fg-muted num" />
+      </>
     );
   }
 
