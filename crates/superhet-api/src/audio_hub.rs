@@ -118,6 +118,7 @@ impl ClientQueue {
             if frames.len() >= self.capacity {
                 frames.pop_front();
                 self.dropped.fetch_add(1, Ordering::Relaxed);
+                crate::metrics::audio_frames_dropped(1);
             }
             frames.push_back(item);
         }

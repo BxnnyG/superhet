@@ -4,6 +4,7 @@
 //! (`docs/api-decoder-events.md`).
 
 mod consumer;
+mod metrics;
 mod recorder;
 
 use std::net::SocketAddr;
@@ -15,11 +16,25 @@ use tracing_subscriber::EnvFilter;
 const DEFAULT_LISTEN: &str = "0.0.0.0:8076";
 
 fn app() -> Router {
-    Router::new().route("/healthz", get(healthz))
+    Router::new()
+        .route("/healthz", get(healthz))
+        .route("/metrics", get(metrics_text))
 }
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+/// Prometheus text exposition. This port is internal (not published by the compose files) and
+/// carries no authentication.
+async fn metrics_text() -> impl axum::response::IntoResponse {
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            superhet_bus::metrics::CONTENT_TYPE,
+        )],
+        metrics::render(),
+    )
 }
 
 #[tokio::main]
@@ -125,5 +140,26 @@ mod tests {
             .expect("body")
             .to_bytes();
         assert_eq!(&body[..], b"ok");
+    }
+
+    #[tokio::test]
+    async fn metrics_are_served_as_prometheus_text() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("infallible");
+        assert!(response.status().is_success());
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes();
+        assert!(String::from_utf8_lossy(&body).contains("# TYPE superhet_worker_"));
     }
 }

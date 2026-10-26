@@ -126,6 +126,7 @@ async fn audio_ws(
         .max_message_size(MAX_CONTROL_BYTES)
         .max_frame_size(MAX_CONTROL_BYTES)
         .on_upgrade(move |socket| async move {
+            let _client = crate::metrics::track_client("audio");
             let dropped = serve_client(socket, session).await;
             if dropped > 0 {
                 tracing::info!(dropped, "audio client disconnected after dropped frames");

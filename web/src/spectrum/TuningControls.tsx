@@ -1,4 +1,5 @@
 import { lockedBy } from "../state/locks";
+import { droppedNotice } from "../shell/dropped";
 import { overloadNotice } from "../shell/overload";
 import { Alert, LockIcon, NumberField, Select, Slider, Toggle } from "../ui";
 import type { TunePatch } from "./api";
@@ -43,6 +44,7 @@ export function TuningControls({ tuning, onTune }: Props) {
   const gainIdx = nearestGainIndex(gains, gain?.db ?? null);
   const gainDb = gains[gainIdx];
   const overload = overloadNotice(tuning.state);
+  const dropped = droppedNotice(tuning.state);
 
   return (
     <div className="flex flex-col gap-3" role="group" aria-label="Source">
@@ -78,6 +80,14 @@ export function TuningControls({ tuning, onTune }: Props) {
           <p className="font-medium">{overload.summary}</p>
           <p className="mt-0.5">{overload.action}</p>
         </Alert>
+      )}
+      {dropped && (
+        <div data-testid="dropped-notice">
+          <Alert tone="info" className="text-xs">
+            <p className="font-medium">{dropped.summary}</p>
+            <p className="mt-0.5">{dropped.action}</p>
+          </Alert>
+        </div>
       )}
       {gain === null ? (
         display ? (

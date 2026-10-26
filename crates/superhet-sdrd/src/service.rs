@@ -33,6 +33,8 @@ use crate::zoom::ZoomHandle;
 const QUEUE_JOBS: usize = 64;
 /// How often the ADC overload state is checked for changes.
 const OVERLOAD_POLL: Duration = Duration::from_secs(1);
+/// Minimum spacing of state refreshes caused by a changed dropped-block count.
+const DROPPED_REFRESH: Duration = Duration::from_secs(5);
 /// Timeout for each JetStream operation.
 const JS_TIMEOUT: Duration = Duration::from_secs(5);
 /// State is re-published this often, so a restarted NATS server regains it.
@@ -149,13 +151,28 @@ async fn watch_overload(controller: Arc<Controller>, status: Arc<OverloadStatus>
         let (percent, active) = status.get();
         (percent.round() as u32, active)
     };
+    let dropped = || {
+        let counters = crate::metrics::global();
+        counters.device_dropped_blocks() + counters.vfo_dropped_blocks()
+    };
     let mut seen = key(&status);
+    let mut seen_dropped = dropped();
+    let mut dropped_at = tokio::time::Instant::now();
     let mut tick = tokio::time::interval(OVERLOAD_POLL);
     loop {
         tick.tick().await;
         let now = key(&status);
-        if now != seen {
+        // The drop count changes with every lost block; the UI does not need more than a
+        // fresh value every few seconds, so a sustained overrun cannot flood the state feed.
+        let now_dropped = dropped();
+        let dropped_changed =
+            now_dropped != seen_dropped && dropped_at.elapsed() >= DROPPED_REFRESH;
+        if now != seen || dropped_changed {
             seen = now;
+            if dropped_changed {
+                seen_dropped = now_dropped;
+                dropped_at = tokio::time::Instant::now();
+            }
             let controller = Arc::clone(&controller);
             if tokio::task::spawn_blocking(move || controller.refresh())
                 .await

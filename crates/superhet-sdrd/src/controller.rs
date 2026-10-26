@@ -105,6 +105,8 @@ impl Controller {
             &vfos,
             locks.holders(),
             self.overload.get(),
+            crate::metrics::global().device_dropped_blocks()
+                + crate::metrics::global().vfo_dropped_blocks(),
         )
         .into();
         self.state.send_if_modified(|current| {
@@ -737,6 +739,8 @@ mod tests {
     fn essence(c: &Controller) -> Value {
         let mut s = state(c);
         s["tuning_epoch"] = Value::Null;
+        // A process-wide counter that other tests move.
+        s["dropped_blocks"] = Value::Null;
         s["locks"] = json!(s["locks"].as_array().map_or(0, Vec::len));
         for vfo in s["vfos"].as_array_mut().expect("vfos") {
             vfo["id"] = Value::Null;
@@ -974,6 +978,7 @@ mod tests {
         assert_eq!(restored["locks"], saved["locks"]);
         // The epoch differs (the new device was retuned), everything else is identical.
         restored["tuning_epoch"] = saved["tuning_epoch"].clone();
+        restored["dropped_blocks"] = saved["dropped_blocks"].clone();
         assert_eq!(restored, saved);
         // Ids survive and new VFOs continue after the highest one.
         let reply = create(&fresh, 433_600_000);

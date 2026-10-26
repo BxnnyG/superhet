@@ -16,6 +16,7 @@
 
 pub mod audio;
 pub mod config;
+pub mod metrics;
 #[cfg(feature = "opus")]
 pub mod opus;
 pub mod profile;

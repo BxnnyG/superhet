@@ -101,6 +101,7 @@ async fn spectrum_ws(
         .max_message_size(MAX_CONTROL_BYTES)
         .max_frame_size(MAX_CONTROL_BYTES)
         .on_upgrade(move |socket| async move {
+            let _client = crate::metrics::track_client("spectrum");
             serve_client(socket, streams, &hub, &device).await;
             // The receivers were moved into `serve_client` and are dropped by now.
             hub.release(&device).await;
@@ -212,6 +213,7 @@ async fn serve_client(mut socket: WebSocket, streams: Streams, hub: &Hub, device
                 }
                 // This client was too slow: the oldest frames are gone, carry on with fresh ones.
                 Err(broadcast::error::RecvError::Lagged(missed)) => {
+                    crate::metrics::spectrum_frames_missed(missed);
                     tracing::debug!(missed, "spectrum client lagging, frames dropped");
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
@@ -232,6 +234,7 @@ async fn serve_client(mut socket: WebSocket, streams: Streams, hub: &Hub, device
                     s.last_sent = Some(Instant::now());
                 }
                 Err(broadcast::error::RecvError::Lagged(missed)) => {
+                    crate::metrics::spectrum_frames_missed(missed);
                     tracing::debug!(missed, "zoom client lagging, frames dropped");
                 }
                 Err(broadcast::error::RecvError::Closed) => break,

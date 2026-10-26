@@ -1,8 +1,5 @@
 //! Non-blocking bridge from the DSP thread to NATS core publishing.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use async_nats::{Client, connection::State};
 use tokio::sync::mpsc::{self, error::TrySendError};
 
@@ -17,10 +14,10 @@ const QUEUE_FRAMES: usize = 8;
 pub fn spawn_spectrum_publisher(
     client: Client,
     subject: String,
+    stream: &'static str,
 ) -> impl FnMut(Vec<u8>) + Send + 'static {
     let status = client.clone();
     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(QUEUE_FRAMES);
-    let dropped = Arc::new(AtomicU64::new(0));
     tokio::spawn(async move {
         while let Some(frame) = rx.recv().await {
             if let Err(e) = client.publish(subject.clone(), frame.into()).await {
@@ -38,9 +35,9 @@ pub fn spawn_spectrum_publisher(
                 Err(TrySendError::Closed(_)) => return,
             }
         };
-        let n = dropped.fetch_add(1, Ordering::Relaxed) + 1;
+        let n = crate::metrics::global().frame_dropped(stream);
         if n == 1 || n.is_multiple_of(250) {
-            tracing::warn!(total = n, reason, "dropping spectrum frames");
+            tracing::warn!(total = n, reason, stream, "dropping spectrum frames");
         }
     }
 }
@@ -108,7 +105,6 @@ fn spawn_vfo_publisher(
     let device = device.to_owned();
     let status = client.clone();
     let (tx, mut rx) = mpsc::channel::<(u32, Vec<u8>)>(queue);
-    let dropped = Arc::new(AtomicU64::new(0));
     tokio::spawn(async move {
         while let Some((vfo, frame)) = rx.recv().await {
             let subject = format!(
@@ -130,7 +126,7 @@ fn spawn_vfo_publisher(
                 Err(TrySendError::Closed(_)) => return,
             }
         };
-        let n = dropped.fetch_add(1, Ordering::Relaxed) + 1;
+        let n = crate::metrics::global().frame_dropped(kind);
         if n == 1 || n.is_multiple_of(250) {
             tracing::warn!(total = n, reason, kind, "dropping frames");
         }
