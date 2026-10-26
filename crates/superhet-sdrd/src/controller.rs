@@ -603,6 +603,17 @@ mod tests {
         serde_json::from_str(&c.latest().expect("state")).expect("json")
     }
 
+    /// The state without live counters (they keep moving while a file device runs), for
+    /// "nothing changed" comparisons.
+    fn config_state(c: &Controller) -> Value {
+        let mut s = state(c);
+        if let Some(o) = s.as_object_mut() {
+            o.remove("dropped_blocks");
+            o.remove("overload");
+        }
+        s
+    }
+
     fn vfo_call(c: &Controller, command: &str, body: Value) -> Result<Value, CtlError> {
         c.vfo(command, body.to_string().as_bytes())
             .map(|reply| serde_json::from_slice(&reply).expect("json"))
@@ -911,14 +922,14 @@ mod tests {
         let c = controller(Mock::new());
         create(&c, 100_100_000);
         c.set_user_lock(true);
-        let before = state(&c);
+        let before = config_state(&c);
         let other = ProfileData {
             center_hz: 145_000_000,
             ..ProfileData::from_state(&before).expect("snapshot")
         };
         let err = load(&c, &other).expect_err("locked");
         assert_eq!(err.code, ErrorCode::Locked);
-        assert_eq!(state(&c), before);
+        assert_eq!(config_state(&c), before);
         // A profile that keeps centre and rate may still replace the VFOs.
         let same = ProfileData {
             vfos: Vec::new(),
@@ -939,7 +950,7 @@ mod tests {
     fn a_profile_with_an_unrealisable_vfo_changes_nothing() {
         let c = controller(Mock::new());
         create(&c, 100_100_000);
-        let before = state(&c);
+        let before = config_state(&c);
         let mut data = ProfileData::from_state(&before).expect("snapshot");
         data.center_hz = 145_000_000;
         data.sample_rate = 250_000;
@@ -956,7 +967,7 @@ mod tests {
         }];
         let err = load(&c, &data).expect_err("invalid");
         assert_eq!(err.code, ErrorCode::Invalid);
-        assert_eq!(state(&c), before);
+        assert_eq!(config_state(&c), before);
         // Malformed requests are invalid, too.
         for body in [
             "{}",
@@ -996,7 +1007,7 @@ mod tests {
         // A rate the file cannot provide is refused as unsupported (after the lock is gone;
         // loading a profile never releases it).
         c.set_user_lock(false);
-        let before = state(&c);
+        let before = config_state(&c);
         let err = load(
             &c,
             &ProfileData {
@@ -1007,7 +1018,7 @@ mod tests {
         )
         .expect_err("unsupported");
         assert_eq!(err.code, ErrorCode::Unsupported);
-        assert_eq!(state(&c), before);
+        assert_eq!(config_state(&c), before);
         let _ = std::fs::remove_file(path);
     }
 
