@@ -159,12 +159,13 @@ function TabBody({ r, tab, phoneUp }: { r: Receiver; tab: InspectorTab; phoneUp:
       );
     case "bookmarks":
       return (
-        <div className="h-full min-h-0 overflow-y-auto px-4 py-3">
+        <div className="h-full min-h-0 px-4 pt-3">
           <BookmarksPanel
             store={r.bookmarks}
             overlay={r.overlay}
             activeFreqHz={r.selected?.freqHz ?? null}
             onTune={r.tuneTo}
+            onTuneNew={r.tuneNew}
             onAdd={r.startBookmark}
           />
         </div>
