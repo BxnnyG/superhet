@@ -180,7 +180,9 @@ by the API from the session; a client-supplied `owner` is discarded. VFOs create
   (guest policy) or `locked` (`only_without_lock`). Counting and creating happen under one gate, so
   concurrent requests cannot exceed a quota.
 - The state document (`GET .../state`, `GET .../vfos`, the state WebSocket) is prepared per viewer:
-  every VFO has `"mine":true|false`; the raw `owner` is only visible to operators and admins;
+  every VFO has `"mine":true|false` and `"shared":true|false` (no owner: everybody may listen;
+  without it a listener could not tell a shared VFO from somebody else's); the raw `owner` is only
+  visible to operators and admins;
   guests also lose lock holder names and ids.
 - `POST|DELETE /api/v1/devices/{dev}/lock` need `operator`. The holder is the account (`kind:
   "user"`, `id:"u:<id>"`, `name:<login>`), each account releases only its own lock;
@@ -201,8 +203,9 @@ by the API from the session; a client-supplied `owner` is discarded. VFOs create
   also lose bookmarks and the sessions page); the server answers `403 forbidden` anyway.
 - A closed WebSocket may mean a kick or a disabled account: re-read `auth/status` and go to the
   login page on `401`.
-- VFOs: use `mine` to tell own channels from shared and foreign ones; only own ones are editable
-  for listeners and guests, and only own/shared ones can be listened to. Do not assume 8 VFOs
+- VFOs: use `mine` and `shared` to tell own channels from shared and foreign ones; only own ones
+  are editable for listeners and guests, and only own/shared ones can be listened to (subscribe
+  the audio socket to those only: one foreign id makes the whole subscription `forbidden`). Do not assume 8 VFOs
   per device (`SUPERHET_MAX_VFOS`) or per user (`/admin/limits`, `403 vfo_limit`).
 - The lock is per account: show the holder's `name` from `locks[]`, unlock releases only the
   caller's own lock (`force=true` for admins).

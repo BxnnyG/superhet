@@ -23,7 +23,7 @@ use serde_json::{Map, Value, json};
 use superhet_bus::{audit::Outcome, subjects};
 use superhet_db::users::Role;
 
-use crate::access::{Principal, view_state};
+use crate::access::{Principal, view_reply, view_state};
 use crate::auth::AuthState;
 use crate::origin::OriginPolicy;
 
@@ -467,12 +467,24 @@ async fn post_tune(
                 Outcome::Ok,
                 Value::Object(details),
             );
-            json(StatusCode::OK, reply)
+            json(StatusCode::OK, viewed(reply, &principal))
         }
         Err(response) => {
             audit_refusal(&state, &principal, "device.tune", &device, &response);
             *response
         }
+    }
+}
+
+/// A daemon reply as the caller may see it (see [`view_reply`]); an unparsable reply is returned
+/// unchanged.
+pub(crate) fn viewed(reply: Bytes, principal: &Principal) -> Bytes {
+    match serde_json::from_slice::<Value>(&reply) {
+        Ok(mut value) => {
+            view_reply(&mut value, principal);
+            Bytes::from(value.to_string())
+        }
+        Err(_) => reply,
     }
 }
 
@@ -522,7 +534,7 @@ async fn set_lock(
                     json!({"force": force}),
                 )
                 .await;
-            json(StatusCode::OK, reply)
+            json(StatusCode::OK, viewed(reply, principal))
         }
         Err(response) => {
             audit_refusal(state, principal, action, device, &response);
@@ -605,7 +617,7 @@ async fn post_vfo(
             json!({"freq_hz": object.get("freq_hz"), "mode": object.get("mode")}),
         )
         .await;
-    let mut response = json(StatusCode::CREATED, reply.clone());
+    let mut response = json(StatusCode::CREATED, viewed(reply.clone(), &principal));
     if let Some(id) = serde_json::from_slice::<serde_json::Value>(&reply)
         .ok()
         .and_then(|v| v["vfo"]["id"].as_u64())
@@ -655,7 +667,7 @@ async fn patch_vfo(
                 Outcome::Ok,
                 Value::Object(details),
             );
-            json(StatusCode::OK, reply)
+            json(StatusCode::OK, viewed(reply, &principal))
         }
         Err(response) => {
             audit_refusal(&state, &principal, "vfo.update", &target, &response);
