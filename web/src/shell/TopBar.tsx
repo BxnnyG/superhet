@@ -1,83 +1,85 @@
-import type { SocketStatus } from "../spectrum/socket";
-import { formatRate } from "../spectrum/TuningControls";
-import { Badge, IconButton, Logo, MenuIcon, type BadgeTone } from "../ui";
+import { AudioButton } from "../audio/AudioControls";
+import {
+  IconButton,
+  Kbd,
+  Logo,
+  PanelRightIcon,
+  PlainButton,
+  SearchIcon,
+  Slider,
+  toasts,
+} from "../ui";
 import type { ThemePreference } from "../ui/theme";
-import { lockedBy } from "../state/locks";
-import { ReceiverFrequency } from "./ReceiverFrequency";
+import { DeviceSwitcher } from "./DeviceSwitcher";
+import type { InspectorState } from "./inspector";
 import { SettingsMenu } from "./SettingsMenu";
-import { TuningLock } from "./TuningLock";
 import type { Receiver } from "./useReceiver";
-
-const STATUS: Record<SocketStatus, { label: string; tone: BadgeTone; pulse: boolean }> = {
-  connecting: { label: "Connecting", tone: "warn", pulse: true },
-  connected: { label: "Connected", tone: "success", pulse: false },
-  reconnecting: { label: "Reconnecting", tone: "danger", pulse: true },
-};
 
 interface Props {
   r: Receiver;
   theme: ThemePreference;
   onTheme: (t: ThemePreference) => void;
   onShortcuts: () => void;
-  drawerOpen: boolean;
-  onMenu: () => void;
+  inspector: InspectorState;
 }
 
-export function TopBar({ r, theme, onTheme, onShortcuts, drawerOpen, onMenu }: Props) {
-  const st = STATUS[r.status];
-  const display = r.tuningSnap.display;
+/**
+ * Top bar (no frequencies): logo, device switcher, command palette trigger, audio on/off with the
+ * master volume, inspector toggle and settings. Below 600 px only logo, palette, audio, settings.
+ */
+export function TopBar({ r, theme, onTheme, onShortcuts, inspector }: Props) {
   return (
-    <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-surface-1 px-3 py-2 shell:px-4">
-      <div className="shell:hidden">
-        <IconButton
-          label="Open controls"
-          aria-expanded={drawerOpen}
-          aria-controls="sidebar"
-          onClick={onMenu}
-        >
-          <MenuIcon />
-        </IconButton>
-      </div>
+    <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-surface-1 px-3 shell:gap-3 shell:px-4">
       <Logo />
-      <div role="status" className="flex items-center gap-2">
-        <Badge tone={st.tone} dot pulse={st.pulse}>
-          {st.label}
-        </Badge>
-        <span className="hidden text-xs text-fg-muted sm:inline">
-          <span className="font-mono">{r.device}</span>
-          {display && (
-            <>
-              {" · "}
-              {display.tuner ?? display.driver}
-              {" · "}
-              <span className="num">{formatRate(display.sampleRate)}</span>
-            </>
-          )}
-        </span>
+      <div className="max-phone:hidden">
+        <DeviceSwitcher r={r} />
       </div>
-      <div className="order-last flex basis-full flex-wrap items-center justify-center gap-x-3 gap-y-1 shell:order-none shell:basis-auto shell:flex-1">
-        <ReceiverFrequency
-          vfo={r.selected}
-          step={r.step}
-          onStep={r.setStep}
-          onVfo={(id, patch) => r.vfoCtl.update(id, patch)}
-          centerHz={display?.centerHz ?? null}
-          onCenter={(hz) => r.tuning.request({ centerHz: hz })}
-          centerLockedReason={
-            r.locks.length > 0 ? `${lockedBy(r.locks)}: tune the VFO instead, or unlock` : null
-          }
-          locked={r.locks.length > 0}
-          onBookmark={r.startBookmark}
-          lock={
-            <TuningLock
-              holders={r.locks}
-              disabled={!r.tuningSnap.state || r.tuningSnap.lockBusy}
-              onToggle={r.toggleLock}
-            />
-          }
+      <div className="flex-1" />
+      <PlainButton
+        title="Command palette (coming soon)"
+        onClick={() =>
+          toasts.push({
+            key: "palette",
+            tone: "info",
+            title: "Search is coming soon",
+            body: "Jump to a frequency, bookmark or action from here.",
+            durationMs: 3000,
+          })
+        }
+        className="inline-flex h-8 items-center gap-2 rounded-md border border-border-strong bg-surface-2 px-2.5 text-xs text-fg-subtle transition-colors duration-150 hover:text-fg shell:w-64 max-phone:size-11 max-phone:justify-center max-phone:px-0"
+      >
+        <SearchIcon size={14} className="shrink-0" />
+        <span className="flex-1 truncate text-left max-phone:sr-only">Search or jump…</span>
+        <span className="max-shell:hidden">
+          <Kbd>⌘K</Kbd>
+        </span>
+      </PlainButton>
+      <div className="flex items-center gap-2">
+        <AudioButton audio={r.audio} snapshot={r.audioSnap} className="max-phone:h-11" />
+        <Slider
+          className="w-24 max-phone:hidden"
+          label="Master volume"
+          hideLabel
+          min={0}
+          max={100}
+          value={Math.round(r.audioSnap.master * 100)}
+          valueLabel={`${Math.round(r.audioSnap.master * 100)} %`}
+          title="Master volume"
+          onChange={(v) => r.audio.setMasterVolume(v / 100)}
         />
       </div>
-      <div className="ml-auto flex items-center gap-2 shell:ml-0">
+      <div className="flex items-center gap-1">
+        <div className="max-phone:hidden">
+          <IconButton
+            label={inspector.open ? "Hide inspector" : "Show inspector"}
+            tip={inspector.open ? "Hide inspector (])" : "Show inspector (])"}
+            aria-controls="inspector"
+            aria-expanded={inspector.open}
+            onClick={inspector.toggle}
+          >
+            <PanelRightIcon />
+          </IconButton>
+        </div>
         <SettingsMenu theme={theme} onTheme={onTheme} onShortcuts={onShortcuts} />
       </div>
     </header>

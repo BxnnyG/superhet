@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { BookmarkEditorHost } from "./bookmarks/BookmarkEditor";
+import { Inspector } from "./shell/Inspector";
+import { useInspector } from "./shell/inspector";
+import { MobileTabBar } from "./shell/MobileTabBar";
 import { ShortcutsDialog } from "./shell/ShortcutsDialog";
-import { Sidebar } from "./shell/Sidebar";
 import { StatusBar } from "./shell/StatusBar";
 import { TopBar } from "./shell/TopBar";
+import { TuningStrip } from "./shell/TuningStrip";
 import { useReceiver } from "./shell/useReceiver";
 import { useShortcuts } from "./shell/useShortcuts";
+import { VfoTabs } from "./shell/VfoTabs";
 import { SpectrumView } from "./spectrum/SpectrumView";
-import { ReceiverDock } from "./vfo/ReceiverDock";
 import { Toaster } from "./ui";
 import { useTheme } from "./ui/theme";
 
@@ -15,11 +18,15 @@ interface Props {
   device?: string;
 }
 
+/**
+ * Fixed shell, the page never scrolls: top bar, the tuning strip, the VFO tab row, the spectrum
+ * with the waterfall filling what is left, the inspector on the right and the status bar. Only the
+ * inspector tab bodies scroll.
+ */
 export function App({ device = "dev0" }: Props) {
   const r = useReceiver(device);
   const [theme, setTheme] = useTheme();
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+  const inspector = useInspector();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
 
@@ -34,26 +41,17 @@ export function App({ device = "dev0" }: Props) {
     centerHz: r.tuningSnap.display?.centerHz ?? null,
     startBookmark: r.startBookmark,
     openHelp: openShortcuts,
+    toggleInspector: inspector.toggle,
   });
 
-  useEffect(() => {
-    if (!drawerOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setDrawerOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [drawerOpen]);
-
   return (
-    <div className="flex h-full flex-col bg-surface-0 text-fg">
+    <div className="flex h-full flex-col overflow-hidden bg-surface-0 text-fg">
       <TopBar
         r={r}
         theme={theme}
         onTheme={setTheme}
         onShortcuts={openShortcuts}
-        drawerOpen={drawerOpen}
-        onMenu={() => setDrawerOpen((o) => !o)}
+        inspector={inspector}
       />
       {r.errors.length > 0 && (
         <div
@@ -63,41 +61,35 @@ export function App({ device = "dev0" }: Props) {
           {r.errors.join(" · ")}
         </div>
       )}
+      <TuningStrip r={r} />
       <div className="flex min-h-0 flex-1">
-        <Sidebar r={r} open={drawerOpen} onClose={closeDrawer} />
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <h1 className="sr-only">Superhet spectrum and waterfall</h1>
-          <div className="min-h-48 flex-1 shrink-0 overflow-hidden rounded-xl border border-border-strong">
-            <SpectrumView
-              device={device}
-              controller={r.levelController}
-              tuning={r.spectrumTuning}
-              vfoCtl={r.vfoCtl}
-              step={r.step}
-              createVfoAt={r.createVfoAt}
-              overlaySettings={r.overlay}
-              bookmarks={r.bookmarks}
-              onAnnotationTune={r.tuneTo}
-              metrics={r.metrics}
-              registerView={r.registerView}
-              onStatus={r.setStatus}
-              onInfo={r.setInfo}
-              onError={r.setSpectrumError}
-            />
+          <VfoTabs r={r} />
+          <div className="min-h-0 flex-1 p-3">
+            <div className="size-full overflow-hidden rounded-xl border border-border-strong">
+              <SpectrumView
+                device={device}
+                controller={r.levelController}
+                tuning={r.spectrumTuning}
+                vfoCtl={r.vfoCtl}
+                step={r.step}
+                createVfoAt={r.createVfoAt}
+                overlaySettings={r.overlay}
+                bookmarks={r.bookmarks}
+                onAnnotationTune={r.tuneTo}
+                metrics={r.metrics}
+                registerView={r.registerView}
+                onStatus={r.setStatus}
+                onInfo={r.setInfo}
+                onError={r.setSpectrumError}
+              />
+            </div>
           </div>
-          <ReceiverDock
-            vfos={r.vfoSnap}
-            audio={r.audio}
-            audioSnap={r.audioSnap}
-            locked={r.locks.length > 0}
-            autoSquelch={r.autoSquelch}
-            onCreate={() => r.createVfoAt(r.tuningSnap.display?.centerHz ?? null)}
-            onSelect={(id) => r.vfoCtl.select(id)}
-            onUpdate={(id, patch) => r.vfoCtl.update(id, patch)}
-            onRemove={(id) => r.vfoCtl.remove(id)}
-          />
         </main>
+        <Inspector r={r} inspector={inspector} />
       </div>
+      <MobileTabBar inspector={inspector} />
       <StatusBar audio={r.audio} metrics={r.metrics} />
       <BookmarkEditorHost store={r.bookmarks} />
       {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}

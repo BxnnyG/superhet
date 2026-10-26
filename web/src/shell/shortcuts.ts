@@ -19,6 +19,8 @@ export type ShortcutAction =
   | { type: "zoomReset" }
   | { type: "newVfo" }
   | { type: "delete" }
+  /** Show / hide the inspector. */
+  | { type: "inspector" }
   | { type: "help" };
 
 /** Modes on keys 1-6. */
@@ -67,6 +69,8 @@ export function shortcutFor(e: KeyLike): ShortcutAction | null {
       return { type: "delete" };
     case "?":
       return { type: "help" };
+    case "]":
+      return { type: "inspector" };
   }
   if (/^[1-6]$/.test(e.key)) {
     const entry = MODE_KEYS[Number(e.key) - 1];
@@ -151,6 +155,12 @@ export const SHORTCUT_GROUPS: readonly {
       { keys: ["0"], label: "Reset zoom" },
       { keys: ["Wheel"], label: "Zoom around the pointer (also over a VFO)" },
       { keys: ["Shift", "Wheel"], label: "Tune the active VFO by one step per notch" },
+    ],
+  },
+  {
+    title: "Layout",
+    items: [
+      { keys: ["]"], label: "Show / hide the inspector" },
       { keys: ["?"], label: "Show this list" },
     ],
   },

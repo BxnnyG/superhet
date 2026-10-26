@@ -12,12 +12,13 @@ interface Props {
 }
 
 /** Audio on/off (a user gesture is required by the autoplay policy). */
-export function AudioButton({ audio, snapshot }: Props) {
+export function AudioButton({ audio, snapshot, className }: Props & { className?: string }) {
   const { enabled, starting, unsupported } = snapshot;
   return (
     <Button
       variant={enabled ? "secondary" : "primary"}
       size="md"
+      className={className}
       aria-pressed={enabled}
       aria-label={enabled ? "Audio on" : "Audio off"}
       disabled={starting || unsupported !== null}

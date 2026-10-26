@@ -180,6 +180,18 @@ export const PauseIcon = (p: IconProps) => (
     <path d="M9 5v14M15 5v14" />
   </Icon>
 );
+export const SearchIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="11" cy="11" r="6" />
+    <path d="M20 20l-4.2-4.2" />
+  </Icon>
+);
+export const PanelRightIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M15 4v16" />
+  </Icon>
+);
 export const BookmarkIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M7 4h10a1 1 0 011 1v15l-6-4-6 4V5a1 1 0 011-1z" />

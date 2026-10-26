@@ -41,6 +41,7 @@ function context(vfos: Vfo[], selectedId: number | null, patch: Partial<Shortcut
     createVfoAt: vi.fn(),
     startBookmark: vi.fn(),
     openHelp: vi.fn(),
+    toggleInspector: vi.fn(),
   };
   const ctx: ShortcutContext = {
     vfoCtl: {
@@ -63,6 +64,7 @@ function context(vfos: Vfo[], selectedId: number | null, patch: Partial<Shortcut
     centerHz: 100_000_000,
     startBookmark: calls.startBookmark,
     openHelp: calls.openHelp,
+    toggleInspector: calls.toggleInspector,
     ...patch,
   };
   return { ctx, calls };
@@ -92,6 +94,7 @@ describe("key map", () => {
     expect(shortcutFor(key("n"))).toEqual({ type: "newVfo" });
     expect(shortcutFor(key("Delete"))).toEqual({ type: "delete" });
     expect(shortcutFor(key("?", { shiftKey: true }))).toEqual({ type: "help" });
+    expect(shortcutFor(key("]"))).toEqual({ type: "inspector" });
   });
 
   it("leaves unmapped keys and browser shortcuts alone", () => {
@@ -216,6 +219,8 @@ describe("actions", () => {
     runShortcut({ type: "bookmark" }, ctx);
     runShortcut({ type: "autoSquelch" }, ctx);
     runShortcut({ type: "help" }, ctx);
+    runShortcut({ type: "inspector" }, ctx);
+    expect(calls.toggleInspector).toHaveBeenCalled();
     expect(calls.zoom).toHaveBeenCalledWith(0.5);
     expect(calls.startBookmark).toHaveBeenCalled();
     expect(calls.toggle).toHaveBeenCalled();

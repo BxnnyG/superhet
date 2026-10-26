@@ -18,6 +18,8 @@ export { RowButton } from "./RowButton";
 export { SegmentedControl, type SegmentOption } from "./SegmentedControl";
 export { Select, type SelectOption } from "./Select";
 export { Slider, markerLeft } from "./Slider";
+export { PlainButton } from "./PlainButton";
+export { Popover } from "./Popover";
 export { PasswordField, TextField } from "./TextField";
 export { Toaster } from "./Toast";
 export { ToastStore, toasts, type ToastAction, type ToastInput, type ToastTone } from "./toast";

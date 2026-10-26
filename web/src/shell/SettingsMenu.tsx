@@ -52,6 +52,7 @@ export function SettingsMenu({ theme, onTheme, onShortcuts }: Props) {
     <div ref={rootRef} className="relative">
       <IconButton
         label="Settings"
+        className="max-phone:size-11"
         tooltipAlign="end"
         aria-expanded={open}
         aria-haspopup="dialog"
