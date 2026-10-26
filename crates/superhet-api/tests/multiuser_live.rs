@@ -9,6 +9,18 @@ use std::time::{Duration, Instant};
 use common::*;
 use serde_json::{Value, json};
 
+/// The API without a bus, whatever `SUPERHET_NATS_URL` the environment (CI) carries: these tests
+/// expect the gateways to answer 503.
+fn spawn_plain_api(
+    db_url: &str,
+    configure: impl FnOnce(&mut std::process::Command),
+) -> (Proc, u16) {
+    spawn_api(db_url, |c| {
+        c.env_remove("SUPERHET_NATS_URL");
+        configure(c);
+    })
+}
+
 macro_rules! start {
     ($tag:expr) => {
         start!($tag, |_| {})
@@ -18,7 +30,7 @@ macro_rules! start {
             eprintln!("DATABASE_URL not set; skipping");
             return;
         };
-        let (api, port) = spawn_api(&db.url, $configure);
+        let (api, port) = spawn_plain_api(&db.url, $configure);
         wait_ready(port, "api").await;
         let admin = setup_admin(port);
         (db, api, port, admin)
