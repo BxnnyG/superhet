@@ -398,9 +398,9 @@ async fn limit_of_10000_bookmarks() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn bulk_body_limit_is_2_mib() {
+async fn bulk_body_limit_is_8_mib() {
     let (_db, _api, client) = start!("bm_body");
-    let padding = "x".repeat(2 * 1024 * 1024);
+    let padding = "x".repeat(8 * 1024 * 1024);
     let reply = client.send(
         "POST",
         "/api/v1/bookmarks/bulk",
@@ -414,4 +414,187 @@ async fn bulk_body_limit_is_2_mib() {
         Some(json!({"name": "a", "freq_hz": 1, "notes": "n".repeat(20_000)})),
     );
     assert_eq!(reply.status, 413, "{reply:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn full_receiver_state_and_groups() {
+    let (_db, _api, client) = start!("bm_v2");
+
+    // v1-style bookmarks read back with neutral v2 fields.
+    let plain = client.create(json!({"name": "plain", "freq_hz": 100_000_000}));
+    assert_eq!(plain["squelch_auto"], false);
+    assert_eq!(plain["favourite"], false);
+    assert_eq!(plain["digital"], Value::Null);
+    assert_eq!(plain["group_id"], Value::Null);
+    assert_eq!(
+        plain["scan"],
+        json!({"include": false, "priority": null, "dwell_ms": null})
+    );
+    for null in ["squelch_db", "step_hz", "tone_mode", "ctcss_hz", "dcs_code"] {
+        assert_eq!(plain[null], Value::Null, "{null}");
+    }
+
+    // Groups: create, duplicate (case-insensitive), order, rename.
+    let group = |client: &Client, name: &str| -> Value {
+        let reply = client.send(
+            "POST",
+            "/api/v1/bookmark-groups",
+            Some(json!({"name": name})),
+        );
+        assert_eq!(reply.status, 201, "{reply:?}");
+        reply.json()
+    };
+    let air = group(&client, "Airband");
+    let tetra = group(&client, " TETRA ");
+    assert_eq!(tetra["name"], "TETRA");
+    assert_eq!(
+        (air["position"].clone(), tetra["position"].clone()),
+        (json!(0), json!(1))
+    );
+    let reply = client.send(
+        "POST",
+        "/api/v1/bookmark-groups",
+        Some(json!({"name": "airband"})),
+    );
+    assert_eq!((reply.status, code(&reply)), (409, json!("duplicate")));
+    for bad in [
+        json!({"name": ""}),
+        json!({"name": "x".repeat(61)}),
+        json!({}),
+    ] {
+        let reply = client.send("POST", "/api/v1/bookmark-groups", Some(bad));
+        assert_eq!((reply.status, code(&reply)), (400, json!("invalid")));
+    }
+    let (air_id, tetra_id) = (
+        air["id"].as_str().expect("id").to_owned(),
+        tetra["id"].as_str().expect("id").to_owned(),
+    );
+    let reply = client.send(
+        "PUT",
+        "/api/v1/bookmark-groups/order",
+        Some(json!({"ids": [tetra_id, air_id]})),
+    );
+    assert_eq!(reply.status, 200, "{reply:?}");
+    let names: Vec<_> = reply.json()["groups"]
+        .as_array()
+        .expect("groups")
+        .iter()
+        .map(|g| g["name"].clone())
+        .collect();
+    assert_eq!(names, [json!("TETRA"), json!("Airband")]);
+    let reply = client.send(
+        "PUT",
+        "/api/v1/bookmark-groups/order",
+        Some(json!({"ids": ["0f8fad5b-d9cb-469f-a165-70867728950e"]})),
+    );
+    assert_eq!((reply.status, code(&reply)), (400, json!("invalid")));
+    let reply = client.send(
+        "PATCH",
+        &format!("/api/v1/bookmark-groups/{air_id}"),
+        Some(json!({"name": "Aero"})),
+    );
+    assert_eq!(reply.json()["name"], "Aero");
+
+    // A bookmark with the whole state.
+    let full = client.create(json!({
+        "name": "Dispatch", "freq_hz": 392_000_000, "mode": "nfm", "bandwidth_hz": 25_000,
+        "squelch_db": -75, "squelch_auto": true, "step_hz": 25_000,
+        "tone_mode": "dcs", "dcs_code": 23, "dcs_polarity": "R", "ctcss_hz": 88.5,
+        "digital": {"protocol": "tetra", "timeslot": 3, "talkgroup": 262_001, "mcc": 262,
+                    "mnc": 1, "decoder_plugin_id": "tetra-kit"},
+        "group_id": tetra_id, "favourite": true,
+        "scan": {"include": true, "priority": 2, "dwell_ms": 3000},
+    }));
+    assert_eq!(full["tone_mode"], "dcs");
+    assert_eq!(full["dcs_code"], 23);
+    assert_eq!(full["dcs_polarity"], "R");
+    assert_eq!(
+        full["ctcss_hz"],
+        Value::Null,
+        "tone fields follow the tone mode"
+    );
+    assert_eq!(full["digital"]["timeslot"], 3);
+    assert_eq!(full["digital"]["talkgroup"], 262_001);
+    assert_eq!(
+        full["scan"],
+        json!({"include": true, "priority": 2, "dwell_ms": 3000})
+    );
+    assert_eq!(full["group_id"], tetra_id);
+    assert_eq!(full["squelch_db"], -75);
+    assert_eq!(full["squelch_auto"], true);
+
+    // Patch: switch the tone, clear digital and the group, keep the rest.
+    let path = format!("/api/v1/bookmarks/{}", full["id"].as_str().expect("id"));
+    let reply = client.send(
+        "PATCH",
+        &path,
+        Some(
+            json!({"tone_mode": "ctcss", "ctcss_hz": 123.0, "digital": null, "group_id": null,
+                    "squelch_db": null, "scan": {"include": false}}),
+        ),
+    );
+    assert_eq!(reply.status, 200, "{reply:?}");
+    let patched = reply.json();
+    assert_eq!(patched["ctcss_hz"], 123.0);
+    assert_eq!(patched["dcs_code"], Value::Null);
+    assert_eq!(patched["digital"], Value::Null);
+    assert_eq!(patched["group_id"], Value::Null);
+    assert_eq!(patched["squelch_db"], Value::Null);
+    assert_eq!(patched["favourite"], true);
+    assert_eq!(patched["scan"]["include"], false);
+    assert_eq!(patched["name"], "Dispatch");
+
+    // Unknown group and read-only fields are rejected; nothing changes.
+    for body in [
+        json!({"group_id": "0f8fad5b-d9cb-469f-a165-70867728950e"}),
+        json!({"tone_mode": "dcs"}),
+        json!({"digital": {"protocol": "dmr", "timeslot": 3}}),
+    ] {
+        let reply = client.send("PATCH", &path, Some(body.clone()));
+        assert_eq!(
+            (reply.status, code(&reply)),
+            (400, json!("invalid")),
+            "{body}"
+        );
+    }
+    let reply = client.send(
+        "POST",
+        "/api/v1/bookmarks",
+        Some(
+            json!({"name": "x", "freq_hz": 1, "group_id": "0f8fad5b-d9cb-469f-a165-70867728950e"}),
+        ),
+    );
+    assert_eq!((reply.status, code(&reply)), (400, json!("invalid")));
+
+    // Export/import round trip keeps everything (group ids must still exist).
+    let again = client.create(json!({"name": "g", "freq_hz": 7, "group_id": tetra_id}));
+    let export = client.list();
+    let reply = client.send(
+        "POST",
+        "/api/v1/bookmarks/bulk",
+        Some(json!({"replace": true, "bookmarks": export})),
+    );
+    assert_eq!(reply.json(), json!({"v": 1, "created": 3}), "{reply:?}");
+    let restored = client.list();
+    let item = restored.iter().find(|b| b["name"] == "g").expect("g");
+    assert_eq!(item["group_id"], again["group_id"]);
+
+    // Deleting a group keeps its bookmarks, ungrouped.
+    let reply = client.send(
+        "DELETE",
+        &format!("/api/v1/bookmark-groups/{tetra_id}"),
+        None,
+    );
+    assert_eq!(reply.status, 204, "{reply:?}");
+    let after = client.list();
+    assert_eq!(after.len(), 3);
+    assert!(after.iter().all(|b| b["group_id"] == Value::Null));
+    let reply = client.send(
+        "DELETE",
+        &format!("/api/v1/bookmark-groups/{tetra_id}"),
+        None,
+    );
+    assert_eq!((reply.status, code(&reply)), (404, json!("not_found")));
+    let reply = client.send("GET", "/api/v1/bookmark-groups", None);
+    assert_eq!(reply.json()["groups"].as_array().map(Vec::len), Some(1));
 }

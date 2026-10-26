@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CATEGORIES } from "../bandplan/data";
 import { builtinBandPlan } from "../bandplan/model";
-import type { Bookmark } from "../bookmarks/model";
+import { newInput, type Bookmark } from "../bookmarks/model";
 import {
   AnnotationLayer,
   CHANNEL_LANE_H,
@@ -20,14 +20,14 @@ const all = new Set(CATEGORIES.map((c) => c.id));
 const measure = (t: string) => t.length * 5;
 
 const bookmark = (over: Partial<Bookmark> = {}): Bookmark => ({
+  ...newInput({
+    name: "Home repeater",
+    freqHz: 438_650_000,
+    mode: "nfm",
+    bandwidthHz: 12_500,
+    tags: ["ham"],
+  }),
   id: "1",
-  name: "Home repeater",
-  freqHz: 438_650_000,
-  mode: "nfm",
-  bandwidthHz: 12_500,
-  tags: ["ham"],
-  color: null,
-  notes: null,
   createdMs: 0,
   updatedMs: 0,
   ...over,
@@ -143,7 +143,25 @@ describe("hit testing", () => {
     expect(hitTarget({ kind: "channel", channel: adsb, x: 0 })).toBeNull();
     expect(hitTarget({ kind: "range", range, x: 0 })).toBeNull();
     const plain = bookmark({ mode: null, bandwidthHz: null });
-    expect(hitTarget({ kind: "bookmark", bookmark: plain, x: 0 })).toEqual({ freqHz: 438_650_000 });
+    expect(hitTarget({ kind: "bookmark", bookmark: plain, x: 0 })).toEqual({
+      freqHz: 438_650_000,
+      toneSquelchHz: null,
+    });
+    // A bookmark applies its whole receiver state.
+    const full = bookmark({
+      squelchDb: -80,
+      stepHz: 25_000,
+      toneMode: "ctcss",
+      ctcssHz: 88.5,
+    });
+    expect(hitTarget({ kind: "bookmark", bookmark: full, x: 0 })).toEqual({
+      freqHz: 438_650_000,
+      mode: "nfm",
+      bandwidthHz: 12_500,
+      squelchDbfs: -80,
+      stepHz: 25_000,
+      toneSquelchHz: 88.5,
+    });
     expect(hitTarget(null)).toBeNull();
   });
 });
@@ -172,9 +190,14 @@ describe("tooltips", () => {
   });
 
   it("describes a bookmark", () => {
-    const tip = hitTooltip({ kind: "bookmark", bookmark: bookmark({ notes: "Local" }), x: 0 });
+    const tip = hitTooltip({
+      kind: "bookmark",
+      bookmark: bookmark({ notes: "Local", toneMode: "ctcss", ctcssHz: 88.5 }),
+      x: 0,
+    });
     expect(tip.title).toBe("Home repeater");
     expect(tip.lines.join("|")).toContain("NFM");
+    expect(tip.lines.join("|")).toContain("88.5");
     expect(tip.lines).toContain("Local");
   });
 

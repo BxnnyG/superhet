@@ -16,5 +16,5 @@ async fn migrations_apply_and_are_idempotent() {
         .fetch_one(&pool)
         .await
         .expect("schema_version row");
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
 }

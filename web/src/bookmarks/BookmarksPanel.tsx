@@ -1,41 +1,80 @@
-import { useMemo, useRef, useState, useSyncExternalStore, type ChangeEvent } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ChangeEvent,
+  type MouseEvent,
+} from "react";
 import type { OverlayStore } from "../bandplan/settings";
 import type { AnnotationTarget } from "../spectrum/annotations";
 import { formatFrequency } from "../spectrum/freq";
 import {
   Alert,
-  BookmarkIcon,
+  Badge,
   Button,
+  ChevronDownIcon,
+  ChevronRightIcon,
   ConfirmDialog,
   Dialog,
   EmptyState,
   IconButton,
+  MoreIcon,
+  PlainButton,
   PencilIcon,
-  RowButton,
+  PlusIcon,
   SegmentedControl,
   Select,
-  TextField,
-  Toggle,
+  StarIcon,
   TrashIcon,
+  cn,
   toasts,
 } from "../ui";
 import { MODE_LABEL } from "../vfo/model";
+import { ActionsMenu } from "./ActionsMenu";
 import {
   FORMAT_LABEL,
+  exportChirp,
   exportGqrx,
   exportSuperhet,
   parseImport,
   type ImportResult,
 } from "./formats";
-import { allTags, bookmarkColor, filterBookmarks, newBookmarks, type Bookmark } from "./model";
+import { GroupsDialog } from "./GroupsDialog";
+import {
+  NO_FILTER,
+  SORT_LABEL,
+  allTags,
+  bookmarkColor,
+  bookmarkTarget,
+  digitalBadge,
+  filterBookmarks,
+  groupSections,
+  isFiltering,
+  nearBookmarks,
+  newBookmarks,
+  sortBy,
+  toneBadge,
+  type Bookmark,
+  type Filter,
+  type SortKey,
+} from "./model";
+import { loadPrefs, savePrefs } from "./prefs";
 import type { BookmarkStore } from "./store";
+import { layoutRows, visibleWindow } from "./virtual";
 
 interface Props {
   store: BookmarkStore;
   overlay: OverlayStore;
   /** Frequency of the active VFO, to highlight its bookmark. */
   activeFreqHz: number | null;
+  /** Tune the selected VFO and apply the bookmark's stored receiver state. */
   onTune: (target: AnnotationTarget) => void;
+  /** Alt-click: open the bookmark on a new VFO. Alt-click tunes like a plain click without it. */
+  onTuneNew?: (target: AnnotationTarget) => void;
   /** Open the add dialog prefilled from the receiver. */
   onAdd: () => void;
 }
@@ -62,23 +101,118 @@ function download(name: string, mime: string, text: string): void {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-/** Bookmarks section: list with search and tag filter, add/edit/delete, import/export. */
-export function BookmarksPanel({ store, overlay, activeFreqHz, onTune, onAdd }: Props) {
+const HEAD_H = 28;
+const ITEM_H = 44;
+/** Viewport height assumed until the list has been measured (and in jsdom). */
+const FALLBACK_VIEWPORT_H = 480;
+const UNGROUPED = "none";
+
+type Row =
+  | { kind: "near"; key: string }
+  | { kind: "group"; key: string; id: string; title: string; count: number; folded: boolean }
+  | { kind: "item"; key: string; bookmark: Bookmark };
+
+const rowHeight = (r: Row) => (r.kind === "item" ? ITEM_H : HEAD_H);
+
+/**
+ * Bookmarks section: pinned header (search, group and tag filter, sort, add, "…" menu), then the
+ * list grouped by folder with collapsible groups, a "Near current frequency" block and a
+ * windowed row list so thousands of bookmarks stay cheap. Fills its container; only the list
+ * scrolls.
+ */
+export function BookmarksPanel({ store, overlay, activeFreqHz, onTune, onTuneNew, onAdd }: Props) {
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const show = useSyncExternalStore(overlay.subscribe, overlay.getSnapshot).bookmarks;
-  const [query, setQuery] = useState("");
-  const [tag, setTag] = useState("");
+  const [filter, setFilter] = useState<Filter>(NO_FILTER);
+  const [prefs, setPrefs] = useState(() => loadPrefs());
   const [deleting, setDeleting] = useState<Bookmark | null>(null);
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState<ImportResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [managingGroups, setManagingGroups] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const updatePrefs = (next: typeof prefs) => {
+    setPrefs(next);
+    savePrefs(next);
+  };
+
   const tags = useMemo(() => allTags(snap.bookmarks), [snap.bookmarks]);
+  const tag = tags.includes(filter.tag) ? filter.tag : "";
+  const groupFilter =
+    filter.group === "all" ||
+    filter.group === UNGROUPED ||
+    snap.groups.some((g) => g.id === filter.group)
+      ? filter.group
+      : "all";
+  const effective: Filter = { ...filter, tag, group: groupFilter };
+  const filtering = isFiltering(effective);
+
   const shown = useMemo(
-    () => filterBookmarks(snap.bookmarks, query, tags.includes(tag) ? tag : ""),
-    [snap.bookmarks, query, tag, tags],
+    () =>
+      sortBy(
+        filterBookmarks(snap.bookmarks, effective.query, tag, {
+          group: groupFilter,
+          favouritesOnly: effective.favouritesOnly,
+        }),
+        prefs.sort,
+      ),
+    [snap.bookmarks, effective.query, tag, groupFilter, effective.favouritesOnly, prefs.sort],
   );
+  const near = useMemo(
+    () => (filtering ? [] : nearBookmarks(snap.bookmarks, activeFreqHz)),
+    [filtering, snap.bookmarks, activeFreqHz],
+  );
+
+  const rows = useMemo(() => {
+    const out: Row[] = [];
+    if (near.length > 0) {
+      out.push({ kind: "near", key: "near" });
+      for (const b of near) out.push({ kind: "item", key: `near:${b.id}`, bookmark: b });
+    }
+    const sections = groupSections(shown, snap.groups, filtering);
+    const flat = sections.length === 1 && sections[0]?.group === null;
+    for (const s of sections) {
+      const id = s.group?.id ?? UNGROUPED;
+      const folded = !flat && !filtering && prefs.collapsed.includes(id);
+      if (!flat) {
+        out.push({
+          kind: "group",
+          key: `group:${id}`,
+          id,
+          title: s.group?.name ?? "Ungrouped",
+          count: s.items.length,
+          folded,
+        });
+      }
+      if (!folded) for (const b of s.items) out.push({ kind: "item", key: b.id, bookmark: b });
+    }
+    return out;
+  }, [near, shown, snap.groups, filtering, prefs.collapsed]);
+
+  const heights = useMemo(() => rows.map(rowHeight), [rows]);
+  const layout = useMemo(() => layoutRows(heights), [heights]);
+  const scroller = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportH, setViewportH] = useState(FALLBACK_VIEWPORT_H);
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = () => setViewportH(el.clientHeight || FALLBACK_VIEWPORT_H);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const win = visibleWindow(layout, heights, scrollTop, viewportH);
+
+  const toggleFold = (id: string) =>
+    updatePrefs({
+      ...prefs,
+      collapsed: prefs.collapsed.includes(id)
+        ? prefs.collapsed.filter((x) => x !== id)
+        : [...prefs.collapsed, id],
+    });
 
   const remove = async (b: Bookmark) => {
     setBusy(true);
@@ -89,6 +223,29 @@ export function BookmarksPanel({ store, overlay, activeFreqHz, onTune, onAdd }: 
       toasts.push({ tone: "danger", title: "Could not delete the bookmark", body: error });
     }
   };
+
+  const toggleFavourite = useCallback(
+    async (b: Bookmark) => {
+      const error = await store.update(b.id, { favourite: !b.favourite });
+      if (error !== null) {
+        toasts.push({ tone: "danger", title: "Could not update the bookmark", body: error });
+      }
+    },
+    [store],
+  );
+
+  const tune = useCallback(
+    (b: Bookmark, e: MouseEvent) => {
+      const target = bookmarkTarget(b);
+      if (e.altKey && onTuneNew) onTuneNew(target);
+      else onTune(target);
+    },
+    [onTune, onTuneNew],
+  );
+  const edit = useCallback(
+    (b: Bookmark) => store.openEditor({ kind: "edit", bookmark: b }),
+    [store],
+  );
 
   const onFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -103,138 +260,204 @@ export function BookmarksPanel({ store, overlay, activeFreqHz, onTune, onAdd }: 
     }
   };
 
+  const empty = snap.bookmarks.length === 0;
+  const set = (patch: Partial<Filter>) => setFilter({ ...effective, ...patch });
+
   return (
-    <div className="flex flex-col gap-3" role="group" aria-label="Bookmarks">
-      <Toggle
-        label="Show on spectrum"
-        checked={show}
-        onChange={(on) => overlay.set({ bookmarks: on })}
-      />
-      <Button icon={<BookmarkIcon />} onClick={onAdd}>
-        Add bookmark…
-      </Button>
-      {snap.error !== null && (
-        <Alert tone="warn">
-          <p>Bookmarks are unavailable: {snap.error}</p>
-          <Button size="sm" className="mt-2" onClick={() => void store.refresh()}>
-            Retry
-          </Button>
-        </Alert>
-      )}
-      {snap.bookmarks.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <TextField
-            label="Search bookmarks"
+    <div className="flex h-full min-h-0 flex-col" role="group" aria-label="Bookmarks">
+      <div className="flex shrink-0 flex-col gap-2 border-b border-border pb-2">
+        <div className="flex items-center gap-1">
+          <input
             type="search"
-            value={query}
+            aria-label="Search bookmarks"
+            placeholder="Search name, tag, MHz, tone…"
+            value={filter.query}
             autoComplete="off"
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => set({ query: e.target.value })}
+            className="focus-ring h-8 min-w-0 flex-1 rounded-md border border-border-strong bg-surface-1 px-2.5 text-sm text-fg placeholder:text-fg-subtle"
           />
-          {tags.length > 0 && (
+          <IconButton label="Add bookmark…" onClick={onAdd}>
+            <PlusIcon />
+          </IconButton>
+          <ActionsMenu
+            label="More bookmark actions"
+            icon={<MoreIcon />}
+            actions={[
+              { label: "Import…", onSelect: () => fileRef.current?.click() },
+              {
+                label: "Export JSON",
+                disabled: empty,
+                onSelect: () =>
+                  download(
+                    "superhet-bookmarks.json",
+                    "application/json",
+                    exportSuperhet(snap.bookmarks, snap.groups),
+                  ),
+              },
+              {
+                label: "Export gqrx CSV",
+                disabled: empty,
+                onSelect: () => download("bookmarks.csv", "text/csv", exportGqrx(snap.bookmarks)),
+              },
+              {
+                label: "Export CHIRP CSV",
+                disabled: empty,
+                onSelect: () =>
+                  download("bookmarks-chirp.csv", "text/csv", exportChirp(snap.bookmarks)),
+              },
+              { label: "Manage groups…", separated: true, onSelect: () => setManagingGroups(true) },
+              {
+                label: "Show on spectrum",
+                checked: show,
+                onSelect: () => overlay.set({ bookmarks: !show }),
+              },
+            ]}
+          />
+        </div>
+        {!empty && (
+          <div className="flex items-center gap-1">
             <Select
-              label="Tag"
-              value={tags.includes(tag) ? tag : ""}
-              onChange={setTag}
+              aria-label="Group"
+              size="sm"
+              className="flex-1"
+              value={groupFilter}
+              onChange={(group) => set({ group })}
               options={[
-                { value: "", label: "All tags" },
-                ...tags.map((t) => ({ value: t, label: t })),
+                { value: "all", label: "All groups" },
+                ...snap.groups.map((g) => ({ value: g.id, label: g.name })),
+                { value: UNGROUPED, label: "Ungrouped" },
               ]}
             />
-          )}
-        </div>
-      )}
-      {!snap.loaded && snap.error === null && <p className="text-xs text-fg-subtle">Loading…</p>}
-      {snap.loaded && snap.error === null && snap.bookmarks.length === 0 && (
-        <EmptyState title="No bookmarks yet">
-          Press the star next to the frequency or “Add bookmark…”, or import a list.
-        </EmptyState>
-      )}
-      {snap.bookmarks.length > 0 && shown.length === 0 && (
-        <p className="text-xs text-fg-muted">No bookmark matches.</p>
-      )}
-      {shown.length > 0 && (
-        <ul className="flex flex-col gap-0.5" aria-label="Bookmark list">
-          {shown.map((b) => (
-            <li key={b.id} className="flex items-center gap-0.5">
-              <RowButton
-                selected={
-                  activeFreqHz !== null && Math.round(activeFreqHz) === Math.round(b.freqHz)
-                }
+            {tags.length > 0 && (
+              <Select
+                aria-label="Tag"
+                size="sm"
                 className="flex-1"
-                aria-label={`Tune to ${b.name}`}
-                title={b.tags.length > 0 ? b.tags.join(", ") : undefined}
-                onClick={() =>
-                  onTune({
-                    freqHz: b.freqHz,
-                    ...(b.mode ? { mode: b.mode } : {}),
-                    ...(b.bandwidthHz ? { bandwidthHz: b.bandwidthHz } : {}),
-                  })
-                }
-              >
-                <span
-                  aria-hidden="true"
-                  className="size-2 shrink-0 rounded-full"
-                  style={{ background: bookmarkColor(b) }}
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm leading-tight text-fg">{b.name}</span>
-                  <span className="block truncate text-xs leading-tight text-fg-muted num">
-                    {formatFrequency(b.freqHz).slice(0, -4)} MHz
-                    {b.mode ? ` · ${MODE_LABEL[b.mode]}` : ""}
-                  </span>
-                </span>
-              </RowButton>
-              <IconButton
-                label={`Edit bookmark ${b.name}`}
-                size="sm"
-                onClick={() => store.openEditor({ kind: "edit", bookmark: b })}
-              >
-                <PencilIcon size={14} />
-              </IconButton>
-              <IconButton
-                label={`Delete bookmark ${b.name}`}
-                size="sm"
-                disabled={busy}
-                onClick={() => setDeleting(b)}
-              >
-                <TrashIcon size={14} />
-              </IconButton>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Import and export">
-        <Button size="sm" onClick={() => fileRef.current?.click()}>
-          Import…
-        </Button>
-        <Button
-          size="sm"
-          disabled={snap.bookmarks.length === 0}
-          onClick={() =>
-            download("superhet-bookmarks.json", "application/json", exportSuperhet(snap.bookmarks))
-          }
-        >
-          Export JSON
-        </Button>
-        <Button
-          size="sm"
-          disabled={snap.bookmarks.length === 0}
-          onClick={() => download("bookmarks.csv", "text/csv", exportGqrx(snap.bookmarks))}
-        >
-          Export gqrx CSV
-        </Button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".json,.csv,.txt,application/json,text/csv,text/plain"
-          aria-label="Bookmark file to import"
-          className="sr-only"
-          tabIndex={-1}
-          onChange={(e) => void onFile(e)}
-        />
+                value={tag}
+                onChange={(t) => set({ tag: t })}
+                options={[
+                  { value: "", label: "All tags" },
+                  ...tags.map((t) => ({ value: t, label: t })),
+                ]}
+              />
+            )}
+            <Select
+              aria-label="Sort bookmarks"
+              size="sm"
+              className="flex-1"
+              value={prefs.sort}
+              onChange={(sort) => updatePrefs({ ...prefs, sort: sort as SortKey })}
+              options={(Object.keys(SORT_LABEL) as SortKey[]).map((k) => ({
+                value: k,
+                label: SORT_LABEL[k],
+              }))}
+            />
+            <IconButton
+              label="Favourites only"
+              size="sm"
+              pressed={filter.favouritesOnly}
+              onClick={() => set({ favouritesOnly: !filter.favouritesOnly })}
+            >
+              <StarIcon size={14} fill={filter.favouritesOnly ? "currentColor" : "none"} />
+            </IconButton>
+          </div>
+        )}
       </div>
-      {importError !== null && <Alert tone="danger">{importError}</Alert>}
+
+      <div
+        ref={scroller}
+        className="min-h-0 flex-1 overflow-y-auto pt-2"
+        onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+      >
+        {snap.error !== null && (
+          <Alert tone="warn">
+            <p>Bookmarks are unavailable: {snap.error}</p>
+            <Button size="sm" className="mt-2" onClick={() => void store.refresh()}>
+              Retry
+            </Button>
+          </Alert>
+        )}
+        {!snap.loaded && snap.error === null && <p className="text-xs text-fg-subtle">Loading…</p>}
+        {snap.loaded && snap.error === null && empty && (
+          <EmptyState title="No bookmarks yet">
+            Press the star next to the frequency or the + above, or import a list from the “…” menu.
+          </EmptyState>
+        )}
+        {!empty && shown.length === 0 && (
+          <p className="text-xs text-fg-muted">No bookmark matches.</p>
+        )}
+        {rows.length > 0 && (
+          <div role="list" aria-label="Bookmark list">
+            <div style={{ height: layout.offsets[win.start] ?? 0 }} aria-hidden="true" />
+            {rows.slice(win.start, win.end).map((row) => {
+              if (row.kind === "near") {
+                return (
+                  <div
+                    key={row.key}
+                    role="presentation"
+                    style={{ height: HEAD_H }}
+                    className="flex items-center px-1 text-[11px] font-medium tracking-wide text-fg-subtle uppercase"
+                  >
+                    Near current frequency
+                  </div>
+                );
+              }
+              if (row.kind === "group") {
+                return (
+                  <PlainButton
+                    key={row.key}
+                    aria-expanded={!row.folded}
+                    disabled={filtering}
+                    style={{ height: HEAD_H }}
+                    onClick={() => toggleFold(row.id)}
+                    className="flex w-full items-center gap-1.5 rounded-md px-1 text-left text-[11px] font-medium tracking-wide text-fg-subtle uppercase hover:text-fg"
+                  >
+                    {row.folded ? <ChevronRightIcon size={12} /> : <ChevronDownIcon size={12} />}
+                    <span className="min-w-0 flex-1 truncate">{row.title}</span>
+                    <span className="num">{row.count}</span>
+                  </PlainButton>
+                );
+              }
+              return (
+                <BookmarkRow
+                  key={row.key}
+                  bookmark={row.bookmark}
+                  active={
+                    activeFreqHz !== null &&
+                    Math.round(activeFreqHz) === Math.round(row.bookmark.freqHz)
+                  }
+                  busy={busy}
+                  onTune={tune}
+                  onEdit={edit}
+                  onDelete={setDeleting}
+                  onFavourite={toggleFavourite}
+                />
+              );
+            })}
+            <div
+              style={{
+                height: Math.max(0, layout.total - (layout.offsets[win.end] ?? layout.total)),
+              }}
+              aria-hidden="true"
+            />
+          </div>
+        )}
+        {importError !== null && (
+          <div className="pt-2">
+            <Alert tone="danger">{importError}</Alert>
+          </div>
+        )}
+      </div>
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".json,.csv,.txt,application/json,text/csv,text/plain"
+        aria-label="Bookmark file to import"
+        className="sr-only"
+        tabIndex={-1}
+        onChange={(e) => void onFile(e)}
+      />
 
       {deleting !== null && (
         <ConfirmDialog
@@ -248,6 +471,7 @@ export function BookmarksPanel({ store, overlay, activeFreqHz, onTune, onAdd }: 
           “{deleting.name}” will be removed permanently.
         </ConfirmDialog>
       )}
+      {managingGroups && <GroupsDialog store={store} onClose={() => setManagingGroups(false)} />}
       {importing !== null && (
         <ImportDialog
           result={importing}
@@ -269,6 +493,110 @@ export function BookmarksPanel({ store, overlay, activeFreqHz, onTune, onAdd }: 
     </div>
   );
 }
+
+interface RowProps {
+  bookmark: Bookmark;
+  active: boolean;
+  busy: boolean;
+  onTune: (b: Bookmark, e: MouseEvent) => void;
+  onEdit: (b: Bookmark) => void;
+  onDelete: (b: Bookmark) => void;
+  onFavourite: (b: Bookmark) => void;
+}
+
+/** "name · freq · mode · tone badge" with edit and delete on hover (always shown on touch). */
+const BookmarkRow = memo(function BookmarkRow({
+  bookmark: b,
+  active,
+  busy,
+  onTune,
+  onEdit,
+  onDelete,
+  onFavourite,
+}: RowProps) {
+  const tone = toneBadge(b);
+  const digital = digitalBadge(b);
+  return (
+    <div role="listitem" style={{ height: ITEM_H }} className="group flex items-center gap-0.5">
+      <PlainButton
+        aria-pressed={active}
+        aria-label={`Tune to ${b.name}`}
+        title={[
+          b.tags.length > 0 ? b.tags.join(", ") : null,
+          "Click to tune, Alt-click for a new VFO, double-click to edit",
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+        onClick={(e) => onTune(b, e)}
+        onDoubleClick={() => onEdit(b)}
+        className={cn(
+          "flex h-10 min-w-0 flex-1 items-center gap-2 rounded-md border px-2.5 text-left",
+          "transition-colors duration-150",
+          active ? "border-accent/50 bg-accent-soft" : "border-transparent hover:bg-surface-2",
+        )}
+      >
+        <span
+          aria-hidden="true"
+          className="size-2 shrink-0 rounded-full"
+          style={{ background: bookmarkColor(b) }}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1 text-sm leading-tight text-fg">
+            <span className="truncate">{b.name}</span>
+            {b.favourite && (
+              <StarIcon size={11} fill="currentColor" className="shrink-0 text-warn" />
+            )}
+          </span>
+          <span className="flex items-center gap-1.5 text-xs leading-tight text-fg-muted">
+            <span className="truncate num">
+              {formatFrequency(b.freqHz).slice(0, -4)} MHz
+              {b.mode ? ` · ${MODE_LABEL[b.mode]}` : ""}
+            </span>
+            {tone !== null && (
+              <Badge
+                tone="accent"
+                title={b.toneMode === "dcs" ? "DCS (stored only, not detected yet)" : "CTCSS"}
+                className="h-4 shrink-0 px-1.5 text-[10px]"
+              >
+                {tone}
+              </Badge>
+            )}
+            {digital !== null && (
+              <Badge tone="neutral" className="h-4 shrink-0 px-1.5 text-[10px]">
+                {digital}
+              </Badge>
+            )}
+          </span>
+        </span>
+      </PlainButton>
+      <div
+        className={cn(
+          "flex shrink-0 items-center opacity-0 transition-opacity",
+          "group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100",
+        )}
+      >
+        <IconButton
+          label={b.favourite ? `Unfavourite ${b.name}` : `Favourite ${b.name}`}
+          size="sm"
+          onClick={() => onFavourite(b)}
+        >
+          <StarIcon size={14} fill={b.favourite ? "currentColor" : "none"} />
+        </IconButton>
+        <IconButton label={`Edit bookmark ${b.name}`} size="sm" onClick={() => onEdit(b)}>
+          <PencilIcon size={14} />
+        </IconButton>
+        <IconButton
+          label={`Delete bookmark ${b.name}`}
+          size="sm"
+          disabled={busy}
+          onClick={() => onDelete(b)}
+        >
+          <TrashIcon size={14} />
+        </IconButton>
+      </div>
+    </div>
+  );
+});
 
 type ImportMode = "merge" | "replace";
 
