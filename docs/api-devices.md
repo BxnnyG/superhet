@@ -8,7 +8,12 @@ and exclusive claims.
 ## REST (superhet-api, port 8073)
 
 All routes require a session cookie and answer `401 {"error":"unauthenticated"}` without one
-(`docs/api-auth.md`).
+(`docs/api-auth.md`). Roles (`docs/api-users.md`): `state`, `vfos` (list/create/update/delete) are
+open to every signed-in caller including guests, subject to VFO ownership and the guest policy;
+`tune` and the lock routes need `operator`. Refusals are `403`: `forbidden` (role), `not_owner`,
+`vfo_limit`, `mode_not_allowed`, `frequency_not_allowed`, `locked` (guest policy), with the
+device error shape below. The state is prepared per viewer: each VFO gets `"mine"`, `owner` is only
+shown to operators and admins, guests do not see lock holder names.
 `{dev}` is the device id (`SUPERHET_DEVICE_ID` of the daemon).
 
 ### `GET /api/v1/devices/{dev}/state`
@@ -36,8 +41,9 @@ Body (at most 4 KiB, `Content-Type: application/json`), every field optional but
 
 ### Tuning lock routes
 
-`POST /api/v1/devices/{dev}/lock` takes the user lock, `DELETE /api/v1/devices/{dev}/lock`
-releases it. No body. Both are idempotent and answer `200` with `{"v":1,"ok":true,"state":{...}}`
+`POST /api/v1/devices/{dev}/lock` takes the lock for the calling account (`holder u:<id>`),
+`DELETE /api/v1/devices/{dev}/lock` releases the caller's own lock; `DELETE ...?force=true`
+(admin only) releases every user lock. Role `operator`. No body. Both are idempotent and answer `200` with `{"v":1,"ok":true,"state":{...}}`
 (the state carries `locks`). Same CSRF policy and error shape as `/tune`. Semantics: "Tuning lock".
 
 ### VFO routes
@@ -56,7 +62,7 @@ fields and limits: section "VFOs" below. Bodies are at most 4 KiB, `Content-Type
   `deemphasis`, `cw_pitch_hz` and `stereo`. `200` with the daemon's reply.
 - `DELETE`: `204` without body.
 - Errors use the shape of the tune route: `400` invalid body/value, non-numeric id, or the daemon's
-  `invalid`/`unsupported` (including the limit of 8 VFOs); `404` the daemon's `not_found` (unknown
+  `invalid`/`unsupported` (including the daemon's VFO limit, `SUPERHET_MAX_VFOS`, default 8); `404` the daemon's `not_found` (unknown
   VFO id, PATCH and DELETE); `403` `Origin` not allowed; `413`; `415`; `502`; `503`; `504` as for
   `/tune`.
 - Same CSRF policy as `/tune`; audio is fetched through the audio WebSocket
@@ -71,8 +77,11 @@ fields and limits: section "VFOs" below. Bodies are at most 4 KiB, `Content-Type
   to every requester. A caller whose request was superseded sees the final state in the reply.
 - `sh.v1.dev.<dev>.ctl.state` (request/reply): reply `{"v":1,"ok":true,"state":{...}}`.
 - Unknown commands are answered with `ok:false`, `code:"invalid"`.
-- `sh.v1.dev.<dev>.ctl.lock.acquire` / `.ctl.lock.release` (request/reply): body `{"v":1}`, reply
-  as `ctl.state`. Take or drop the user lock (idempotent).
+- `sh.v1.dev.<dev>.ctl.lock.acquire` / `.ctl.lock.release` (request/reply): body `{"v":1}` (the
+  anonymous holder `user`, as before accounts existed) or `{"v":1,"holder":"u:3","name":"alice"}`
+  (acquire: holder id and display name; release: `{"v":1,"holder":"u:3"}`, or `{"v":1,"force":true}`
+  to drop every user lock). Reply as `ctl.state`. Take or drop the lock (idempotent per holder).
+  `holder` is 1..64 characters of `[A-Za-z0-9:._-]`, `name` 1..64 printable characters.
 - `sh.v1.dev.<dev>.ctl.profile.load` (request/reply): `{"v":1,"profile":{...}}` (the profile
   document, `docs/api-profiles.md`), reply as `ctl.state`. Section "Profiles" below.
 - State is published after start-up and on **every change** (tune, gain/ppm/bias, VFO create/update/
@@ -127,12 +136,18 @@ most every 5 s. The UI hides it while zero. Clients must tolerate the field bein
 A VFO is a demodulated channel at an absolute frequency inside the passband of the device. The
 daemon runs one channelizer per VFO on a dedicated thread, encodes the audio to Opus (48 kHz, mono
 or stereo, 20 ms frames, VBR; 64 kbit/s mono WFM, 96 kbit/s stereo WFM, 24 kbit/s NFM/AM) and publishes it as binary `AudioFrame` v1 on
-`sh.v1.dev.<dev>.audio.<vfo_id>` (core NATS, lossy; format in `docs/protocol-audio.md`). At most 8
-VFOs per device.
+`sh.v1.dev.<dev>.audio.<vfo_id>` (core NATS, lossy; format in `docs/protocol-audio.md`). At most
+`SUPERHET_MAX_VFOS` VFOs per device (default 8, at most 64; the api enforces smaller per-user
+limits, `docs/api-users.md`).
 
 VFO object (in `vfos` and in replies):
-`{"id","freq_hz","mode":"wfm"|"nfm"|"am"|"usb"|"lsb"|"cw","bandwidth_hz","squelch_dbfs":null|number,"deemphasis":"none"|"50us"|"75us"|null,"stereo":true|false|null,"tones":true|false|null,"tone_squelch_hz":null|number,"cw_pitch_hz"?:number,"offset_hz","status":"active"|"paused"}`
+`{"id","freq_hz","mode":"wfm"|"nfm"|"am"|"usb"|"lsb"|"cw","bandwidth_hz","squelch_dbfs":null|number,"deemphasis":"none"|"50us"|"75us"|null,"stereo":true|false|null,"tones":true|false|null,"tone_squelch_hz":null|number,"cw_pitch_hz"?:number,"offset_hz","status":"active"|"paused","owner"?:string}`
 
+- `owner` (`u:<user id>` or `g:<guest id>`) is set by the api when it creates the VFO (the create
+  body takes an optional `owner`, 1..64 characters of `[A-Za-z0-9:._-]`, which only the api sends)
+  and survives a daemon restart; VFOs without it (the default VFO, profile loads) are shared.
+  The daemon does not enforce ownership, the api does; the public REST state hides the field from
+  listeners and guests.
 - `id` is assigned by the daemon (starting at 1, increasing, not reused while the daemon runs).
 - `bandwidth_hz` is the effective value (mode default: WFM 180 kHz, NFM 12.5 kHz, AM 10 kHz,
   USB/LSB 2.4 kHz, CW 500 Hz). For USB/LSB it is the width of the passband, which starts 300 Hz
@@ -209,7 +224,7 @@ applied immediately, not debounced: every one moves the window by most of its wi
 causes few of them.
 
 Error codes: `invalid` (malformed or out-of-range request, unrealisable bandwidth, de-emphasis on
-anything but WFM/NFM, `cw_pitch_hz` on anything but CW), `not_found` (unknown VFO id in update/delete) and `unsupported` (the limit of 8 VFOs is
+anything but WFM/NFM, `cw_pitch_hz` on anything but CW), `not_found` (unknown VFO id in update/delete) and `unsupported` (the VFO limit is
 reached).
 
 ## Tuning lock
@@ -220,11 +235,12 @@ fine; gain, ppm and bias tee are not covered) and `ctl.profile.load` when the pr
 different centre or rate. VFOs keep working: they can be created, moved and deleted inside the
 window, and one moved outside simply pauses (`retune:"locked"`). The error reply:
 
-`{"v":1,"ok":false,"code":"locked","error":"tuning is locked by: user","holders":[{"kind":"user","id":"user","since_ms":1760000000000}]}`
+`{"v":1,"ok":false,"code":"locked","error":"tuning is locked by: user alice","holders":[{"kind":"user","id":"u:3","name":"alice","since_ms":1760000000000}]}`
 
 `holders` entries (also in the state's `locks`) have `kind`, `id` (identifies the holder within its
-kind) and `since_ms` (Unix ms). Only `kind:"user"` exists today (`ctl.lock.*`, the REST lock
-routes, or a profile with `lock:true`); recordings, decoders and exclusive claims will add their
+kind), `since_ms` (Unix ms) and optionally `name` (login name). Only `kind:"user"` exists today
+(`ctl.lock.*`, the REST lock routes - one holder per account, `id:"u:<user id>"` - or a profile
+with `lock:true`, which takes the anonymous holder `id:"user"`); recordings, decoders and exclusive claims will add their
 own kinds without changing this shape. The lock survives a daemon restart (restore snapshot) but
 nothing else releases it: loading a profile never does.
 

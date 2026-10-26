@@ -1,6 +1,7 @@
 # Auth API (superhet-api)
 
-Local admin authentication, see ADR-0008 for the design. All bodies are JSON
+Local authentication, see ADR-0008 for the design and ADR-0011 for the multi-user extension
+(roles, invites, guests; contract in `docs/api-users.md`, audit log in `docs/api-audit.md`). All bodies are JSON
 (`Content-Type: application/json`, at most 8 KiB); all responses carry `Cache-Control: no-store`.
 Errors are `{"error": "<code>"}`, optionally with `"message"` (human readable).
 
@@ -9,7 +10,9 @@ path outside `/api`, served from `SUPERHET_WEB_DIR`, default `/usr/share/superhe
 paths get `index.html` for client-side routing, missing `/assets/*` and `*.ext` files a plain 404;
 without an `index.html` there it is a plain-text 404 hint and a one-time startup warning). **Every
 other route**, including unknown `/api/*` paths and WebSocket upgrades, answers `401 {"error":"unauthenticated"}` without a valid session
-cookie. WebSocket upgrades are refused with `401` before the upgrade.
+cookie (or guest cookie while guest mode is on). A signed-in caller whose role is too low gets `403
+{"error":"forbidden"}` (the table of routes and roles is in `docs/api-users.md`). WebSocket
+upgrades are refused with `401`/`403` before the upgrade.
 
 POST routes also run the `Origin` check (`403 {"error":"forbidden"}`, see `SUPERHET_ALLOWED_ORIGINS`)
 and require `Content-Type: application/json` (`415`) when they carry a body. Without a configured
@@ -26,11 +29,16 @@ options). A session expires after 7 days without use or 30 days after login. `Se
 ## Endpoints
 
 `GET /api/v1/auth/status` returns 200
-`{"setup_required": bool, "authenticated": bool, "username": string|null}`. Works with or without a
-cookie. The UI shows the setup wizard if `setup_required`, the login page if not `authenticated`.
+`{"setup_required": bool, "authenticated": bool, "username": string|null, "user_id": int|null,
+"role": "admin"|"operator"|"listener"|null, "kind": "user"|"guest"|null,
+"must_change_password": bool, "guest": {"enabled": bool, "privacy_text": string|null}}`. Works with
+or without a cookie. The UI shows the setup wizard if `setup_required`, the login page if not
+`authenticated`, the password-change page if `must_change_password`, and offers "continue as
+guest" (`POST /api/v1/auth/guest`) if `guest.enabled`. A guest has `authenticated: true`,
+`kind: "guest"`, `role: "listener"` and no `username`.
 
-`POST /api/v1/auth/setup` with `{"username", "password", "setup_token"}` creates the admin account
-and logs in.
+`POST /api/v1/auth/setup` with `{"username", "password", "setup_token"}` creates the first admin
+account and logs in (further accounts are created by admins, `docs/api-users.md`).
 - 204 and `Set-Cookie`
 - 409 `already_setup`
 - 403 `invalid_setup_token`
@@ -42,14 +50,15 @@ setup token: ..."; `docker compose logs superhet-api`) or pinned via `SUPERHET_S
 
 `POST /api/v1/auth/login` with `{"username", "password"}`.
 - 204 and `Set-Cookie`
-- 401 `invalid_credentials` (same answer and similar timing for unknown user and wrong password)
-- 429 `rate_limited` with `Retry-After: <seconds>` (5 failures per client address and 50 globally per 15 minutes; also blocks correct passwords while active)
+- 401 `invalid_credentials` (same answer and similar timing for unknown user, wrong password and a disabled account)
+- 429 `rate_limited` with `Retry-After: <seconds>` (5 failures per client address, 10 per user name from any address and 50 globally per 15 minutes; also blocks correct passwords while active)
 
-`POST /api/v1/auth/logout` (no body) always answers 204, deletes the session if there is one and
-clears the cookie.
+`POST /api/v1/auth/logout` (no body) always answers 204, deletes the session (or ends the guest
+session) if there is one and clears both cookies.
 
 `POST /api/v1/auth/password` with `{"current_password", "new_password"}` (session required).
-- 204; all other sessions of the user are revoked, the calling one stays
+- 204; all other sessions of the user are revoked, the calling one stays; a one-time password
+  (`must_change_password`) is replaced
 - 401 `unauthenticated` (no session)
 - 401 `invalid_credentials` (wrong current password; counts towards the rate limit)
 - 400 `invalid` (new password policy)

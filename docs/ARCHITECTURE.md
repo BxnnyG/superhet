@@ -90,6 +90,7 @@ Concurrency inside sdrd: tokio for I/O; DSP runs on dedicated OS threads (device
 | `sh.v1.dev.<dev>.rds.<vfo>` | pub/sub (core NATS, lossy) | sdrd → api (JSON RDS state of a WFM VFO, repeated every second; api forwards it as a text frame on the audio WebSocket; `docs/protocol-audio.md`) |
 | `sh.v1.events.<plugin>.<type>` | JetStream `EVENTS` | pluginhost → worker (persist), api (live) |
 | `sh.v1.lookup.<key>` | request/reply | api/worker → worker lookup service |
+| `sh.v1.audit.<source>` | core NATS | sdrd/pluginhost → worker (persist as `audit_events`, `docs/api-audit.md`) |
 | `sh.v1.plugin.<id>.ctl` | request/reply | api → pluginhost |
 
 ## 2. Data flow: stick → browser
