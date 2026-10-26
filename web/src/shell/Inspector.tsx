@@ -2,10 +2,11 @@ import { useRef, useState, type KeyboardEvent } from "react";
 import { AudioControls } from "../audio/AudioControls";
 import { BandPlanPanel } from "../bandplan/BandPlanPanel";
 import { BookmarksPanel } from "../bookmarks/BookmarksPanel";
+import { DecodersTab } from "../decoders/DecodersTab";
 import { ProfilesPanel } from "../profiles/ProfilesPanel";
 import { DisplayControls } from "../spectrum/DisplayControls";
 import { CloseIcon, IconButton, PlainButton, Section, cn } from "../ui";
-import { DecodersPanel, ReceiverPanel } from "../vfo/ReceiverPanel";
+import { ReceiverPanel } from "../vfo/ReceiverPanel";
 import {
   INSPECTOR_LABEL,
   INSPECTOR_TABS,
@@ -131,7 +132,11 @@ export function Inspector({ r, inspector }: Props) {
           role={phoneUp ? "tabpanel" : "region"}
           aria-labelledby={phoneUp ? tabId(tab) : undefined}
           aria-label={phoneUp ? undefined : INSPECTOR_LABEL[tab]}
-          className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
+          className={cn(
+            "min-h-0 flex-1 overflow-x-hidden",
+            // The Decoders tab pins its cards and scrolls the log itself.
+            tab === "decoders" ? "overflow-y-hidden" : "overflow-y-auto",
+          )}
         >
           {open && <TabBody r={r} tab={tab} phoneUp={phoneUp} />}
         </div>
@@ -172,11 +177,15 @@ function TabBody({ r, tab, phoneUp }: { r: Receiver; tab: InspectorTab; phoneUp:
       );
     case "decoders":
       return (
-        <DecodersPanel
-          vfo={r.selected}
+        <DecodersTab
+          vfos={r.vfoSnap.vfos}
+          selectedId={r.selected?.id ?? null}
           audio={r.audio}
           audioSnap={r.audioSnap}
+          events={r.decoderEvents}
+          device={r.device}
           onUpdate={(id, patch) => r.vfoCtl.update(id, patch)}
+          onTune={r.tuneTo}
         />
       );
     case "display":

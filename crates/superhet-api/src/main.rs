@@ -4,6 +4,7 @@ mod audio_hub;
 mod audio_ws;
 mod auth;
 mod bookmarks;
+mod decoder_events;
 mod devices;
 mod hub;
 mod origin;
@@ -47,6 +48,10 @@ fn app(
             devices.clone(),
         )))
         .merge(bookmarks::router(bookmarks::BookmarksState::new(
+            devices.clone(),
+            deps.db.clone(),
+        )))
+        .merge(decoder_events::router(decoder_events::EventsState::new(
             devices.clone(),
             deps.db.clone(),
         )))
@@ -215,6 +220,9 @@ mod tests {
             "/api/v1/ws/state?dev=rtl0",
             "/api/v1/profiles",
             "/api/v1/bookmarks",
+            "/api/v1/decoder-events",
+            "/api/v1/decoder-events/export.csv",
+            "/api/v1/ws/events?dev=rtl0",
             "/api/v1/devices/rtl0/lock",
             "/api/v1/does/not/exist",
         ] {

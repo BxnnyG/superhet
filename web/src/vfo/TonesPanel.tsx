@@ -11,12 +11,12 @@ interface Props {
   onUpdate: (id: number, patch: VfoPatch) => void;
 }
 
-const SQUELCH_OPTIONS: readonly SelectOption[] = [
+export const SQUELCH_OPTIONS: readonly SelectOption[] = [
   { value: "off", label: "Off" },
   ...CTCSS_TONES.map((hz) => ({ value: String(hz), label: formatCtcss(hz) })),
 ];
 
-async function copyDigits(digits: string): Promise<void> {
+export async function copyDigits(digits: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(digits);
     toasts.push({ tone: "success", title: "Digits copied", key: "dtmf-copy", durationMs: 2000 });

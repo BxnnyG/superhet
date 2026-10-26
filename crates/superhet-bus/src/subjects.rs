@@ -21,6 +21,8 @@ pub const ALL_RDS: &str = "sh.v1.dev.*.rds.>";
 pub const ALL_TONES: &str = "sh.v1.dev.*.tones.>";
 /// Wildcard matching every plugin event.
 pub const ALL_EVENTS: &str = "sh.v1.events.>";
+/// Wildcard matching the decoder history events of every device.
+pub const ALL_DECODER_EVENTS: &str = "sh.v1.events.core.decoder.>";
 /// Wildcard matching every lookup request.
 pub const ALL_LOOKUP: &str = "sh.v1.lookup.>";
 /// Wildcard matching the control subject of every plugin.
@@ -196,6 +198,16 @@ pub fn tones(device: &str, vfo: &str) -> Result<String, InvalidToken> {
     Ok(format!("{PREFIX}.dev.{device}.tones.{vfo}"))
 }
 
+/// Decoder history event subject (published by the worker for every stored event):
+/// `sh.v1.events.core.decoder.<dev>`.
+///
+/// # Errors
+/// Fails if `device` is not a single valid token.
+pub fn decoder_events(device: &str) -> Result<String, InvalidToken> {
+    check(device)?;
+    Ok(format!("{PREFIX}.events.core.decoder.{device}"))
+}
+
 /// Plugin event subject: `sh.v1.events.<plugin>.<type>`.
 ///
 /// # Errors
@@ -256,6 +268,11 @@ mod tests {
         assert!(rds("rtl0", "3.4").is_err());
         assert_eq!(tones("rtl0", "3").as_deref(), Ok("sh.v1.dev.rtl0.tones.3"));
         assert!(tones("rtl0", "*").is_err());
+        assert_eq!(
+            decoder_events("rtl0").as_deref(),
+            Ok("sh.v1.events.core.decoder.rtl0")
+        );
+        assert!(decoder_events("a.b").is_err());
         assert_eq!(
             ctl_vfo("rtl0", "create").as_deref(),
             Ok("sh.v1.dev.rtl0.ctl.vfo.create")

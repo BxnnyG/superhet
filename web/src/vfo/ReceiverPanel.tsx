@@ -131,37 +131,6 @@ export function Decoders({
   return null;
 }
 
-/** Decoders tab: the decoders of the selected VFO's mode, or why there are none. */
-export function DecodersPanel({
-  vfo,
-  audio,
-  audioSnap,
-  onUpdate,
-}: {
-  vfo: Vfo | null;
-  audio: AudioController;
-  audioSnap: AudioSnapshot;
-  onUpdate: Update;
-}) {
-  if (vfo === null) {
-    return (
-      <div className="p-4">
-        <EmptyState title="No receiver selected">Decoders run on the selected VFO.</EmptyState>
-      </div>
-    );
-  }
-  if (vfo.mode !== "wfm" && vfo.mode !== "nfm" && vfo.mode !== "am") {
-    return (
-      <div className="p-4">
-        <EmptyState title="No decoders for this mode">
-          RDS needs WFM; CTCSS and DTMF need NFM or AM. {MODE_LABEL[vfo.mode]} has none yet.
-        </EmptyState>
-      </div>
-    );
-  }
-  return <Decoders vfo={vfo} audio={audio} audioSnap={audioSnap} onUpdate={onUpdate} />;
-}
-
 function Block({
   title,
   flush,

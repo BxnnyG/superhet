@@ -7,6 +7,7 @@ import { builtinBandPlan, matchBandPlan, suggestName } from "../bandplan/model";
 import { OverlayStore } from "../bandplan/settings";
 import { newInput, receiverState } from "../bookmarks/model";
 import { BookmarkStore } from "../bookmarks/store";
+import { DecoderEventStore } from "../decoders/store";
 import { createProfileApi } from "../profiles/api";
 import type { StateDoc } from "../state/doc";
 import { bindState, StateStore } from "../state/store";
@@ -68,6 +69,7 @@ export function useReceiver(device: string) {
   }, []);
 
   const [overlay] = useState(() => new OverlayStore());
+  const decoderEvents = useMemo(() => new DecoderEventStore({ device }), [device]);
   const bookmarks = useMemo(() => new BookmarkStore(), []);
   const bookmarkSnap = useSyncExternalStore(bookmarks.subscribe, bookmarks.getSnapshot);
 
@@ -128,13 +130,15 @@ export function useReceiver(device: string) {
     store.start();
     vfoCtl.start();
     audio.start();
+    decoderEvents.start();
     return () => {
       unbind();
       store.stop();
       vfoCtl.stop();
       audio.stop();
+      decoderEvents.stop();
     };
-  }, [store, tuning, vfoCtl, audio]);
+  }, [store, tuning, vfoCtl, audio, decoderEvents]);
 
   // Bookmarks live on the server: read them at start and again once the state feed is up.
   const feedUp = feed.status === "connected";
@@ -239,6 +243,7 @@ export function useReceiver(device: string) {
     overlay,
     bookmarks,
     bookmarkSnap,
+    decoderEvents,
     tuneTo,
     tuneNew,
     startBookmark,
