@@ -95,3 +95,18 @@ P2).
 - Stereo streams are about 50 % larger on the bus than mono WFM.
 - The synthetic broadcast generator (`superhet-dsp` feature `testsig`, `scripts/gen-wfm-iq.py`)
   doubles as a test source for file-device runs.
+
+## Real-hardware findings (alpha.7)
+
+- A real recording (RTL-SDR v5, 2.4 MS/s, tuner gain 30 dB, 99.19 and 100.79 MHz) shows the pilot
+  lock and an RDS bump in the 57 kHz band, but no decodable data: carrier-to-noise in the 180 kHz
+  channel is about 13 dB, the demodulated noise at 57 kHz is about 0.045 of full deviation against
+  an RDS amplitude of about 0.027, i.e. Eb/N0 of about -1 dB (bit error rate > 10 %). That is below
+  what any RDS decoder can use; the synthetic decoder limit is a carrier-to-noise of about 12 to
+  14 dB. RDS needs roughly 16 dB or more, so antenna and gain decide, not the DSP chain.
+- With the tuner on automatic gain the same band reached about 0 dBFS total power (heavy clipping
+  of the 8-bit ADC). `superhet-sdrd` now logs `ADC overload` when more than 1 % of the samples sit
+  at the rails. The end-to-end tests `rds_e2e_tests` (programme-material multiplex, 2.048 and
+  2.4 MS/s, station 500 to 800 kHz off centre, 8-bit quantisation, DC offset, IQ imbalance, a
+  crowded clipping band) guard the full channel path; `real_recording_probe` (ignored, set
+  `SUPERHET_RDS_IQ`) runs a real file through it.
