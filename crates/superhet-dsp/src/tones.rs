@@ -3,11 +3,14 @@
 //! The detector takes the 48 kHz mono audio of a [`Channel`](crate::Channel) (before the squelch
 //! gate and after the DC block, so the sub-audible band is intact) and decimates it twice:
 //!
-//! - to 8 kHz for DTMF: eight Goertzel filters (697-941 Hz rows, 1209-1633 Hz columns) plus the
-//!   second harmonics of the rows over a 205-sample window (25.6 ms) every 8 ms. A window counts
-//!   as a digit when the two strongest tones dominate the window energy, each stands out from the
-//!   rest of its group, the twist is within ITU-T Q.24 limits (+4 dB reverse, -8 dB normal) and the
-//!   second harmonic of the row tone is small (talk-off guard against speech and music). A digit
+//! - to 8 kHz for DTMF, followed by a 500 Hz sixth-order high-pass (CTCSS sub-tones and voice
+//!   fundamentals must not count as energy next to the tones): eight Goertzel filters
+//!   (697-941 Hz rows, 1209-1633 Hz columns) plus the second harmonics of the rows over a
+//!   205-sample window (25.6 ms) every 8 ms. A window counts as a digit when the two strongest
+//!   tones carry at least 70 % of the window energy, each stands out from the rest of its group,
+//!   the twist is within +-10 dB (radios pre-emphasise; far wider than ITU-T Q.24 on purpose) and
+//!   the second harmonic of the row tone is small (talk-off guard against speech and music, with
+//!   the leakage of a nearby column tone discounted). A digit
 //!   is reported after three consecutive hits (about 42 ms minimum tone length) and again only
 //!   after at least two window hops without a hit (inter-digit pause of 34 ms or more) or when a
 //!   different digit follows.
@@ -61,8 +64,10 @@ const DTMF_DOMINANCE: f64 = 0.7;
 const DTMF_GROUP_RATIO: f64 = 10.0;
 /// The row tone must exceed its own second harmonic by this power ratio (10 dB).
 const DTMF_HARMONIC_RATIO: f64 = 10.0;
-/// Column power over row power: -8 dB (normal twist) ..= +4 dB (reverse twist).
-const DTMF_TWIST: std::ops::RangeInclusive<f64> = 0.158..=2.512;
+/// Column power over row power: -10 dB (normal twist) ..= +10 dB (reverse twist). Wider than
+/// ITU-T Q.24: radios pre-emphasise the audio (columns up to 6 dB over rows) and receivers often
+/// do not de-emphasise.
+const DTMF_TWIST: std::ops::RangeInclusive<f64> = 0.1..=10.0;
 /// Consecutive hits that confirm a digit.
 const DTMF_CONFIRM: u8 = 3;
 /// Consecutive misses that end a digit.
@@ -83,6 +88,73 @@ const CTCSS_STATIONARITY: f64 = 0.4;
 const CTCSS_LOCK: u8 = 2;
 /// Consecutive misses that release the lock.
 const CTCSS_UNLOCK: u8 = 5;
+
+/// Corner of the DTMF high-pass in Hz: 20 dB or more below the CTCSS tones (up to 254 Hz) and the
+/// voice fundamentals, flat at the lowest DTMF tone (697 Hz).
+const DTMF_HIGHPASS_HZ: f64 = 500.0;
+
+/// One direct-form II transposed biquad section.
+#[derive(Clone, Copy)]
+struct Biquad {
+    b: [f64; 3],
+    a: [f64; 2],
+    z: [f64; 2],
+}
+
+impl Biquad {
+    /// High-pass section (RBJ cookbook) at `fc` with quality `q`.
+    fn highpass(fc: f64, fs: f64, q: f64) -> Self {
+        let w = std::f64::consts::TAU * fc / fs;
+        let alpha = w.sin() / (2.0 * q);
+        let c = w.cos();
+        let a0 = 1.0 + alpha;
+        Self {
+            b: [(1.0 + c) / 2.0 / a0, -(1.0 + c) / a0, (1.0 + c) / 2.0 / a0],
+            a: [-2.0 * c / a0, (1.0 - alpha) / a0],
+            z: [0.0; 2],
+        }
+    }
+
+    fn process(&mut self, x: f64) -> f64 {
+        let y = self.b[0] * x + self.z[0];
+        self.z[0] = self.b[1] * x - self.a[0] * y + self.z[1];
+        self.z[1] = self.b[2] * x - self.a[1] * y;
+        y
+    }
+}
+
+/// Sixth-order Butterworth high-pass keeping CTCSS sub-tones and voice fundamentals out of the
+/// DTMF energy estimate.
+#[derive(Clone)]
+struct DtmfHighpass {
+    sections: [Biquad; 3],
+}
+
+impl DtmfHighpass {
+    fn new() -> Self {
+        // Butterworth pole Q values of order 6.
+        let q = [0.517_638_1, std::f64::consts::FRAC_1_SQRT_2, 1.931_851_7];
+        Self {
+            sections: q.map(|q| Biquad::highpass(DTMF_HIGHPASS_HZ, DTMF_RATE, q)),
+        }
+    }
+
+    fn reset(&mut self) {
+        for s in &mut self.sections {
+            s.z = [0.0; 2];
+        }
+    }
+
+    fn process(&mut self, x: &[f32], out: &mut Vec<f32>) {
+        out.extend(x.iter().map(|&v| {
+            let y = self
+                .sections
+                .iter_mut()
+                .fold(f64::from(v), |a, s| s.process(a));
+            y as f32
+        }));
+    }
+}
 
 /// Goertzel recursion coefficient `2 cos(2 pi f / fs)`.
 fn coeff(f: f64, fs: f64) -> f64 {
@@ -178,7 +250,7 @@ impl Dtmf {
             && row_p >= DTMF_GROUP_RATIO * row_second
             && col_p >= DTMF_GROUP_RATIO * col_second
             && DTMF_TWIST.contains(&(col_p / row_p))
-            && row_p >= DTMF_HARMONIC_RATIO * power[8 + row];
+            && row_p >= DTMF_HARMONIC_RATIO * harmonic_residual(power[8 + row], row, col, col_p);
         ok.then(|| DTMF_KEYS[row][col])
     }
 
@@ -214,6 +286,20 @@ impl Dtmf {
             }
         }
     }
+}
+
+/// Power in the second-harmonic bin of the row tone that is not leakage of the column tone.
+///
+/// The column tone can sit close to that bin (row 697 / column 1336, 770 / 1477, 770 / 1633) and
+/// leaks into it through the sidelobes of the rectangular window; with the reverse twist of
+/// pre-emphasised radio audio that leakage alone would exceed the harmonic limit. The expected
+/// leakage amplitude is subtracted (worst-case phase), so a genuine harmonic still counts.
+fn harmonic_residual(harmonic: f64, row: usize, col: usize, col_p: f64) -> f64 {
+    let bins = (2.0 * DTMF_ROWS[row] - DTMF_COLS[col]).abs() / (DTMF_RATE / DTMF_N as f64);
+    let x = std::f64::consts::PI * bins;
+    let kernel = x.sin() / (DTMF_N as f64 * (x / DTMF_N as f64).sin());
+    let leak = kernel * kernel * col_p;
+    (harmonic.sqrt() - leak.sqrt()).max(0.0).powi(2)
 }
 
 /// Index, power and the runner-up power of the strongest entry.
@@ -402,9 +488,11 @@ pub struct ToneDetector {
     to16: DecimFir<f32>,
     to8: DecimFir<f32>,
     to2: DecimFir<f32>,
+    dtmf_hp: DtmfHighpass,
     buf16: Vec<f32>,
     buf8: Vec<f32>,
     buf2: Vec<f32>,
+    buf_hp: Vec<f32>,
     dtmf: Dtmf,
     ctcss: Ctcss,
     digits: Vec<char>,
@@ -429,9 +517,11 @@ impl ToneDetector {
             to16: DecimFir::new(design_lowpass(fs, 3_500.0, 12_500.0, 50.0), 3),
             to8: DecimFir::new(design_lowpass(fs / 3.0, 3_500.0, 4_500.0, 50.0), 2),
             to2: DecimFir::new(design_lowpass(DTMF_RATE, 300.0, 1_700.0, 50.0), 4),
+            dtmf_hp: DtmfHighpass::new(),
             buf16: Vec::new(),
             buf8: Vec::new(),
             buf2: Vec::new(),
+            buf_hp: Vec::new(),
             dtmf: Dtmf::new(),
             ctcss: Ctcss::new(),
             digits: Vec::new(),
@@ -451,7 +541,9 @@ impl ToneDetector {
         self.to16.process(audio, &mut self.buf16);
         self.buf8.clear();
         self.to8.process(&self.buf16, &mut self.buf8);
-        self.dtmf.process(&self.buf8, &mut self.digits);
+        self.buf_hp.clear();
+        self.dtmf_hp.process(&self.buf8, &mut self.buf_hp);
+        self.dtmf.process(&self.buf_hp, &mut self.digits);
         self.buf2.clear();
         self.to2.process(&self.buf8, &mut self.buf2);
         self.ctcss.process(&self.buf2);
@@ -483,6 +575,7 @@ impl ToneDetector {
         self.to16.reset();
         self.to8.reset();
         self.to2.reset();
+        self.dtmf_hp.reset();
         self.dtmf.reset();
         self.ctcss.reset();
         self.dirty = false;
