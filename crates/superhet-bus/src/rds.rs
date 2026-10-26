@@ -43,6 +43,14 @@ pub struct RdsMessage {
     pub ps: Option<String>,
     /// RadioText, up to 64 characters.
     pub rt: Option<String>,
+    /// Share of failed blocks in percent (0..=100) over the last ~10 seconds while the block
+    /// sync held; absent until enough blocks have been seen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bler: Option<u8>,
+    /// Reception quality 0..=100 (100 minus `bler`, 0 without block sync); absent together with
+    /// `bler`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality: Option<u8>,
 }
 
 impl RdsMessage {
@@ -61,6 +69,8 @@ impl RdsMessage {
             ms: None,
             ps: None,
             rt: None,
+            bler: None,
+            quality: None,
         }
     }
 
@@ -75,6 +85,7 @@ impl RdsMessage {
             && self.ms.is_none()
             && self.ps.is_none()
             && self.rt.is_none()
+            && self.quality.is_none()
     }
 
     /// Serialise to JSON.
@@ -104,6 +115,9 @@ impl RdsMessage {
         if msg.pty.is_some_and(|p| p > 31) {
             return Err("pty out of range".into());
         }
+        if msg.bler.is_some_and(|b| b > 100) || msg.quality.is_some_and(|q| q > 100) {
+            return Err("bler or quality out of range".into());
+        }
         if msg
             .pi
             .as_ref()
@@ -129,6 +143,8 @@ mod tests {
             ms: Some(true),
             ps: Some("SUPERHET".into()),
             rt: Some("Now playing: Ünïcode ✓".into()),
+            bler: Some(12),
+            quality: Some(88),
             ..RdsMessage::empty(3)
         }
     }
@@ -143,6 +159,8 @@ mod tests {
         assert_eq!(json["type"], "rds");
         assert_eq!(json["vfo"], 3);
         assert_eq!(json["ps"], "SUPERHET");
+        assert_eq!(json["bler"], 12);
+        assert_eq!(json["quality"], 88);
         let empty = RdsMessage::empty(3);
         assert!(empty.is_empty() && !full().is_empty());
         let json: serde_json::Value = serde_json::from_slice(&empty.encode()).expect("json");
@@ -165,5 +183,16 @@ mod tests {
             assert!(RdsMessage::parse(bad.as_bytes()).is_err(), "{bad}");
         }
         assert!(RdsMessage::parse(&vec![b' '; MAX_LEN + 1]).is_err());
+        assert!(RdsMessage::parse(text.replace("\"bler\":12", "\"bler\":101").as_bytes()).is_err());
+    }
+
+    #[test]
+    fn quality_fields_are_optional() {
+        // Messages of daemons that predate the fields still parse.
+        let old = r#"{"v":1,"type":"rds","vfo":1,"synced":true,"pi":null,"pty":null,"tp":null,"ta":null,"ms":null,"ps":null,"rt":null}"#;
+        let msg = RdsMessage::parse(old.as_bytes()).expect("old message");
+        assert_eq!((msg.bler, msg.quality), (None, None));
+        let text = String::from_utf8(RdsMessage::empty(1).encode()).expect("utf8");
+        assert!(!text.contains("bler") && !text.contains("quality"));
     }
 }

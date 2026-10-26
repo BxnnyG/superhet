@@ -82,12 +82,16 @@ const BLOCK_BITS: u64 = 26;
 const SEARCH_BLOCKS: u64 = 6;
 /// Blocks looked at for the loss-of-sync decision.
 const LOSS_WINDOW: u32 = 40;
-/// Sync is lost with more bad blocks than this in the window.
-const LOSS_BAD_BLOCKS: u32 = 24;
+/// Sync is lost with more bad blocks than this in the window. Generous on purpose: a weak
+/// station still delivers PI and some text at 60 to 70 % block errors (the soft combiner and
+/// the burst corrector make use of it), and noise reaches the limit within a second anyway.
+const LOSS_BAD_BLOCKS: u32 = 30;
 /// While synced, a search for a shifted block grid starts after this many bad blocks in a row.
 const RESYNC_BAD_RUN: u32 = 3;
 /// Longest error burst that the block code corrects.
 const MAX_BURST: u32 = 5;
+/// Weight of the older repetitions in the block A soft combiner per new repetition.
+const A_DECAY: f32 = 0.9;
 
 /// Decoded RDS information of one station.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -201,6 +205,9 @@ enum BlockEvent {
         corrected: bool,
         c_prime: bool,
     },
+    /// A block A that failed the check on its own but whose soft-combined repetitions pass it:
+    /// only the programme identification is taken from it.
+    SoftPi { info: u16 },
     /// A block that failed the check.
     Bad { pos: u8 },
     /// Synchronisation was lost.
@@ -224,6 +231,13 @@ struct Framer {
     history: u64,
     /// Blocks in a row that were bad.
     bad_run: u32,
+    /// Sum of the signed reliabilities of the 26 bits of the recent block A repetitions that
+    /// did not decode cleanly (bit j = j places before the end of the block).
+    a_acc: [f32; BLOCK_BITS as usize],
+    /// Repetitions in `a_acc`.
+    a_n: u32,
+    /// Test hook: no soft combining of block A.
+    hard_pi_only: bool,
 }
 
 /// A block found by the sync search.
@@ -273,6 +287,39 @@ impl Framer {
         best.map(|(_, word, len)| (word, len))
     }
 
+    /// Adds the block just received at position 0 to the soft combiner. Block A carries the
+    /// PI, which is the same in every group, so its repetitions can be combined bit by bit
+    /// weighted with the reliability of each bit (the check bits repeat too). Returns the PI
+    /// when the combined word passes the block check.
+    fn combine_a(&mut self) -> Option<u16> {
+        for j in 0..BLOCK_BITS as u32 {
+            let sign = if self.reg >> j & 1 == 1 { 1.0 } else { -1.0 };
+            let rel = self.rel_of(j);
+            let acc = &mut self.a_acc[j as usize];
+            // Older repetitions fade so that a station change does not drag along stale bits.
+            *acc = *acc * A_DECAY + sign * rel;
+        }
+        self.a_n += 1;
+        if self.a_n < 2 {
+            return None;
+        }
+        let word = self
+            .a_acc
+            .iter()
+            .enumerate()
+            .fold(0u32, |w, (j, &v)| w | (u32::from(v > 0.0) << j));
+        if remainder(word) != OFFSETS[0] {
+            return None;
+        }
+        self.clear_combiner();
+        Some((word >> 10) as u16)
+    }
+
+    fn clear_combiner(&mut self) {
+        self.a_acc = [0.0; BLOCK_BITS as usize];
+        self.a_n = 0;
+    }
+
     fn push(&mut self, bit: bool, reliability: f32) -> Option<BlockEvent> {
         self.reg = ((self.reg << 1) | u32::from(bit)) & 0x03FF_FFFF;
         self.rel[(self.bits & 31) as usize] = reliability;
@@ -298,6 +345,7 @@ impl Framer {
         self.history = 0;
         self.bad_run = 0;
         self.last_hit = None;
+        self.clear_combiner();
         BlockEvent::Good {
             pos: hit.pos,
             info: hit.info,
@@ -364,6 +412,15 @@ impl Framer {
                 None => (None, 0),
             }
         };
+        // Block A: repetitions that are not clean add up in the soft combiner.
+        let mut soft_pi = None;
+        if pos == 0 && !self.hard_pi_only {
+            if word.is_some() && burst == 0 {
+                self.clear_combiner();
+            } else {
+                soft_pi = self.combine_a();
+            }
+        }
         let window = (1u64 << LOSS_WINDOW) - 1;
         self.history = (self.history << 1) & window;
         // Long corrections are too often wrong to keep a failing sync alive.
@@ -378,7 +435,11 @@ impl Framer {
                 self.last_hit = None;
                 self.history = 0;
                 self.bad_run = 0;
+                self.clear_combiner();
                 return Some(BlockEvent::Lost);
+            }
+            if let Some(info) = soft_pi {
+                return Some(BlockEvent::SoftPi { info });
             }
             return Some(BlockEvent::Bad { pos });
         };
@@ -423,6 +484,7 @@ pub fn rds_char(code: u8) -> char {
 }
 
 const PS_LEN: usize = 8;
+const PI_CANDIDATES: usize = 4;
 const RT_LEN: usize = 64;
 pub(crate) const RT_END: u8 = 0x0D;
 
@@ -433,7 +495,10 @@ struct GroupDecoder {
     c_prime: bool,
     info: RdsInfo,
     revision: u64,
-    pi_pending: Option<u16>,
+    /// PI candidates with the number of receptions (a few, so one false block cannot push
+    /// out the right candidate).
+    pi_votes: [(u16, u8); PI_CANDIDATES],
+    pi_next: usize,
     pty_pending: Option<u8>,
     ps: [Option<u8>; PS_LEN],
     ps_pending: [Option<[u8; 2]>; PS_LEN / 2],
@@ -451,7 +516,8 @@ impl GroupDecoder {
             c_prime: false,
             info: RdsInfo::default(),
             revision: 0,
-            pi_pending: None,
+            pi_votes: [(0, 0); PI_CANDIDATES],
+            pi_next: 0,
             pty_pending: None,
             ps: [None; PS_LEN],
             ps_pending: [None; PS_LEN / 2],
@@ -480,6 +546,10 @@ impl GroupDecoder {
     fn event(&mut self, event: BlockEvent) {
         match event {
             BlockEvent::Lost => self.blocks = [None; 4],
+            BlockEvent::SoftPi { info } => {
+                self.blocks = [None; 4];
+                self.accept_pi(info);
+            }
             BlockEvent::Bad { pos } => {
                 if pos == 0 {
                     self.blocks = [None; 4];
@@ -515,14 +585,23 @@ impl GroupDecoder {
     /// text of the right one.
     fn accept_pi(&mut self, pi: u16) {
         if self.info.pi == Some(pi) {
-            self.pi_pending = None;
+            self.pi_votes = [(0, 0); PI_CANDIDATES];
             return;
         }
-        if self.pi_pending != Some(pi) {
-            self.pi_pending = Some(pi);
+        if let Some(vote) = self.pi_votes.iter_mut().find(|v| v.1 > 0 && v.0 == pi) {
+            vote.1 = vote.1.saturating_add(1);
+        } else {
+            // Replace the weakest candidate (the oldest one among equals).
+            let n = self.pi_next;
+            let weakest = (0..PI_CANDIDATES)
+                .map(|k| (n + k) % PI_CANDIDATES)
+                .min_by_key(|&k| self.pi_votes[k].1)
+                .unwrap_or(n);
+            self.pi_votes[weakest] = (pi, 1);
+            self.pi_next = (weakest + 1) % PI_CANDIDATES;
             return;
         }
-        self.pi_pending = None;
+        self.pi_votes = [(0, 0); PI_CANDIDATES];
         if self.info.pi.is_some() {
             // A different station: forget everything that belonged to the previous one.
             self.clear_station();
@@ -1045,11 +1124,17 @@ impl RdsDecoder {
                     #[cfg(not(test))]
                     let _ = (pos, info, corrected);
                 }
-                BlockEvent::Bad { .. } => self.bad_blocks += 1,
+                BlockEvent::Bad { .. } | BlockEvent::SoftPi { .. } => self.bad_blocks += 1,
                 BlockEvent::Lost => {}
             }
             self.groups.event(event);
         }
+    }
+
+    /// Switches the soft combining of block A off (test hook).
+    #[cfg(test)]
+    pub(crate) fn set_hard_pi_only(&mut self, hard: bool) {
+        self.framer.hard_pi_only = hard;
     }
 
     /// Feeds already differentially decoded bits (test hook).
@@ -1300,6 +1385,52 @@ mod tests {
         let info = dec.info();
         assert_eq!(info.ps.as_deref(), Some("SUPERHET"));
         assert_eq!(info.rt.as_deref(), Some("Hello RDS world"));
+    }
+
+    /// Groups whose block A is hit by `errors` scattered unreliable bit errors in each of the
+    /// first `hit_groups` repetitions (a different pattern every time), too spread out for the
+    /// burst corrector.
+    fn scattered_a_errors(
+        groups: &[[u16; 4]],
+        hit_groups: usize,
+        errors: usize,
+    ) -> Vec<(bool, f32)> {
+        let mut soft: Vec<(bool, f32)> = group_bits(groups).into_iter().map(|b| (b, 1.0)).collect();
+        for g in 0..hit_groups.min(groups.len()) {
+            for k in 0..errors {
+                let at = g * 104 + (g * 3 + k * 8) % 26;
+                soft[at].0 = !soft[at].0;
+                soft[at].1 = 0.1;
+            }
+        }
+        soft
+    }
+
+    #[test]
+    fn soft_combining_recovers_the_pi_from_blocks_that_never_decode() {
+        let groups = cycle(0xD3C2, 10, "SUPERHET", "Hello RDS world");
+        let soft = scattered_a_errors(&groups, groups.len(), 3);
+        let mut hard = RdsDecoder::new(256_000.0);
+        hard.set_hard_pi_only(true);
+        hard.push_soft_bits(&soft[11..]);
+        assert!(hard.synced());
+        assert_eq!(hard.info().pi, None, "no block A decodes on its own");
+        let mut dec = RdsDecoder::new(256_000.0);
+        dec.push_soft_bits(&soft[11..]);
+        assert!(dec.synced());
+        assert_eq!(dec.info().pi, Some(0xD3C2));
+    }
+
+    #[test]
+    fn soft_combining_does_not_mix_up_stations() {
+        let a = cycle(0xD3C2, 10, "STATIONA", "Hello RDS world");
+        let b = cycle(0x1234, 10, "STATIONB", "Hello RDS world");
+        let mut soft = scattered_a_errors(&a, 3, 3);
+        soft.extend(scattered_a_errors(&b, b.len(), 3));
+        let mut dec = RdsDecoder::new(256_000.0);
+        dec.push_soft_bits(&soft[11..]);
+        assert_eq!(dec.info().pi, Some(0x1234));
+        assert_ne!(dec.info().pi, Some(0xD3C2));
     }
 
     #[test]

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { isEmptyRds, parseRds, ptyName, sameRds } from "./rds";
+import {
+  isEmptyRds,
+  parseRds,
+  ptyName,
+  rdsQualityLevel,
+  rdsTooWeakForText,
+  sameRds,
+  type RdsState,
+} from "./rds";
 
 const full = {
   v: 1,
@@ -15,6 +23,42 @@ const full = {
   rt: "Hello",
 };
 
+describe("rds quality", () => {
+  it("reads and range-checks bler and quality", () => {
+    expect(parseRds({ ...full, bler: 12, quality: 88 })?.state).toMatchObject({
+      bler: 12,
+      quality: 88,
+    });
+    expect(parseRds(full)?.state).toMatchObject({ bler: null, quality: null });
+    expect(parseRds({ ...full, bler: 101, quality: "x" })?.state).toMatchObject({
+      bler: null,
+      quality: null,
+    });
+  });
+
+  it("grades reception and spots signals too weak for text", () => {
+    const s = parseRds(full)?.state as RdsState;
+    expect(rdsQualityLevel({ synced: false, bler: 0 })).toBe("none");
+    expect(rdsQualityLevel({ synced: true, bler: null })).toBe("fair");
+    expect(rdsQualityLevel({ synced: true, bler: 10 })).toBe("good");
+    expect(rdsQualityLevel({ synced: true, bler: 35 })).toBe("fair");
+    expect(rdsQualityLevel({ synced: true, bler: 36 })).toBe("poor");
+    expect(rdsTooWeakForText({ ...s, bler: 60, ps: null })).toBe(true);
+    expect(rdsTooWeakForText({ ...s, bler: 60 })).toBe(false);
+    expect(rdsTooWeakForText({ ...s, bler: 20, ps: null })).toBe(false);
+    expect(rdsTooWeakForText({ ...s, synced: false, bler: 60, ps: null })).toBe(false);
+  });
+
+  it("keeps a quality-only state on screen and treats a changed rate as a change", () => {
+    const empty = parseRds({ v: 1, type: "rds", vfo: 1, synced: false })?.state as RdsState;
+    expect(isEmptyRds(empty)).toBe(true);
+    expect(isEmptyRds({ ...empty, quality: 0 })).toBe(false);
+    expect(sameRds({ ...empty, bler: 3, quality: 97 }, { ...empty, bler: 4, quality: 96 })).toBe(
+      false,
+    );
+  });
+});
+
 describe("parseRds", () => {
   it("reads a full message", () => {
     const m = parseRds(full);
@@ -28,6 +72,8 @@ describe("parseRds", () => {
       ms: true,
       ps: "SUPERHET",
       rt: "Hello",
+      bler: null,
+      quality: null,
     });
   });
 

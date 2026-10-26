@@ -45,11 +45,23 @@ fn real_recording_probe() {
         let mut out = Vec::new();
         let mut synced = 0;
         let mut power = 0.0;
-        for chunk in iq.chunks(rate as usize / 20) {
+        // Seconds (of recording) until the PI and the PS were first decoded.
+        let (mut pi_at, mut ps_at) = (None, None);
+        for (k, chunk) in iq.chunks(rate as usize / 20).enumerate() {
             power = ch.process(chunk, &mut out).power_dbfs;
             out.clear();
             synced += usize::from(ch.rds_synced());
+            let t = (k + 1) as f64 / 20.0;
+            if let Some(info) = ch.rds_info() {
+                if pi_at.is_none() && info.pi.is_some() {
+                    pi_at = Some(t);
+                }
+                if ps_at.is_none() && info.ps.is_some() {
+                    ps_at = Some(t);
+                }
+            }
         }
+        eprintln!("offset {offset}: PI after {pi_at:?} s, PS after {ps_at:?} s");
         eprintln!(
             "offset {offset}: power {power:.1} pilot {} synced {synced}/{} blocks (good, bad) {:?} info {:?}",
             ch.stereo_locked(),

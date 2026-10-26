@@ -14,7 +14,7 @@ use superhet_dsp::{SpectrumConfig, SpectrumError, SpectrumProcessor};
 
 use crate::audio::IqTap;
 use crate::config::SpectrumSettings;
-use crate::overload::OverloadMonitor;
+use crate::overload::{OverloadMonitor, OverloadStatus};
 use crate::zoom::ZoomEngine;
 
 /// Blocks buffered between device thread and DSP thread.
@@ -44,6 +44,7 @@ pub struct Pipeline {
     control: Arc<dyn DeviceControl>,
     thread: Option<JoinHandle<()>>,
     running: Arc<AtomicBool>,
+    overload: Arc<OverloadStatus>,
 }
 
 /// Clears the running flag when the DSP thread ends, even by panic.
@@ -60,6 +61,12 @@ impl Pipeline {
     #[must_use]
     pub fn running_flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.running)
+    }
+
+    /// ADC overload state, updated by the DSP thread every few seconds.
+    #[must_use]
+    pub fn overload(&self) -> Arc<OverloadStatus> {
+        Arc::clone(&self.overload)
     }
 
     /// Handle for changing the device settings while the pipeline runs.
@@ -93,6 +100,8 @@ impl Pipeline {
         let stream: IqStream = device.start(QUEUE_BLOCKS)?;
         let running = Arc::new(AtomicBool::new(true));
         let guard = RunningGuard(Arc::clone(&running));
+        let overload_status = Arc::new(OverloadStatus::default());
+        let overload_out = Arc::clone(&overload_status);
         let thread = std::thread::Builder::new()
             .name("sdrd-dsp".into())
             .spawn(move || {
@@ -125,7 +134,7 @@ impl Pipeline {
                         settle -= 1;
                         continue;
                     }
-                    overload.observe(&block.samples);
+                    overload.observe(&block.samples, &overload_out);
                     if let Some(zoom) = &mut zoom {
                         zoom.process(&block.samples, block.center_hz, block.sample_rate);
                     }
@@ -159,6 +168,7 @@ impl Pipeline {
             control,
             thread: Some(thread),
             running,
+            overload: overload_status,
         })
     }
 }

@@ -95,7 +95,7 @@ fields and limits: section "VFOs" below. Bodies are at most 4 KiB, `Content-Type
 
 ## State object
 
-`{"v":1,"device","driver","tuner"?,"center_hz","sample_rate","gain":{"mode":"auto"|"manual","db":null|number}|null,"ppm","bias_tee","tuning_epoch","gains_db":[...],"vfos":[...],"locks":[...],"window":{"start_hz","end_hz"}}`
+`{"v":1,"device","driver","tuner"?,"center_hz","sample_rate","gain":{"mode":"auto"|"manual","db":null|number}|null,"ppm","bias_tee","tuning_epoch","gains_db":[...],"vfos":[...],"locks":[...],"window":{"start_hz","end_hz"},"overload":{"active","clipped_percent"}}`
 
 `vfos` lists the device's VFOs (see below) with their current `status`; it is re-published on
 every VFO change and every retune (status follows the tuning). VFOs live in the daemon's memory
@@ -107,6 +107,12 @@ is free), see "Tuning lock".
 
 `gain` is `null` for devices without gain control (file replay); `gains_db` lists the selectable
 manual steps. `tuner` is omitted when unknown.
+
+`overload` is the ADC clipping report of the daemon: every 5 s it counts the samples at the
+8-bit rails; `active` is true when 1 % or more clipped, `clipped_percent` is the share of the
+last interval. The state is re-published when `active` flips or the rounded percentage changes.
+The UI shows a warning chip and, with automatic gain, a hint to switch to manual gain. Clients
+must tolerate the field being absent (older daemons).
 
 ## VFOs
 

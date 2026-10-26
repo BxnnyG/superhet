@@ -26,6 +26,7 @@ use superhet_bus::tones::TonesMessage;
 use superhet_device::IqBlock;
 use superhet_dsp::{Channel, Mode, OUTPUT_RATE};
 
+use crate::rds_quality::RdsQuality;
 use crate::vfo::{Status, Tuning, Vfo, VfoShared};
 
 /// IQ blocks buffered between the spectrum thread and the VFO thread.
@@ -208,6 +209,8 @@ struct Slot {
     /// Last published RDS state `(revision, synced)`; the 1 s repeat timer.
     rds_seen: (u64, bool),
     rds_at: Instant,
+    /// Block error rate over the last seconds.
+    rds_quality: RdsQuality,
     /// A non-empty RDS state was published and has not been cleared since.
     rds_active: bool,
     /// The channel was replaced or removed: publish an empty RDS state.
@@ -240,6 +243,7 @@ impl Slot {
             stereo_locked: false,
             rds_seen: (0, false),
             rds_at: Instant::now(),
+            rds_quality: RdsQuality::default(),
             rds_active: false,
             rds_clear: false,
             tones_seen: (None, 0),
@@ -294,6 +298,7 @@ impl Slot {
                 Ok(channel) => {
                     self.rds_clear |= self.rds_active;
                     self.rds_seen = (0, false);
+                    self.rds_quality.clear();
                     self.tones_clear |= self.tones_active;
                     self.tones_seen = (None, 0);
                     self.channel = Some(channel);
@@ -353,13 +358,18 @@ impl Slot {
             Some(channel) => {
                 let seen = (channel.rds_revision(), channel.rds_synced());
                 let info = channel.rds_info();
-                let nonempty = seen.1 || info.is_some_and(|i| !i.is_empty());
+                let quality =
+                    self.rds_quality
+                        .observe(Instant::now(), channel.rds_block_counts(), seen.1);
+                let nonempty = seen.1 || quality.is_some() || info.is_some_and(|i| !i.is_empty());
                 let due = nonempty && self.rds_at.elapsed() >= RDS_REPEAT;
                 if !self.rds_clear && seen == self.rds_seen && !due {
                     return;
                 }
                 self.rds_seen = seen;
                 let mut message = RdsMessage::empty(id);
+                message.bler = quality.map(|q| q.bler);
+                message.quality = quality.map(|q| q.quality);
                 if let Some(info) = info {
                     message.synced = seen.1;
                     message.pi = info.pi.map(|pi| format!("{pi:04X}"));
