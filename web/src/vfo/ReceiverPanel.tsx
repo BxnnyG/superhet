@@ -3,7 +3,13 @@ import type { AudioController, AudioSnapshot } from "../audio/controller";
 import { Badge, Button, EmptyState, PauseIcon, TrashIcon, cn } from "../ui";
 import type { Vfo, VfoPatch } from "./api";
 import type { AutoSquelch } from "./autoSquelch";
-import { BandwidthSelect, ModeSelect, SquelchControl, VolumeControl } from "./controls";
+import {
+  BandwidthSelect,
+  CwPitchControl,
+  ModeSelect,
+  SquelchControl,
+  VolumeControl,
+} from "./controls";
 import { MODE_LABEL, VFO_PAUSED_FREE_HINT, VFO_PAUSED_HINT, vfoColor } from "./model";
 import { RdsPanel } from "./RdsPanel";
 import { SMeter } from "./SMeter";
@@ -82,6 +88,11 @@ export function ReceiverPanel({
           <p className="text-xs text-fg-muted">
             De-emphasis <span className="font-mono text-fg">{vfo.deemphasis ?? "default"}</span>
           </p>
+        </Block>
+      )}
+      {vfo.mode === "cw" && (
+        <Block title="CW">
+          <CwPitchControl vfo={vfo} onUpdate={onUpdate} />
         </Block>
       )}
       <Block title="Output">

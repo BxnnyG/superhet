@@ -29,6 +29,8 @@ export interface Vfo {
   /** null = squelch off. */
   squelchDbfs: number | null;
   deemphasis: string | null;
+  /** CW pitch in Hz; null for every mode but CW. */
+  cwPitchHz?: number | null;
   /** Stereo decoding on/off; null for modes without stereo (everything but WFM). */
   stereo?: boolean | null;
   /** CTCSS / DTMF detection on/off; null for modes without it (everything but NFM and AM). */
@@ -44,6 +46,8 @@ export interface VfoCreate {
   mode: VfoMode;
   bandwidthHz?: number;
   squelchDbfs?: number | null;
+  /** CW only: pitch in Hz (daemon default 700). */
+  cwPitchHz?: number;
   /** NFM and AM only, one of the standard CTCSS tones. */
   toneSquelchHz?: number | null;
 }
@@ -54,6 +58,8 @@ export interface VfoPatch {
   mode?: VfoMode;
   bandwidthHz?: number | null;
   squelchDbfs?: number | null;
+  /** CW only: pitch in Hz (200..2000 on the daemon); `null` resets to the default. */
+  cwPitchHz?: number | null;
   /** WFM only; `null` resets to the default (on). */
   stereo?: boolean | null;
   /** NFM and AM only; `null` resets to the default (on for NFM, off for AM). */
@@ -98,6 +104,7 @@ export function parseVfo(raw: unknown): Vfo {
     bandwidth_hz,
     squelch_dbfs,
     deemphasis,
+    cw_pitch_hz,
     stereo,
     tones,
     tone_squelch_hz,
@@ -123,6 +130,7 @@ export function parseVfo(raw: unknown): Vfo {
     bandwidthHz: bandwidth_hz,
     squelchDbfs: typeof squelch_dbfs === "number" ? squelch_dbfs : null,
     deemphasis: typeof deemphasis === "string" ? deemphasis : null,
+    cwPitchHz: typeof cw_pitch_hz === "number" && Number.isFinite(cw_pitch_hz) ? cw_pitch_hz : null,
     stereo: typeof stereo === "boolean" ? stereo : null,
     tones: typeof tones === "boolean" ? tones : null,
     toneSquelchHz:
@@ -180,6 +188,7 @@ export function createBody(req: VfoCreate): Rec {
   const body: Rec = { v: 1, freq_hz: req.freqHz, mode: req.mode };
   if (req.bandwidthHz !== undefined) body.bandwidth_hz = req.bandwidthHz;
   if (req.squelchDbfs !== undefined) body.squelch_dbfs = req.squelchDbfs;
+  if (req.cwPitchHz !== undefined) body.cw_pitch_hz = req.cwPitchHz;
   if (req.toneSquelchHz !== undefined) body.tone_squelch_hz = req.toneSquelchHz;
   return body;
 }
@@ -190,6 +199,7 @@ export function patchBody(patch: VfoPatch): Rec {
   if (patch.mode !== undefined) body.mode = patch.mode;
   if (patch.bandwidthHz !== undefined) body.bandwidth_hz = patch.bandwidthHz;
   if (patch.squelchDbfs !== undefined) body.squelch_dbfs = patch.squelchDbfs;
+  if (patch.cwPitchHz !== undefined) body.cw_pitch_hz = patch.cwPitchHz;
   if (patch.stereo !== undefined) body.stereo = patch.stereo;
   if (patch.tones !== undefined) body.tones = patch.tones;
   if (patch.toneSquelchHz !== undefined) body.tone_squelch_hz = patch.toneSquelchHz;
