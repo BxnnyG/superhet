@@ -124,6 +124,14 @@
   #root {
     height: 100%;
   }
+  /* The shell fills the dynamic viewport (mobile browser bars); 100% above is the fallback. */
+  @supports (height: 100dvh) {
+    html,
+    body,
+    #root {
+      height: 100dvh;
+    }
+  }
   * {
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;

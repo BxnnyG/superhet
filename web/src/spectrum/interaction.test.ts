@@ -224,6 +224,27 @@ describe("wheel routing", () => {
     ia.destroy();
   });
 
+  it("Alt-click on a strip entry opens it on a new VFO, a plain click retunes the active one", () => {
+    const hit = { kind: "channel", channel: { freqHz: 145_000_000, mode: "nfm" }, x: 100 };
+    const annotations = { hit: () => hit } as unknown as AnnotationLayer;
+    const onAnnotationTune = vi.fn();
+    const { canvas, calls, it: ia } = setup({ annotations, onAnnotationTune });
+    pointer(canvas, "pointerdown", 100, 10);
+    pointer(canvas, "pointerup", 100, 10);
+    expect(onAnnotationTune).toHaveBeenLastCalledWith(
+      expect.objectContaining({ mode: "nfm" }),
+      false,
+    );
+    pointer(canvas, "pointerdown", 100, 10, { altKey: true });
+    pointer(canvas, "pointerup", 100, 10, { altKey: true });
+    expect(onAnnotationTune).toHaveBeenLastCalledWith(
+      expect.objectContaining({ mode: "nfm" }),
+      true,
+    );
+    expect(calls.create).not.toHaveBeenCalled();
+    ia.destroy();
+  });
+
   it("tune mode tunes everywhere except with Ctrl", () => {
     const { canvas, calls, view, it: ia } = setup({ getWheelMode: () => "tune" });
     const e = wheel(canvas, 100, -100);
