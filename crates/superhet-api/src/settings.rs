@@ -14,6 +14,12 @@ pub const KEY_GUEST: &str = "guest_policy";
 pub const KEY_AUDIT: &str = "audit";
 /// Settings key of the VFO limits.
 pub const KEY_LIMITS: &str = "limits";
+/// Settings key of the client report policy.
+pub const KEY_CLIENT_REPORT: &str = "client_report";
+/// Lookup service offered for "ask clients for their public IP" (the service sees the address).
+pub const DEFAULT_PUBLIC_IP_SERVICE: &str = "https://api.ipify.org?format=json";
+/// Longest accepted service URL, in characters.
+pub const SERVICE_URL_MAX: usize = 200;
 
 /// How long a read value is reused. Writes through this process refresh at once.
 const CACHE_TTL: Duration = Duration::from_secs(5);
@@ -74,6 +80,100 @@ impl AuditSettings {
             return Err(format!("retention must be 0..={RETENTION_MAX_DAYS} days"));
         }
         Ok(())
+    }
+}
+
+/// Whose browsers are asked to report device details at session start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CollectScope {
+    /// Nobody (the default).
+    Off,
+    /// Signed-in accounts only.
+    Users,
+    /// Accounts and guests.
+    All,
+}
+
+/// Client-reported device info and public address (`docs/client-addresses.md`, "Client-reported
+/// information"). Everything is off until the admin turns it on; the data is unverified.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ClientReportPolicy {
+    /// Whose browsers report device details (User-Agent Client Hints, screen, languages ...).
+    pub collect: CollectScope,
+    /// Also make the browser look up its public address at `public_ip_service` and report it.
+    /// Only for the browsers `collect` covers.
+    pub ask_public_ip: bool,
+    /// HTTPS URL that answers `{"ip": "..."}` or a bare address in plain text.
+    pub public_ip_service: String,
+}
+
+impl Default for ClientReportPolicy {
+    fn default() -> Self {
+        Self {
+            collect: CollectScope::Off,
+            ask_public_ip: false,
+            public_ip_service: DEFAULT_PUBLIC_IP_SERVICE.to_owned(),
+        }
+    }
+}
+
+impl ClientReportPolicy {
+    /// Check the service URL: `https://`, a host, no credentials, no fragment.
+    ///
+    /// # Errors
+    /// A message naming the problem.
+    pub fn validate(&self) -> Result<(), String> {
+        self.service_origin().map(|_| ())
+    }
+
+    /// `https://host[:port]` of the lookup service: what the CSP `connect-src` must allow.
+    ///
+    /// # Errors
+    /// A message naming the problem with the URL.
+    pub fn service_origin(&self) -> Result<String, String> {
+        let url = self.public_ip_service.trim();
+        if url.is_empty() || url.chars().count() > SERVICE_URL_MAX {
+            return Err(format!(
+                "public_ip_service must be 1..={SERVICE_URL_MAX} characters"
+            ));
+        }
+        if url.chars().any(|c| c.is_control() || c.is_whitespace()) {
+            return Err("public_ip_service must not contain whitespace".into());
+        }
+        let uri: axum::http::Uri = url
+            .parse()
+            .map_err(|_| "public_ip_service is not a valid URL".to_owned())?;
+        if uri.scheme_str() != Some("https") {
+            return Err("public_ip_service must be an https:// URL".into());
+        }
+        let authority = uri
+            .authority()
+            .ok_or_else(|| "public_ip_service needs a host".to_owned())?;
+        if authority.as_str().contains('@') {
+            return Err("public_ip_service must not contain credentials".into());
+        }
+        if uri.host().is_none_or(str::is_empty) {
+            return Err("public_ip_service needs a host".into());
+        }
+        Ok(format!("https://{authority}"))
+    }
+
+    /// Whether the browser of a guest (`guest`) or an account is asked for device details.
+    #[must_use]
+    pub fn collects(&self, guest: bool) -> bool {
+        match self.collect {
+            CollectScope::Off => false,
+            CollectScope::Users => !guest,
+            CollectScope::All => true,
+        }
+    }
+
+    /// Whether that browser is also asked for its public address.
+    #[must_use]
+    pub fn asks_public_ip(&self, guest: bool) -> bool {
+        self.ask_public_ip && self.collects(guest)
     }
 }
 
@@ -228,12 +328,21 @@ struct Cache {
     guest: Option<Cached<GuestPolicy>>,
     audit: Option<Cached<AuditSettings>>,
     limits: Option<Cached<Limits>>,
+    client_report: Option<Cached<ClientReportPolicy>>,
 }
 
 /// The three settings documents with a read cache.
 pub struct SettingsStore {
     db: Option<PgPool>,
     cache: Mutex<Cache>,
+}
+
+/// The origin the page may connect to for the public-address lookup, if anybody is asked.
+fn lookup_origin(policy: &ClientReportPolicy) -> Option<String> {
+    if policy.collect == CollectScope::Off || !policy.ask_public_ip {
+        return None;
+    }
+    policy.service_origin().ok()
 }
 
 fn fresh<T: Clone>(slot: &Option<Cached<T>>) -> Option<T> {
@@ -310,6 +419,44 @@ impl SettingsStore {
             at: Instant::now(),
         });
         value
+    }
+
+    /// The client report policy (everything off when nothing is stored). Reading it also keeps
+    /// the page's content security policy in step with the configured lookup service.
+    pub async fn client_report(&self) -> ClientReportPolicy {
+        if let Some(v) = fresh(&self.cache().client_report) {
+            return v;
+        }
+        let value: ClientReportPolicy = self.load(KEY_CLIENT_REPORT).await;
+        self.cache().client_report = Some(Cached {
+            value: value.clone(),
+            at: Instant::now(),
+        });
+        crate::web::set_lookup_origin(lookup_origin(&value));
+        value
+    }
+
+    /// Replace the client report policy.
+    ///
+    /// # Errors
+    /// Fails if the database is unavailable.
+    pub async fn put_client_report(
+        &self,
+        value: &ClientReportPolicy,
+        by: &str,
+    ) -> Result<(), SettingsError> {
+        self.store(
+            KEY_CLIENT_REPORT,
+            serde_json::to_value(value).unwrap_or_default(),
+            by,
+        )
+        .await?;
+        self.cache().client_report = Some(Cached {
+            value: value.clone(),
+            at: Instant::now(),
+        });
+        crate::web::set_lookup_origin(lookup_origin(value));
+        Ok(())
     }
 
     async fn store(
@@ -448,6 +595,73 @@ mod tests {
             .validate()
             .is_err()
         );
+    }
+
+    #[test]
+    fn client_reports_are_off_by_default_and_follow_the_scope() {
+        let p = ClientReportPolicy::default();
+        assert!(!p.collects(false) && !p.collects(true) && !p.asks_public_ip(false));
+        assert_eq!(p.public_ip_service, DEFAULT_PUBLIC_IP_SERVICE);
+        assert_eq!(p.validate(), Ok(()));
+        let users = ClientReportPolicy {
+            collect: CollectScope::Users,
+            ask_public_ip: true,
+            ..p.clone()
+        };
+        assert!(users.collects(false) && !users.collects(true));
+        assert!(users.asks_public_ip(false) && !users.asks_public_ip(true));
+        let all = ClientReportPolicy {
+            collect: CollectScope::All,
+            ..users.clone()
+        };
+        assert!(all.collects(true) && all.asks_public_ip(true));
+        // Asking for the address without collecting at all asks nobody.
+        let no_collect = ClientReportPolicy {
+            ask_public_ip: true,
+            ..p
+        };
+        assert!(!no_collect.asks_public_ip(false));
+    }
+
+    #[test]
+    fn the_lookup_service_must_be_a_plain_https_url() {
+        let with = |url: &str| ClientReportPolicy {
+            public_ip_service: url.to_owned(),
+            ..ClientReportPolicy::default()
+        };
+        assert_eq!(
+            with("https://api.ipify.org?format=json").service_origin(),
+            Ok("https://api.ipify.org".to_owned())
+        );
+        assert_eq!(
+            with("https://ip.example.net:8443/ip").service_origin(),
+            Ok("https://ip.example.net:8443".to_owned())
+        );
+        for bad in [
+            "",
+            "http://api.ipify.org",
+            "ftp://x.example",
+            "api.ipify.org",
+            "https://user:pw@x.example/",
+            "https://x.example/a b",
+            "https:///path",
+            "https://x.example;script-src *",
+            "javascript:alert(1)",
+        ] {
+            assert!(with(bad).validate().is_err(), "{bad}");
+        }
+        let long = format!("https://x.example/{}", "a".repeat(200));
+        assert!(with(&long).validate().is_err());
+    }
+
+    #[test]
+    fn lookup_origin_only_while_somebody_is_asked() {
+        let mut p = ClientReportPolicy::default();
+        assert_eq!(lookup_origin(&p), None);
+        p.ask_public_ip = true;
+        assert_eq!(lookup_origin(&p), None, "collect is off");
+        p.collect = CollectScope::Users;
+        assert_eq!(lookup_origin(&p).as_deref(), Some("https://api.ipify.org"));
     }
 
     #[test]

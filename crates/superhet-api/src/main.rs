@@ -141,6 +141,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!(banned, "address bans loaded");
     }
     auth.spawn_maintenance();
+    // Reading the policy once lets the page's CSP allow the public-address lookup service when
+    // the admin asks clients for it (docs/client-addresses.md).
+    let _ = auth.settings().client_report().await;
     let ws = ws::WsState::new(
         Arc::new(hub::Hub::new(nats.clone())),
         origins.clone(),

@@ -61,6 +61,23 @@ test("the first visitor sets up the administrator", async () => {
   await expect(page.getByRole("button", { name: "Admin console" })).toBeVisible();
 });
 
+test("the inspector tabs fit at desktop width without scrolling", async () => {
+  const { page } = admin;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await expectReceiver(page);
+  const list = page.getByRole("tablist", { name: "Inspector" });
+  await expect(list).toBeVisible();
+  expect(await list.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+  expect(await list.evaluate((el) => el.getAttribute("data-mode"))).not.toBe("full");
+  // Collapsed tabs keep their name for assistive technology and stay clickable.
+  for (const name of ["Receiver", "Bookmarks", "Channels", "Decoders", "Display", "Source"]) {
+    await expect(page.getByRole("tab", { name })).toBeVisible();
+  }
+  await page.getByRole("tab", { name: "Display" }).click();
+  await expect(page.getByRole("tab", { name: "Display" })).toHaveAttribute("aria-selected", "true");
+});
+
 test("the admin creates an invitation for a listener", async () => {
   const { page } = admin;
   await page.goto("/admin/users");
@@ -149,6 +166,54 @@ test("a guest enters, is listed, and is kicked by the admin", async () => {
   } finally {
     await guest.context.close();
   }
+});
+
+test("browsers report their device and public IP once the admin asks for it", async () => {
+  const { page } = admin;
+  await page.goto("/admin/client-info");
+  await page.getByLabel("Ask the browsers of").selectOption("all");
+  await page.getByRole("switch", { name: "Ask clients for their public IP" }).click();
+  await expect(page.getByText(/the third party sees their IP address/)).toBeVisible();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("All changes saved")).toBeVisible();
+
+  const guest = await person();
+  // The lookup service is stubbed; the request still has to pass the page's CSP.
+  await guest.page.route("https://api.ipify.org/*", (route) =>
+    route.fulfill({ json: { ip: "198.51.100.23" } }),
+  );
+  try {
+    await guest.page.goto("/");
+    await guest.page.getByRole("button", { name: "Continue as guest" }).click();
+    const notice = guest.page.getByRole("region", { name: "Device details" });
+    await expect(notice).toContainText("public IP address");
+    await expect(notice).toContainText("api.ipify.org");
+    await guest.page.getByRole("button", { name: "Accept and continue as guest" }).click();
+    await expectReceiver(guest.page);
+
+    await page.goto("/admin/sessions");
+    const row = page.getByRole("listitem").filter({ hasText: /Guest [0-9a-f]{6}/ });
+    await expect(row.getByText("client-reported · unverified").first()).toBeVisible({
+      timeout: 15_000,
+    });
+    // Guests are truncated like their own address; the claim is not the address the server sees.
+    await expect(row).toContainText("198.51.100.0");
+    await row
+      .getByText(/public IP/)
+      .first()
+      .click();
+    await expect(row.getByText("Public IP (client-reported)")).toBeVisible();
+  } finally {
+    await guest.context.close();
+  }
+
+  await page.goto("/admin/audit");
+  await expect(
+    page
+      .getByRole("table", { name: "Audit events" })
+      .getByText("session.client_report", { exact: true })
+      .first(),
+  ).toBeVisible();
 });
 
 test("the admin bans and lifts a network", async () => {

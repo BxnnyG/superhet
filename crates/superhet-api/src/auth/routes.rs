@@ -228,6 +228,11 @@ async fn status_inner(auth: &AuthState, client: &ClientInfo, headers: &HeaderMap
         .await
         .map_err(db_failed)?;
     let guest = auth.settings().guest_policy().await;
+    let report = auth.settings().client_report().await;
+    let guest_notice = guest
+        .enabled
+        .then(|| client_report_notice(&report, true))
+        .flatten();
     let (user_id, username) = match principal.as_ref().map(|p| &p.actor) {
         Some(crate::access::Actor::User(id)) => {
             (Some(*id), principal.as_ref().map(|p| p.name.clone()))
@@ -245,9 +250,27 @@ async fn status_inner(auth: &AuthState, client: &ClientInfo, headers: &HeaderMap
         "guest": {
             "enabled": guest.enabled,
             "privacy_text": guest.enabled.then_some(guest.privacy_text),
+            // Tells the guest page up front what the browser will be asked to report.
+            "client_report": guest_notice,
         },
+        // What this browser is asked to report about itself (null: nothing).
+        "client_report": principal
+            .as_ref()
+            .and_then(|p| client_report_notice(&report, p.is_guest())),
     });
     Ok(json_reply(StatusCode::OK, &body))
+}
+
+/// The client report request for a browser, or `None` when it is not asked for anything.
+fn client_report_notice(
+    policy: &crate::settings::ClientReportPolicy,
+    guest: bool,
+) -> Option<serde_json::Value> {
+    policy.collects(guest).then(|| {
+        serde_json::json!({
+            "public_ip_service": policy.asks_public_ip(guest).then(|| policy.public_ip_service.clone()),
+        })
+    })
 }
 
 async fn setup(

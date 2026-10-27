@@ -311,6 +311,30 @@ describe("settings", () => {
     expect(call(l.f, 1).body).toEqual({ listener_max_vfos: 2, operator_max_vfos: 6 });
   });
 
+  it("reads and writes the client report policy", async () => {
+    const doc = {
+      client_report: {
+        collect: "users",
+        ask_public_ip: true,
+        public_ip_service: "https://api.ipify.org?format=json",
+      },
+    };
+    const a = api(reply(200, doc));
+    const got = await a.client.getClientReportPolicy();
+    expect(got).toEqual({
+      collect: "users",
+      askPublicIp: true,
+      publicIpService: "https://api.ipify.org?format=json",
+    });
+    expect(call(a.f, 0).url).toBe("/api/v1/admin/client-report-policy");
+    await a.client.putClientReportPolicy(got);
+    expect(call(a.f, 1).init.method).toBe("PUT");
+    expect(call(a.f, 1).body).toEqual(doc.client_report);
+    // An unknown scope reads as off rather than as something that collects.
+    const odd = api(reply(200, { client_report: { collect: "everyone" } }));
+    expect((await odd.client.getClientReportPolicy()).collect).toBe("off");
+  });
+
   it("a 403 for non-admins keeps its code", async () => {
     const { client } = api(reply(403, { error: "forbidden" }));
     await expect(client.getLimits()).rejects.toMatchObject({ status: 403, code: "forbidden" });

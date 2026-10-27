@@ -18,6 +18,7 @@ use crate::access::{Actor, Principal};
 use crate::audit::store_ip;
 use crate::auth::{Reply, db_failed, flatten, guard_origin, json_reply, token};
 use crate::clientinfo::Subject;
+use crate::clientinfo::report::present;
 use crate::devices::ctl_state;
 use crate::registry::ConnInfo;
 use crate::settings::IpMode;
@@ -108,6 +109,7 @@ fn user_session_json(
         "ip": ip,
         "peer_addr": peer,
         "user_agent": s.user_agent,
+        "client_report": s.client_report.as_ref().map(|r| present(r, ip_mode)),
         "created_at_ms": s.created_at_ms,
         "last_seen_ms": s.last_seen_ms,
         "current": current == Some(key.as_str()),
@@ -148,6 +150,7 @@ async fn list_inner(state: &AdminState) -> Reply {
             "ip": ip,
             "peer_addr": peer,
             "user_agent": guest.user_agent,
+            "client_report": guest.client_report.as_ref().map(|r| present(r, settings.ip_mode_guest)),
             "created_at_ms": guest.created_ms,
             "idle_secs": idle_secs,
             "connections": conns_json(&state.auth.registry().connections_of(&crate::registry::guest_key(&guest.id))),

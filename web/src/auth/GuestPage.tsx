@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Alert, Button } from "../ui";
+import type { ClientReportRequest } from "../clientreport/collect";
 import { AuthError, type AuthClient, type GuestInfo } from "./api";
 import { AuthLayout } from "./AuthLayout";
 
@@ -9,6 +10,38 @@ interface Props {
   /** The guest session exists now; the gate loads the app. */
   onStarted: () => void;
   onBack: () => void;
+}
+
+/** Host of a lookup service URL, for the notice ("api.ipify.org"). */
+export function serviceHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+/** What the browser will be asked to report; shown before a guest session starts. */
+export function ClientReportNotice({ request }: { request: ClientReportRequest }) {
+  return (
+    <section
+      aria-label="Device details"
+      className="rounded-lg border border-border bg-surface-2 p-3 text-xs text-fg-muted"
+    >
+      <p>
+        This server asks your browser for device details when you start: browser and system, screen
+        size, language, time zone and similar. It is shown to the administrator, who cannot verify
+        it.
+      </p>
+      {request.publicIpService && (
+        <p className="mt-1.5">
+          It also asks your browser for your <strong>public IP address</strong> from{" "}
+          <span className="font-mono">{serviceHost(request.publicIpService)}</span>. That service
+          sees your address when your browser contacts it.
+        </p>
+      )}
+    </section>
+  );
 }
 
 /** What the operator says about guest access, then the button that starts the guest session. */
@@ -49,6 +82,7 @@ export function GuestPage({ client, guest, onStarted, onBack }: Props) {
             {guest.privacyText}
           </section>
         ) : null}
+        {guest.clientReport && <ClientReportNotice request={guest.clientReport} />}
         <p className="text-xs text-fg-subtle">
           Guests can listen and open a limited number of receivers. They cannot change the device
           settings, and their session ends after a period of inactivity.

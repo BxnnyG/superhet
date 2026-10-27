@@ -37,6 +37,8 @@ pub struct GuestSession {
     pub user_agent: Option<String>,
     /// Start, Unix milliseconds.
     pub created_ms: i64,
+    /// Device details the browser reported (unverified); lives as long as the guest session.
+    pub client_report: Option<serde_json::Value>,
     last_active: Instant,
 }
 
@@ -211,6 +213,7 @@ impl Registry {
             peer,
             user_agent,
             created_ms: now_ms(),
+            client_report: None,
             last_active: Instant::now(),
         };
         inner.guests.insert(key, session.clone());
@@ -272,6 +275,16 @@ impl Registry {
             .find(|(_, g)| g.id == id)
             .map(|(k, _)| *k)?;
         self.guest_remove(&key)
+    }
+
+    /// Attach the device details a guest's browser reported. Returns whether the guest exists.
+    pub fn guest_set_report(&self, id: &str, report: serde_json::Value) -> bool {
+        self.lock()
+            .guests
+            .values_mut()
+            .find(|g| g.id == id)
+            .map(|g| g.client_report = Some(report))
+            .is_some()
     }
 
     /// End every guest session (guest mode switched off).

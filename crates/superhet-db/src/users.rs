@@ -329,6 +329,8 @@ pub struct SessionInfo {
     pub ip: Option<String>,
     /// Stored TCP peer address at login.
     pub peer_ip: Option<String>,
+    /// Device details the browser reported for this session (unverified, validated by the API).
+    pub client_report: Option<serde_json::Value>,
 }
 
 /// Sessions of one user, or of everybody (`None`), newest activity first.
@@ -340,7 +342,7 @@ pub async fn list_sessions(pool: &PgPool, user_id: Option<i64>) -> Result<Vec<Se
         "SELECT s.id, s.user_id, u.username, u.role, \
                 (extract(epoch FROM s.created_at) * 1000)::bigint AS created_ms, \
                 (extract(epoch FROM s.last_seen_at) * 1000)::bigint AS seen_ms, \
-                s.user_agent, s.ip, s.peer_ip \
+                s.user_agent, s.ip, s.peer_ip, s.client_report \
          FROM superhet.sessions s JOIN superhet.users u ON u.id = s.user_id \
          WHERE ($1::bigint IS NULL OR s.user_id = $1) \
          ORDER BY s.last_seen_at DESC",
@@ -360,8 +362,32 @@ pub async fn list_sessions(pool: &PgPool, user_id: Option<i64>) -> Result<Vec<Se
             user_agent: r.get("user_agent"),
             ip: r.get("ip"),
             peer_ip: r.get("peer_ip"),
+            client_report: r.get("client_report"),
         })
         .collect())
+}
+
+/// Store the device details a browser reported for its own session. Returns whether the session
+/// exists (and belongs to `user_id`).
+///
+/// # Errors
+/// Fails if the query fails.
+pub async fn set_session_client_report(
+    pool: &PgPool,
+    id: &[u8],
+    user_id: i64,
+    report: &serde_json::Value,
+) -> Result<bool, Error> {
+    Ok(sqlx::query(
+        "UPDATE superhet.sessions SET client_report = $3 WHERE id = $1 AND user_id = $2",
+    )
+    .bind(id)
+    .bind(user_id)
+    .bind(report)
+    .execute(pool)
+    .await?
+    .rows_affected()
+        > 0)
 }
 
 /// Delete one session by key; with `owner` only if it belongs to that user. Returns whether a

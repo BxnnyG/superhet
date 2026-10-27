@@ -7,6 +7,7 @@
 pub mod addr;
 pub mod geo;
 pub mod rdns;
+pub mod report;
 pub mod ua;
 
 use std::collections::HashSet;
@@ -48,6 +49,11 @@ fn base_info(ip: IpAddr) -> Map<String, Value> {
     m.insert("label".into(), json!(class.label()));
     m.insert("family".into(), json!(family(ip)));
     m
+}
+
+/// Class, label and family of an address (what the lists show next to it).
+pub(crate) fn ip_summary(ip: IpAddr) -> Map<String, Value> {
+    base_info(ip)
 }
 
 fn wants_rdns(ip: IpAddr) -> bool {

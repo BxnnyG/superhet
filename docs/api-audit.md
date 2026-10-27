@@ -40,6 +40,7 @@ and exported through the admin API. Not tamper-proof evidence: see "Append-only"
 | `session.kick` | admin kicks a session | `kind` |
 | `ban.create`, `ban.lift` | admin bans or un-bans an address (`target` = network) | `reason`, `expires_at_ms`, `kicked`, `session` (create) / `ban` (lift) |
 | `session.revoke` | user revokes an own session | |
+| `session.client_report` | a browser reported device details (policy `client-report-policy`) | `client`: the report (unverified; `public_ip` in the audit IP mode of the actor class) |
 | `session.connect`, `session.disconnect` | first WebSocket of a session opens / last one closes | `kind`, `duration_secs` |
 | `guest.session_start`, `guest.session_end` | guest session starts / ends (idle, guest mode off) | `reason` |
 | `guest.policy_change` | guest policy saved | `changed` (keys), `enabled` |

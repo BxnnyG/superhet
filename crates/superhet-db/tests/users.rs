@@ -260,6 +260,32 @@ async fn disabling_revokes_sessions_and_blocks_them() {
             .len(),
         2
     );
+    // A client report is stored on the owner's own session only and comes back in the list.
+    let report = serde_json::json!({"platform": "Linux", "screen": {"width": 1920}});
+    assert!(
+        users::set_session_client_report(&db.pool, &[1u8; 32], u, &report)
+            .await
+            .expect("report")
+    );
+    assert!(
+        !users::set_session_client_report(&db.pool, &[1u8; 32], u + 1, &report)
+            .await
+            .expect("report")
+    );
+    let listed = users::list_sessions(&db.pool, Some(u)).await.expect("list");
+    assert_eq!(
+        listed
+            .iter()
+            .find(|s| s.id == [1u8; 32])
+            .and_then(|s| s.client_report.clone()),
+        Some(report)
+    );
+    assert!(
+        listed
+            .iter()
+            .find(|s| s.id == [2u8; 32])
+            .is_some_and(|s| s.client_report.is_none())
+    );
     assert!(
         users::revoke_session(&db.pool, &[2u8; 32], Some(u))
             .await

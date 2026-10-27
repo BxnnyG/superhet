@@ -7,6 +7,7 @@
 
 mod audit_routes;
 mod bans;
+mod report;
 mod sessions;
 mod settings_routes;
 mod users;
@@ -73,6 +74,18 @@ pub fn router(state: AdminState) -> Router {
             get(bans::list).post(bans::create).layer(limit),
         )
         .route("/api/v1/admin/bans/{id}", delete(bans::lift))
+        .route(
+            "/api/v1/auth/client-report",
+            post(report::submit).layer(DefaultBodyLimit::max(
+                crate::clientinfo::report::MAX_BODY_BYTES,
+            )),
+        )
+        .route(
+            "/api/v1/admin/client-report-policy",
+            get(settings_routes::get_client_report_policy)
+                .put(settings_routes::put_client_report_policy)
+                .layer(limit),
+        )
         .route("/api/v1/me/sessions", get(sessions::mine))
         .route("/api/v1/me/sessions/{sid}", delete(sessions::revoke_mine))
         .route("/api/v1/admin/audit", get(audit_routes::query))
