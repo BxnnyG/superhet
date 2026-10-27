@@ -228,6 +228,12 @@ export const ShieldIcon = (p: IconProps) => (
     <path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6l8-3z" />
   </Icon>
 );
+export const BanIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M6 6l12 12" />
+  </Icon>
+);
 export const ListIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01" />

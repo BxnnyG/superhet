@@ -4,6 +4,7 @@ import { Alert, Button } from "../ui";
 import { inviteTokenOf, navigate, usePath } from "../router";
 import { AuthLayout } from "./AuthLayout";
 import {
+  AuthError,
   createAuthClient,
   parseStatus,
   type AuthClient,
@@ -29,6 +30,7 @@ import { SetupPage } from "./SetupPage";
 type State =
   | { kind: "loading" }
   | { kind: "unreachable" }
+  | { kind: "banned" }
   | { kind: "setup" }
   | { kind: "login"; notice?: string; guest: GuestInfo }
   | { kind: "guest"; guest: GuestInfo }
@@ -93,7 +95,7 @@ export function AuthGate({ children, client = defaultClient }: Props) {
     async (fallbackUser?: string) => {
       try {
         await apply(await client.status());
-      } catch {
+      } catch (e) {
         if (fallbackUser) {
           resetSession();
           setState({
@@ -110,7 +112,8 @@ export function AuthGate({ children, client = defaultClient }: Props) {
             },
             limits: null,
           });
-        } else setState({ kind: "unreachable" });
+        } else if (e instanceof AuthError && e.kind === "banned") setState({ kind: "banned" });
+        else setState({ kind: "unreachable" });
       }
     },
     [client, apply],
@@ -217,6 +220,15 @@ export function AuthGate({ children, client = defaultClient }: Props) {
           <Button variant="primary" onClick={() => void refresh()}>
             Retry
           </Button>
+        </AuthLayout>
+      );
+    case "banned":
+      return (
+        <AuthLayout title="Access blocked">
+          <Alert>
+            This address has been blocked by the administrator of this server. Contact them if you
+            think this is a mistake.
+          </Alert>
         </AuthLayout>
       );
     case "setup":

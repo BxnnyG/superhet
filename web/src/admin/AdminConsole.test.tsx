@@ -118,6 +118,34 @@ function fakeApi(over: Partial<AdminApi> = {}): AdminApi {
     revokeInvite: vi.fn().mockResolvedValue(undefined),
     listSessions: vi.fn().mockResolvedValue(SESSIONS),
     kickSession: vi.fn().mockResolvedValue(undefined),
+    listBans: vi.fn().mockResolvedValue([
+      {
+        id: 4,
+        network: "203.0.113.7/32",
+        reason: "spraying",
+        state: "active",
+        createdAtMs: NOW - 60_000,
+        createdBy: "root",
+        expiresAtMs: NOW + 3_600_000,
+        liftedAtMs: null,
+        liftedBy: null,
+      },
+    ]),
+    createBan: vi.fn().mockResolvedValue({
+      ban: {
+        id: 5,
+        network: "203.0.113.9/32",
+        reason: null,
+        state: "active",
+        createdAtMs: NOW,
+        createdBy: "root",
+        expiresAtMs: null,
+        liftedAtMs: null,
+        liftedBy: null,
+      },
+      kicked: 1,
+    }),
+    liftBan: vi.fn().mockResolvedValue(undefined),
     audit: vi.fn().mockResolvedValue({
       events: [event(5), event(4, { outcome: "denied", action: "access.denied" })],
       nextBeforeId: 4,
@@ -401,6 +429,26 @@ describe("live sessions", () => {
     await waitFor(() => expect(api.kickSession).toHaveBeenCalledWith("g.bb22cc"));
   });
 
+  it("kicks and bans a session by its id, with a duration and a reason", async () => {
+    const api = mount("sessions");
+    const guest = await screen.findByTestId("session-g.bb22cc");
+    fireEvent.click(within(guest).getByRole("button", { name: "Kick and ban" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Duration"), { target: { value: "60" } });
+    fireEvent.change(within(dialog).getByLabelText("Reason (optional)"), {
+      target: { value: "noise" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Kick and ban" }));
+    await waitFor(() =>
+      expect(api.createBan).toHaveBeenCalledWith({
+        target: { session: "g.bb22cc" },
+        kick: true,
+        reason: "noise",
+        expiresInMinutes: 60,
+      }),
+    );
+  });
+
   it("refreshes on its own and can pause the refresh", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
@@ -633,5 +681,48 @@ describe("audit settings and limits", () => {
     await waitFor(() =>
       expect(api.putLimits).toHaveBeenCalledWith({ listenerMaxVfos: 2, operatorMaxVfos: 6 }),
     );
+  });
+});
+
+describe("address bans", () => {
+  it("lists active bans and lifts one after a confirmation", async () => {
+    const api = mount("bans");
+    const row = await screen.findByTestId("ban-4");
+    expect(within(row).getByText("203.0.113.7/32")).toBeInTheDocument();
+    expect(within(row).getByText(/spraying/)).toBeInTheDocument();
+    fireEvent.click(within(row).getByRole("button", { name: "Lift" }));
+    expect(api.liftBan).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Lift ban" }));
+    await waitFor(() => expect(api.liftBan).toHaveBeenCalledWith(4));
+  });
+
+  it("bans a typed network and needs one", async () => {
+    const api = mount("bans");
+    await screen.findByTestId("ban-4");
+    fireEvent.click(screen.getByRole("button", { name: "Ban an address" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ban" }));
+    expect(api.createBan).not.toHaveBeenCalled();
+    fireEvent.change(within(dialog).getByLabelText("Address or network"), {
+      target: { value: "203.0.113.0/24" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Duration"), { target: { value: "0" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ban" }));
+    await waitFor(() =>
+      expect(api.createBan).toHaveBeenCalledWith({
+        target: { network: "203.0.113.0/24" },
+        kick: true,
+      }),
+    );
+  });
+
+  it("offers to ban the address of an audit row", async () => {
+    const api = mount("audit");
+    fireEvent.click(await screen.findByRole("button", { name: "Show details of event 5" }));
+    fireEvent.click(screen.getByRole("button", { name: /Ban 198\.51\.100\.7/ }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByLabelText("Address or network")).toHaveValue("198.51.100.7");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ban" }));
+    await waitFor(() => expect(api.createBan).toHaveBeenCalled());
   });
 });

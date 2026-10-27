@@ -57,6 +57,7 @@ export type AuthErrorKind =
   | "forbidden"
   | "password_change_required"
   | "unavailable"
+  | "banned"
   | "network"
   | "unknown";
 
@@ -180,6 +181,9 @@ async function toError(res: Response): Promise<AuthError> {
     case 403:
       if (code === "password_change_required") {
         return new AuthError("password_change_required", "You must change your password first.");
+      }
+      if (code === "banned") {
+        return new AuthError("banned", "This address is blocked by the administrator.");
       }
       return code === "forbidden"
         ? new AuthError("forbidden", "You are not allowed to do that.")
