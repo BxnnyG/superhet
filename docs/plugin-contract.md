@@ -24,6 +24,7 @@ Status: protocol version `1`. Plugin `plugin.protocol` must equal it; incompatib
 | Events durable and in the decoder history | done (JetStream `EVENTS`, stored by the worker) |
 | Process-group kill on stop / crash | done |
 | Admin API in `superhet-api` (`docs/api-plugins.md`) | done |
+| First plugins: POCSAG/FLEX, APRS, rtl_433 (`docs/plugins-decoders.md`), bundled in the image and installed on first start | done |
 | UI | not yet |
 | Container plugins, install from Git URL, resource limits | not yet (P3) |
 
@@ -218,7 +219,10 @@ Instance states (`InstanceState`): `starting`, `running`, `backoff`, `error`, `s
   starts all rows again with the same instance id and binding (a row whose plugin is no longer
   installed or whose binding is refused is logged and kept). Without a database instances live
   in memory only. Installed plugins are persistent too (`SUPERHET_PLUGIN_DIR`, default
-  `/data/plugins`, layout `<dir>/<id>/<version>/`).
+  `/data/plugins`, layout `<dir>/<id>/<version>/`). Plugins shipped with the image
+  (`SUPERHET_BUNDLED_PLUGIN_DIR`, default `/usr/share/superhet/plugins/<name>/`) are installed
+  when the host starts; a marker file `.bundled` in the plugin directory records what was
+  seeded, so a plugin an admin removed stays removed until the image ships a newer version.
 
 ## Control API (bus)
 
@@ -258,7 +262,9 @@ copies of `nats.conf` need the changed `pluginhost` entry.
 
 `superhet_plugin_protocol::contract` runs a plugin as the host would and judges it:
 `check_static(dir)` loads manifest and schema and checks the executable exists;
-`run_simple(&package, input, config, timeout)` feeds stdin, closes it and returns a `Report`;
+`run_simple(&package, input, config, timeout)` feeds stdin, closes it and returns a `Report`
+(`run_simple_with_env` adds environment variables, e.g. a `PATH` that finds the plugin's helper
+binary; the first-party golden tests use it);
 `check(&report)` lists problems: every stdout line must pass the envelope and `events_schema`
 checks, and the process must exit with status 0 by itself after stdin ended. Plugin authors call
 these from an integration test; `crates/superhet-plugin-protocol/tests/contract_example_echo.rs` does

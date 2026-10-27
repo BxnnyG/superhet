@@ -12,9 +12,9 @@ External components run as **separate processes** (plugins) or are **dynamically
 | NATS server | message bus (separate container) | Apache-2.0 | official image | – |
 | libopus | VFO audio encoding in `superhet-sdrd` (dynamic link, in-repo FFI in `superhet-bus` feature `opus`; also decodes in tests) | BSD-3-Clause | system package in image (`libopus0`; `libopus-dev` only in the build stage) | not vendored or bundled; hand-written FFI like librtlsdr |
 | rustfft and other Rust crates | core | MIT / Apache-2.0 (checked by `cargo deny` in CI) | compiled in | – |
-| multimon-ng | POCSAG/FLEX plugin | GPL-2.0 | plugin image | – |
-| direwolf | APRS plugin | GPL-2.0 | plugin image | – |
-| rtl_433 | ISM plugin | GPL-2.0 | plugin image | – |
+| multimon-ng | POCSAG/FLEX plugin | GPL-2.0 | runtime image (Debian package, separate process, `docs/third-party.md`) | – |
+| direwolf | APRS plugin | GPL-2.0 | runtime image (Debian package, separate process, `docs/third-party.md`) | – |
+| rtl_433 | ISM plugin | GPL-2.0 | runtime image (Debian package, separate process, `docs/third-party.md`) | – |
 | readsb (wiedehopf) | ADS-B plugin | GPL-3.0 (+ BSD parts) | plugin image | – |
 | AIS-catcher | AIS plugin | GPL-3.0 | plugin image | – |
 | acarsdec (f00b4r0 fork) | ACARS plugin | GPL-2.0 | plugin image | original TLeconte repo archived |

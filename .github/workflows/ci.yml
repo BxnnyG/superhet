@@ -33,6 +33,8 @@ jobs:
       SUPERHET_NATS_URL: nats://localhost:4222
       # The *_live tests are gated on this variable and skip silently without it.
       SUPERHET_TEST_NATS_URL: nats://localhost:4222
+      # The golden tests of the decoder plugins fail (instead of skipping) when a tool is missing.
+      SUPERHET_REQUIRE_PLUGIN_TOOLS: "1"
     steps:
       - uses: actions/checkout@v4
       # Service containers cannot take command arguments, so start NATS with JetStream by hand.
@@ -48,6 +50,9 @@ jobs:
       # superhet-sdrd links the system libopus dynamically (superhet-bus feature opus).
       - name: Install libopus
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libopus-dev
+      # External decoders of the first-party plugins (golden tests, crates/superhet-plugin-adapters).
+      - name: Install plugin decoders
+        run: sudo apt-get install -y --no-install-recommends multimon-ng direwolf rtl-433
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -95,8 +100,13 @@ jobs:
           context: .
           file: deploy/docker/Dockerfile
           push: false
+          load: true
+          tags: superhet:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # The recordings of the decoder plugins through the real tools of the runtime image.
+      - name: Plugin golden check in the image
+        run: scripts/check-plugin-image.sh superhet:ci
 
   web:
     runs-on: ubuntu-latest

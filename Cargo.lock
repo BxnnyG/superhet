@@ -2310,6 +2310,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "superhet-plugin-adapters"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "superhet-plugin-protocol",
+]
+
+[[package]]
 name = "superhet-plugin-protocol"
 version = "0.1.0"
 dependencies = [

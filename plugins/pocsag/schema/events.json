@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POCSAG / FLEX events",
+  "description": "Validated against the complete event object (envelope included).",
+  "oneOf": [
+    {
+      "properties": {
+        "type": { "const": "pocsag.message" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "protocol": { "const": "pocsag" },
+            "baud": { "enum": [512, 1200, 2400] },
+            "address": { "type": ["integer", "null"], "minimum": 0 },
+            "function": { "type": ["integer", "null"], "minimum": 0, "maximum": 3 },
+            "kind": { "enum": ["alpha", "numeric", "skyper"] },
+            "message": { "type": "string" },
+            "summary": { "type": "string" }
+          },
+          "required": ["protocol", "baud", "address", "function", "kind", "message", "summary"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["type", "data"]
+    },
+    {
+      "properties": {
+        "type": { "const": "flex.message" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "protocol": { "const": "flex" },
+            "baud": { "enum": [1600, 3200, 6400] },
+            "levels": { "enum": [2, 4] },
+            "cycle": { "type": "integer", "minimum": 0 },
+            "frame": { "type": "integer", "minimum": 0 },
+            "phase": { "enum": ["A", "B", "C", "D"] },
+            "capcode": { "type": "integer", "minimum": 0 },
+            "capcodes": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 2 },
+            "kind": { "enum": ["alpha", "numeric", "tone", "binary"] },
+            "message": { "type": "string" },
+            "summary": { "type": "string" }
+          },
+          "required": ["protocol", "baud", "levels", "cycle", "frame", "phase", "capcode", "kind", "message", "summary"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["type", "data"]
+    }
+  ]
+}
