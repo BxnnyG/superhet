@@ -71,13 +71,15 @@ fn app(
             devices.clone(),
         )))
         .merge(devices::router(devices));
-    Router::new()
+    let router = Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .with_state(deps)
         .merge(auth::router(auth.clone()))
-        .merge(auth::protect(protected, auth))
-        .layer(middleware::from_fn_with_state(web, web::layer))
+        .merge(auth::protect(protected, auth.clone()))
+        .layer(middleware::from_fn_with_state(web, web::layer));
+    // Outermost: banned addresses are turned away before login, guest entry and WS upgrades.
+    auth::ban_gate(router, auth)
 }
 
 async fn healthz() -> &'static str {
@@ -127,6 +129,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let origins = origin::OriginPolicy::from_env();
     let auth = auth::AuthState::new(db.clone(), origins.clone(), auth::AuthConfig::from_env()?)?;
     auth.prepare_setup().await?;
+    let banned = auth.reload_bans().await?;
+    if banned > 0 {
+        tracing::info!(banned, "address bans loaded");
+    }
     auth.spawn_maintenance();
     let ws = ws::WsState::new(
         Arc::new(hub::Hub::new(nats.clone())),

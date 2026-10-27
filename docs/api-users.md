@@ -124,7 +124,40 @@ session's owner has on the devices the API has seen.
 `DELETE /api/v1/admin/sessions/{sid}` kicks: the session is revoked (account) or ended (guest) and
 all its WebSockets close (within 2 s in the integration test; they are signalled at once). A kicked
 guest's VFOs are deleted. `204`, `404` unknown, `400` malformed `sid`. Audited as `session.kick`.
-Temporary address bans are not implemented yet.
+
+### Address bans
+
+A ban blocks a host or a network from the whole API (`/api/`): the check runs **before**
+authentication, so a banned address cannot log in, enter as guest, preview an invite, run the
+setup or open a WebSocket, even with a valid session cookie. Such a request gets `403
+{"error":"banned","message","expires_at_ms"}` (the deadline, `null` for permanent; the reason is
+never shown). `/healthz`, `/readyz` and the static web UI are not gated, so a banned visitor sees
+the explanation instead of a blank page. The client address is the socket peer, or the rightmost
+`X-Forwarded-For` entry when `SUPERHET_TRUST_PROXY` is on (IPv4-mapped IPv6 is folded to IPv4).
+The active bans are cached in memory and rebuilt from the database at start; an expiry applies
+to the next request.
+
+- `GET /api/v1/admin/bans[?state=active|all]` -> `{"bans":[Ban]}`, newest first (`all` adds lifted
+  and expired bans of the last 30 days, at most 500). `Ban = {"id","network","reason","state":
+  "active"|"expired"|"lifted","created_at_ms","created_by","expires_at_ms","lifted_at_ms",
+  "lifted_by"}`; `network` is CIDR text (`203.0.113.7/32`).
+- `POST /api/v1/admin/bans` with exactly one of `"network"` (`203.0.113.7`, `203.0.113.0/24`,
+  `2001:db8::/48`; host bits are cleared) or `"session"` (a live session id `g.<id>` / `u.<hex>`:
+  bans that session's exact client address, whatever the audit IP mode shows), plus optional
+  `"reason"` (200 printable characters), `"expires_in_minutes"` (1..525600, absent = permanent) and
+  `"kick"` (default `true`) -> `201 {"ban":Ban,"kicked":n}`. With `kick` every guest session and
+  every account session opened from the network ends at once (sockets close, guest VFOs go);
+  accounts can log in again from elsewhere. Refusals: `400 invalid` (not an address, prefix
+  shorter than /8 IPv4 or /32 IPv6, both or neither of `network`/`session`), `404 not_found`
+  (unknown session), `409 would_ban_self` (the network contains the caller's own address),
+  `409 already_banned` (identical active ban), `409 no_address` (the session has no known
+  address), `409 too_many_bans` (1000 active). Audited as `ban.create`.
+- `DELETE /api/v1/admin/bans/{id}` lifts a ban: `204`, `404` when it is not in force. Audited as
+  `ban.lift`. Refused requests are audited as `access.banned` (coalesced per network).
+
+The web console offers "Kick & ban" on the live sessions and on audit rows (the address of an
+audit row is the stored one: with the default guest mode `truncated` it is the /24 network
+address, so the console asks which network to ban).
 
 ### Self-service
 
