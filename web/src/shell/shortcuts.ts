@@ -195,8 +195,14 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
   {
     id: "wheelTune",
     group: "Spectrum",
+    keys: ["Alt", "Wheel"],
+    label: "Tune the active VFO by one step per notch (Shift+Wheel off its passband too)",
+  },
+  {
+    id: "wheelBandwidth",
+    group: "Spectrum",
     keys: ["Shift", "Wheel"],
-    label: "Tune the active VFO by one step per notch",
+    label: "Change the bandwidth of the active VFO (pointer over its passband)",
   },
   { id: "inspector", group: "Layout", keys: ["]"], label: "Show / hide the inspector" },
   { id: "help", group: "Layout", keys: ["?"], label: "Show this list" },

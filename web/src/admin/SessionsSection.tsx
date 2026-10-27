@@ -5,6 +5,7 @@ import { Badge, Button, ConfirmDialog, EmptyState, RefreshIcon, Toggle, toasts }
 import type { AdminApi, LiveSession } from "./api";
 import { BanDialog } from "./BanDialog";
 import { AddressLine, GatewayBanner } from "./ClientInfo";
+import { ReportedDetails } from "./ReportedClient";
 import { describeUa } from "./clientInfo";
 import { Card, LoadState, RoleBadge, SectionHeader, useNow } from "./common";
 import { useLoad } from "./useLoad";
@@ -114,6 +115,7 @@ export function SessionsSection({ api }: { api: AdminApi }) {
                     </Button>
                   </div>
                 </div>
+                {s.reported && <ReportedDetails reported={s.reported} seenIp={s.ip} />}
                 <div className="flex flex-wrap gap-1.5" aria-label="Open connections">
                   {s.connections.length === 0 && (
                     <span className="text-xs text-fg-subtle">No open connection</span>

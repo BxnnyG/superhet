@@ -124,3 +124,38 @@ Reverse DNS sends the address to your resolver; turn it off with `SUPERHET_REVER
   (https://db-ip.com) wherever the data is shown to others; **MaxMind GeoLite2** needs a free account
   and its EULA applies (no redistribution; keep the database current). Superhet does not ship either.
   GeoIP accuracy is limited (city level is often wrong, VPNs and mobile networks hide users).
+
+## Client-reported information
+
+The server only sees the address a connection came from. For people on the LAN or behind Docker
+that is a private or gateway address, and the browser's `User-Agent` says little about the
+device. A browser can tell more, so Superhet can ask it (admin console, *Client device info*; off
+by default; API: `docs/api-users.md`, "Client report"). Once per page load the browser sends:
+
+- **Device**: User-Agent Client Hints (`platform`, `platformVersion`, `model`, `architecture`,
+  `bitness`, `fullVersionList`, `mobile`; Chromium only, Firefox and Safari send what they have),
+  screen size and pixel ratio, languages, time zone, touch points, `hardwareConcurrency`,
+  `deviceMemory` and the network connection type where the browser exposes them.
+- **Public IP (second switch, off by default)**: *Ask clients for their public IP* makes the
+  browser fetch its address from a lookup service (default `https://api.ipify.org?format=json`,
+  configurable) and report it. The list then shows it as "Public IP (client-reported)" next to the
+  address the server sees.
+
+What this means:
+
+- **Everything is claimed by the client and unverified.** Anybody can send any values or run a
+  modified client, and a browser can be told a different "public" address by a proxy or VPN. The UI
+  marks it as such; Superhet never uses it for bans, rate limits, per-address guest limits or access.
+- **A third party sees the visitor's address** when their browser contacts the lookup service
+  (and that the visitor has *some* page open that calls it; Superhet sends no referrer, no cookies).
+  The service's own logging and privacy policy apply. Name it in the guest privacy notice (guests
+  also get a line about it on the guest page), pick a service you trust, or run your own (any
+  HTTPS endpoint that returns `{"ip":"..."}` or the bare address works). The page's CSP allows
+  exactly that one origin while the switch is on.
+- **Address privacy still applies.** The claimed public address is stored in the address mode of
+  the actor class (*Audit settings*): truncated to /24 or /48 for guests by default, not kept at all
+  with mode `none`. Reports of accounts live with the session and in audit rows under your audit
+  retention; guest reports live in memory until the guest session ends, plus their audit row under
+  the (short) guest retention. No reverse DNS or GeoIP is done for a claimed address.
+- **Blocked or failed lookups are normal** (ad blockers, offline, corporate proxies): the device
+  details still arrive and the row shows why no address is available.

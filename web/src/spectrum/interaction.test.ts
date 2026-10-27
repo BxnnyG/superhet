@@ -36,6 +36,7 @@ function setup(over: Partial<InteractionOptions> = {}, markers: Marker[] = [mark
     create: vi.fn(),
     step: vi.fn(),
     bandwidth: vi.fn(),
+    bandwidthStep: vi.fn(),
   };
   const it = new SpectrumInteraction({
     canvas,
@@ -51,6 +52,7 @@ function setup(over: Partial<InteractionOptions> = {}, markers: Marker[] = [mark
     getWheelMode: () => "zoom",
     onVfoStep: calls.step,
     onBandwidth: calls.bandwidth,
+    onBandwidthStep: calls.bandwidthStep,
     axis: () => ({ top: 282, bottom: 300 }),
     ...over,
   });
@@ -144,7 +146,7 @@ describe("passband edge drag", () => {
     pointer(canvas, "pointermove", 560);
     expect(calls.bandwidth).toHaveBeenLastCalledWith(1, 120_000);
     pointer(canvas, "pointermove", 545);
-    expect(calls.bandwidth).toHaveBeenLastCalledWith(1, 100_000);
+    expect(calls.bandwidth).toHaveBeenLastCalledWith(1, 90_000);
     pointer(canvas, "pointermove", 590);
     expect(calls.bandwidth).toHaveBeenLastCalledWith(1, 180_000);
     pointer(canvas, "pointerup", 590);
@@ -153,12 +155,37 @@ describe("passband edge drag", () => {
     ia.destroy();
   });
 
-  it("clamps to the preset limits of the mode", () => {
+  it("is not limited to the presets: any width the mode allows can be dragged to", () => {
     const { canvas, calls, it: ia } = setup();
     pointer(canvas, "pointerdown", 450);
     pointer(canvas, "pointermove", 100);
-    expect(calls.bandwidth).toHaveBeenLastCalledWith(1, 200_000);
+    expect(calls.bandwidth).toHaveBeenLastCalledWith(1, 800_000);
     ia.destroy();
+  });
+
+  it("clamps to what the device sample rate can realise", () => {
+    const { canvas, calls, it: ia } = setup({ getSampleRate: () => 500_000 });
+    pointer(canvas, "pointerdown", 450);
+    pointer(canvas, "pointermove", 100);
+    expect(calls.bandwidth).toHaveBeenLastCalledWith(1, 416_600);
+    ia.destroy();
+  });
+
+  it("a finger gets a wider grab zone than a mouse", () => {
+    // 10 px away from the upper edge at x = 550: out of reach for a mouse, within a finger's.
+    const { canvas, calls, it: ia } = setup();
+    pointer(canvas, "pointerdown", 560);
+    pointer(canvas, "pointermove", 600);
+    expect(calls.bandwidth).not.toHaveBeenCalled();
+    pointer(canvas, "pointerup", 600);
+    const touch = setup();
+    const down = new MouseEvent("pointerdown", { clientX: 560, clientY: 100, bubbles: true });
+    Object.defineProperty(down, "pointerType", { value: "touch" });
+    touch.canvas.dispatchEvent(down);
+    pointer(touch.canvas, "pointermove", 600);
+    expect(touch.calls.bandwidth).toHaveBeenCalled();
+    ia.destroy();
+    touch.it.destroy();
   });
 
   it("shows ew-resize on an edge and grab on the body", () => {
@@ -197,22 +224,41 @@ describe("wheel routing", () => {
     s.it.destroy();
   });
 
-  it("Shift+wheel tunes the active VFO, also away from its passband", () => {
+  it("Shift+wheel tunes the active VFO away from its passband", () => {
     const { canvas, calls, view, it: ia } = setup();
-    wheel(canvas, 520, -100, { shiftKey: true });
-    expect(calls.step).toHaveBeenLastCalledWith(1, 1);
-    wheel(canvas, 520, 100, { shiftKey: true });
-    expect(calls.step).toHaveBeenLastCalledWith(1, -1);
     wheel(canvas, 100, -100, { shiftKey: true });
     expect(calls.step).toHaveBeenLastCalledWith(1, 1);
+    wheel(canvas, 100, 100, { shiftKey: true });
+    expect(calls.step).toHaveBeenLastCalledWith(1, -1);
+    expect(calls.bandwidthStep).not.toHaveBeenCalled();
     expect(view.zoomed).toBe(false);
     ia.destroy();
   });
 
-  it("Shift+wheel works when the browser reports it as a horizontal delta", () => {
+  it("Alt+wheel tunes the active VFO, also over its passband", () => {
+    const { canvas, calls, view, it: ia } = setup();
+    wheel(canvas, 520, -100, { altKey: true });
+    expect(calls.step).toHaveBeenLastCalledWith(1, 1);
+    expect(calls.bandwidthStep).not.toHaveBeenCalled();
+    expect(view.zoomed).toBe(false);
+    ia.destroy();
+  });
+
+  it("Shift+wheel over the passband changes the bandwidth: wheel up widens, down narrows", () => {
+    const { canvas, calls, view, it: ia } = setup();
+    wheel(canvas, 520, -100, { shiftKey: true });
+    expect(calls.bandwidthStep).toHaveBeenLastCalledWith(1, 1);
+    wheel(canvas, 520, 100, { shiftKey: true });
+    expect(calls.bandwidthStep).toHaveBeenLastCalledWith(1, -1);
+    expect(calls.step).not.toHaveBeenCalled();
+    expect(view.zoomed).toBe(false);
+    ia.destroy();
+  });
+
+  it("Shift+wheel bandwidth works when the browser reports a horizontal delta", () => {
     const { canvas, calls, it: ia } = setup();
     wheel(canvas, 520, 0, { shiftKey: true, deltaX: -100 });
-    expect(calls.step).toHaveBeenLastCalledWith(1, 1);
+    expect(calls.bandwidthStep).toHaveBeenLastCalledWith(1, 1);
     ia.destroy();
   });
 

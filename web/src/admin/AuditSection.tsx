@@ -29,6 +29,7 @@ import {
 } from "./auditFilter";
 import { BanDialog } from "./BanDialog";
 import { ClientRows, GatewayBanner } from "./ClientInfo";
+import { ReportedRows } from "./ReportedClient";
 import { Card, LoadState, RoleBadge, SectionHeader } from "./common";
 import { useLoad } from "./useLoad";
 
@@ -396,6 +397,7 @@ function EventRows({
               <dt className="text-fg-muted">Event</dt>
               <dd className="font-mono">#{ev.id}</dd>
               <ClientRows ip={ev.ip} info={ev.client} userAgent={ev.userAgent} />
+              {ev.reported && <ReportedRows reported={ev.reported} seenIp={ev.ip} />}
               {ev.ip && (
                 <>
                   <dt className="text-fg-muted">Ban</dt>

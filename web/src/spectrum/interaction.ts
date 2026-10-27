@@ -1,5 +1,6 @@
 // Pointer interaction and hover cursor on an overlay canvas above the spectrum and waterfall.
-// Wheel zooms the view (Shift+wheel, or the "wheel tunes" setting, tunes the selected VFO),
+// Wheel zooms the view (Shift+wheel over the selected passband changes its bandwidth; Shift+wheel
+// elsewhere, Alt+wheel or the "wheel tunes" setting tune the selected VFO),
 // plain, shift or middle drag pans a zoomed view, double-click resets the zoom.
 // Plain click: moves the selected VFO there, or tunes the device centre when none is selected.
 // Click on a VFO selects it, dragging a VFO retunes it, dragging an edge of the selected VFO's
@@ -52,11 +53,14 @@ import {
 } from "../vfo/model";
 import {
   CLICK_SLOP_PX,
+  TOUCH_GRAB_PX,
   VFO_GRAB_PX,
   WheelSteps,
   bandwidthFromEdge,
+  editableEdges,
   exceedsSlop,
   hitPassbandEdge,
+  isOverPassband,
   wheelAction,
   type PassbandEdge,
   type WheelMode,
@@ -68,6 +72,8 @@ const CLICK_DELAY_MS = 220;
 const WHEEL_ZOOM_PER_PIXEL = 0.0015;
 /** How long after a click a changed VFO frequency still counts as the click's result. */
 const CLICK_RESULT_MS = 600;
+/** How long the bandwidth label stays after a wheel change. */
+const BANDWIDTH_FLASH_MS = 900;
 
 export interface InteractionOptions {
   canvas: HTMLCanvasElement;
@@ -95,6 +101,10 @@ export interface InteractionOptions {
   onVfoStep: (id: number, steps: number) => void;
   /** A passband edge of the selected VFO was dragged: the new bandwidth (already snapped). */
   onBandwidth: (id: number, bandwidthHz: number) => void;
+  /** Shift+wheel over the selected VFO's passband: `steps` notches wider (negative = narrower). */
+  onBandwidthStep?: (id: number, steps: number) => void;
+  /** Device sample rate, which bounds how wide a dragged passband may get. */
+  getSampleRate?: () => number | null;
   /** Vertical extent (CSS px from the canvas top) of the frequency axis, if known. */
   axis?: () => { top: number; bottom: number } | null;
 }
@@ -154,6 +164,11 @@ export class SpectrumInteraction {
   private pulse: { hz: number; t0: number } | null = null;
   private drag: Drag | null = null;
   private readonly wheelSteps = new WheelSteps();
+  private readonly bandwidthSteps = new WheelSteps();
+  /** Fingers need a bigger grab zone than a mouse pointer. */
+  private grabPx = VFO_GRAB_PX;
+  /** Shows the bandwidth label for a moment after a wheel change. */
+  private bandwidthFlash: { id: number; until: number } | null = null;
   private readonly ctx: CanvasRenderingContext2D | null;
   private destroyed = false;
 
@@ -271,13 +286,29 @@ export class SpectrumInteraction {
     if (frac === null) return;
     e.preventDefault();
     const sel = this.markers.find((m) => m.id === this.selectedId);
+    const hz = this.hzAt(e.clientX);
     const action = wheelAction({
       ctrlKey: e.ctrlKey,
       shiftKey: e.shiftKey,
+      altKey: e.altKey,
       setting: this.o.getWheelMode(),
       hasVfo: sel !== undefined,
+      overPassband: sel !== undefined && hz !== null && isOverPassband(sel, hz, this.slopHz()),
     });
-    if (action === "tune" && sel) {
+    if (action === "bandwidth" && sel && this.o.onBandwidthStep) {
+      // Wheel up widens, wheel down narrows.
+      this.wheelSteps.reset();
+      const steps = this.bandwidthSteps.add(wheelDelta(e));
+      if (steps !== 0) {
+        this.bandwidthFlash = { id: sel.id, until: performance.now() + BANDWIDTH_FLASH_MS };
+        this.o.onBandwidthStep(sel.id, steps);
+        this.schedule();
+        setTimeout(() => this.schedule(), BANDWIDTH_FLASH_MS + 20);
+      }
+      return;
+    }
+    this.bandwidthSteps.reset();
+    if (action !== "zoom" && sel) {
       const steps = this.wheelSteps.add(wheelDelta(e));
       if (steps !== 0) this.o.onVfoStep(sel.id, steps);
       return;
@@ -289,6 +320,7 @@ export class SpectrumInteraction {
   private readonly onDown = (e: PointerEvent): void => {
     const pan = e.button === 1 || (e.button === 0 && e.shiftKey);
     if (e.button !== 0 && e.button !== 1) return;
+    this.grabPx = e.pointerType === "touch" ? TOUCH_GRAB_PX : VFO_GRAB_PX;
     const base = this.o.view.current();
     if (pan) e.preventDefault();
     this.drag = { id: e.pointerId, startX: e.clientX, base, moved: false, pan };
@@ -320,6 +352,7 @@ export class SpectrumInteraction {
 
   private readonly onMove = (e: PointerEvent): void => {
     const rect = this.o.canvas.getBoundingClientRect();
+    if (!this.drag) this.grabPx = e.pointerType === "touch" ? TOUCH_GRAB_PX : VFO_GRAB_PX;
     this.hoverX = e.clientX - rect.left;
     this.hoverY = e.clientY - rect.top;
     this.hoverMod = e.altKey || e.ctrlKey;
@@ -341,7 +374,13 @@ export class SpectrumInteraction {
       const hz = this.hzAt(e.clientX, true);
       const m = this.markers.find((v) => v.id === d.edge?.id);
       if (hz !== null && m) {
-        const bw = bandwidthFromEdge(m.mode, hz, m.freqHz);
+        const bw = bandwidthFromEdge(
+          m.mode,
+          hz,
+          m.freqHz,
+          undefined,
+          this.o.getSampleRate?.() ?? null,
+        );
         if (bw !== d.edge.last) {
           d.edge.last = bw;
           this.o.onBandwidth(m.id, bw);
@@ -431,7 +470,7 @@ export class SpectrumInteraction {
   private slopHz(): number {
     const span = this.frameSpan;
     const plotW = this.o.canvas.getBoundingClientRect().width - this.o.leftPad;
-    return span && plotW > 0 ? (spanWidth(span) / plotW) * VFO_GRAB_PX : 0;
+    return span && plotW > 0 ? (spanWidth(span) / plotW) * this.grabPx : 0;
   }
 
   /** The strip entry under a pointer position (client coordinates), if any. */
@@ -598,7 +637,13 @@ export class SpectrumInteraction {
       return;
     }
     const dragged = this.drag?.edge;
-    const edgeMarker = dragged ? this.markers.find((m) => m.id === dragged.id) : undefined;
+    const flash =
+      this.bandwidthFlash && performance.now() < this.bandwidthFlash.until
+        ? this.bandwidthFlash
+        : null;
+    const flashId = dragged?.id ?? flash?.id;
+    const edgeMarker =
+      flashId !== undefined ? this.markers.find((m) => m.id === flashId) : undefined;
     const label = edgeMarker
       ? `Bandwidth ${formatBandwidth(edgeMarker.bandwidthHz)}`
       : target
@@ -735,7 +780,8 @@ export class SpectrumInteraction {
       ctx.lineTo(xc, canvas.height);
       ctx.stroke();
       ctx.setLineDash([]);
-      const label = `${m.id} ${MODE_LABEL[m.mode]}${m.paused ? " (paused)" : ""}${
+      if (selected && !m.paused) this.drawGrips(ctx, m, { x0, x1, xc, color });
+      const label = `${m.id}${MODE_LABEL[m.mode]}${m.paused ? " (paused)" : ""}${
         selected ? " " + formatFrequency(m.freqHz) : ""
       }`;
       const w = ctx.measureText(label).width + padX * 2;
@@ -759,6 +805,41 @@ export class SpectrumInteraction {
       ctx.fillText(c.label, c.bx + padX, chipY + h / 2);
     }
     ctx.restore();
+  }
+
+  /**
+   * Drag handles on the draggable edges of the selected VFO's passband: a slim pill, wider and
+   * lighter while hovered or dragged, and bigger when the last pointer was a finger.
+   */
+  private drawGrips(
+    ctx: CanvasRenderingContext2D,
+    m: Marker,
+    at: { x0: number; x1: number; xc: number; color: string },
+  ): void {
+    const dpr = this.dpr;
+    const touch = this.grabPx === TOUCH_GRAB_PX;
+    const active = this.drag?.edge?.id === m.id ? this.drag.edge.side : null;
+    const hoverCss = this.hoverX;
+    const h = (touch ? 44 : 28) * dpr;
+    const y = this.o.canvas.height * 0.5 - h / 2;
+    for (const edge of editableEdges(m.mode)) {
+      const x = edge === "lo" ? at.x0 : at.x1;
+      // An edge on top of the centre line would hide it; the centre grab wins there.
+      if (Math.abs(x - at.xc) < 10 * dpr) continue;
+      const hovered = hoverCss !== null && Math.abs(hoverCss * dpr - x) <= this.grabPx * dpr;
+      const hot = active === edge || (active === null && hovered);
+      const w = (hot || touch ? 7 : 5) * dpr;
+      ctx.globalAlpha = hot ? 1 : 0.85;
+      ctx.beginPath();
+      if (typeof ctx.roundRect === "function") ctx.roundRect(x - w / 2, y, w, h, w / 2);
+      else ctx.rect(x - w / 2, y, w, h);
+      ctx.fillStyle = hot ? CANVAS_TEXT_STRONG : at.color;
+      ctx.fill();
+      ctx.lineWidth = Math.max(1, dpr);
+      ctx.strokeStyle = CHIP_BG;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
   }
 
   /** Rounded label chip with a subtle border (outlined in `edge` when given). */

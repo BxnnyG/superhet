@@ -73,20 +73,28 @@ describe("bandwidth from an edge drag", () => {
     expect(bandwidthFromEdge("nfm", f - 7_520, f)).toBe(15_000);
     expect(bandwidthFromEdge("nfm", f + 7_449, f)).toBe(14_900);
   });
-  it("clamps to the limits of the mode presets", () => {
-    expect(bandwidthFromEdge("nfm", f + 100, f)).toBe(6_250);
-    expect(bandwidthFromEdge("nfm", f + 500_000, f)).toBe(25_000);
-    expect(bandwidthFromEdge("am", f + 100_000, f)).toBe(12_000);
-    expect(bandwidthFromEdge("wfm", f + 10_000, f)).toBe(100_000);
-    expect(bandwidthFromEdge("wfm", f + 1_000_000, f)).toBe(200_000);
+  it("snaps coarser when the channel is wide", () => {
+    expect(bandwidthFromEdge("nfm", f + 17_400, f)).toBe(35_000);
+    expect(bandwidthFromEdge("wfm", f + 76_800, f)).toBe(154_000);
+  });
+  it("is capped by the device sample rate", () => {
+    expect(bandwidthFromEdge("wfm", f + 400_000, f, undefined, 500_000)).toBe(416_600);
+    expect(bandwidthFromEdge("wfm", f + 400_000, f, undefined, 2_400_000)).toBe(800_000);
+  });
+  it("clamps to the range of the mode, not to its presets", () => {
+    expect(bandwidthFromEdge("nfm", f + 100, f)).toBe(1_000);
+    expect(bandwidthFromEdge("nfm", f + 2_000_000, f)).toBe(1_000_000);
+    expect(bandwidthFromEdge("am", f + 100_000, f)).toBe(200_000);
+    expect(bandwidthFromEdge("wfm", f + 2_000, f)).toBe(10_000);
+    expect(bandwidthFromEdge("wfm", f + 1_000_000, f)).toBe(1_000_000);
   });
   it("uses the one-sided distance minus the low cut for single sideband", () => {
     expect(bandwidthFromEdge("usb", f + 3_000, f)).toBe(2_700);
     expect(bandwidthFromEdge("lsb", f - 3_000, f)).toBe(2_700);
     expect(bandwidthFromEdge("am", f + 8_300, f, "upper")).toBe(8_000);
     // Dragging an upper-sideband edge across the carrier bottoms out at the minimum.
-    expect(bandwidthFromEdge("usb", f - 3_000, f)).toBe(1_800);
-    expect(bandwidthFromEdge("usb", f + 100_000, f)).toBe(3_600);
+    expect(bandwidthFromEdge("usb", f - 3_000, f)).toBe(300);
+    expect(bandwidthFromEdge("usb", f + 100_000, f)).toBe(12_000);
   });
 });
 
@@ -97,6 +105,15 @@ describe("wheel routing", () => {
   });
   it("Shift tunes the active VFO", () => {
     expect(wheelAction({ ...base, shiftKey: true })).toBe("tune");
+  });
+  it("Shift over the passband changes the bandwidth instead", () => {
+    expect(wheelAction({ ...base, shiftKey: true, overPassband: true })).toBe("bandwidth");
+    expect(wheelAction({ ...base, shiftKey: true, overPassband: false })).toBe("tune");
+    // Without Shift a wheel over the passband never changes the bandwidth.
+    expect(wheelAction({ ...base, overPassband: true })).toBe("zoom");
+  });
+  it("Alt tunes, also over the passband", () => {
+    expect(wheelAction({ ...base, altKey: true, overPassband: true })).toBe("tune");
   });
   it("tunes with a plain wheel in tune mode", () => {
     expect(wheelAction({ ...base, setting: "tune" })).toBe("tune");

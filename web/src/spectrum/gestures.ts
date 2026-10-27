@@ -3,14 +3,15 @@
 // interaction.ts; keeping the rules here makes them testable without a canvas.
 
 import type { VfoMode } from "../vfo/api";
-import { SSB_LOW_CUT_HZ, bandwidthLimits, passbandRange, type Marker } from "../vfo/model";
+import { bandwidthRange, snapBandwidth } from "../vfo/bandwidth";
+import { SSB_LOW_CUT_HZ, passbandRange, type Marker } from "../vfo/model";
 
 /** Distance in CSS pixels below which a press counts as a click, not a drag. */
 export const CLICK_SLOP_PX = 4;
 /** Grab tolerance around a VFO centre line or passband edge (CSS px). */
 export const VFO_GRAB_PX = 5;
-/** Passband edges snap to multiples of this while dragging. */
-export const BANDWIDTH_SNAP_HZ = 100;
+/** Larger grab zone for fingers (CSS px); a mouse or pen keeps `VFO_GRAB_PX`. */
+export const TOUCH_GRAB_PX = 14;
 /** Accumulated wheel pixels per tuning step (a mouse notch is ~100, a trackpad sends many small). */
 export const WHEEL_STEP_PX = 80;
 
@@ -27,6 +28,12 @@ export function sidebandOf(mode: VfoMode): Sideband {
   return mode === "usb" ? "upper" : mode === "lsb" ? "lower" : "both";
 }
 
+/** The edges of a passband that can be dragged: both, or only the outer one for USB / LSB. */
+export function editableEdges(mode: VfoMode): PassbandEdge[] {
+  const side = sidebandOf(mode);
+  return side === "upper" ? ["hi"] : side === "lower" ? ["lo"] : ["lo", "hi"];
+}
+
 /**
  * Which edge of the (selected) VFO passband lies under `hz`, if any. Two-sided passbands offer
  * both edges (the other one mirrors); USB / LSB only their outer edge, the inner one is the fixed
@@ -36,9 +43,7 @@ export function sidebandOf(mode: VfoMode): Sideband {
 export function hitPassbandEdge(m: Marker, hz: number, slopHz: number): PassbandEdge | null {
   if (Math.abs(hz - m.freqHz) <= slopHz) return null;
   const { loHz, hiHz } = passbandRange(m.mode, m.freqHz, m.bandwidthHz);
-  const side = sidebandOf(m.mode);
-  const candidates: PassbandEdge[] =
-    side === "upper" ? ["hi"] : side === "lower" ? ["lo"] : ["lo", "hi"];
+  const candidates = editableEdges(m.mode);
   let best: PassbandEdge | null = null;
   let bestDist = Infinity;
   for (const edge of candidates) {
@@ -63,14 +68,16 @@ export function isOverPassband(m: Marker, hz: number, slopHz: number): boolean {
 /**
  * Bandwidth after dragging an edge to `pointerHz`: twice the distance to the carrier for
  * two-sided modes (the other edge mirrors); for USB / LSB the distance of the outer edge minus
- * the fixed low cut (the passband is `SSB_LOW_CUT_HZ` .. `SSB_LOW_CUT_HZ + bandwidth`). Snapped to
- * 100 Hz and clamped to the limits of the bandwidth presets of the mode.
+ * the fixed low cut (the passband is `SSB_LOW_CUT_HZ` .. `SSB_LOW_CUT_HZ + bandwidth`). Snapped
+ * (100 Hz when narrow, coarser when wide) and clamped to what the mode and the device rate allow;
+ * any value in that range is reachable, the presets are only shortcuts.
  */
 export function bandwidthFromEdge(
   mode: VfoMode,
   pointerHz: number,
   freqHz: number,
   sideband: Sideband = sidebandOf(mode),
+  sampleRateHz?: number | null,
 ): number {
   const offset =
     sideband === "upper"
@@ -78,27 +85,30 @@ export function bandwidthFromEdge(
       : sideband === "lower"
         ? freqHz - pointerHz - SSB_LOW_CUT_HZ
         : 2 * Math.abs(pointerHz - freqHz);
-  const { min, max } = bandwidthLimits(mode);
-  const snapped = Math.round(Math.max(0, offset) / BANDWIDTH_SNAP_HZ) * BANDWIDTH_SNAP_HZ;
-  return Math.min(max, Math.max(min, snapped));
+  const { min, max } = bandwidthRange(mode, sampleRateHz);
+  return Math.min(max, Math.max(min, snapBandwidth(Math.max(0, offset))));
 }
 
 export type WheelMode = "zoom" | "tune";
-export type WheelAction = "zoom" | "tune";
+export type WheelAction = "zoom" | "tune" | "bandwidth";
 
 /**
- * What the wheel does: with no VFO it zooms; Ctrl always zooms; Shift always tunes the active VFO
- * (also over its passband); a plain wheel follows the setting (default: zoom everywhere, even over
- * a wide passband).
+ * What the wheel does: with no VFO it zooms; Ctrl always zooms; Shift over the active VFO's
+ * passband changes its bandwidth; Shift elsewhere and Alt tune the active VFO; a plain wheel
+ * follows the setting (default: zoom everywhere, even over a wide passband).
  */
 export function wheelAction(opts: {
   ctrlKey: boolean;
   shiftKey: boolean;
+  altKey?: boolean;
   setting: WheelMode;
   hasVfo: boolean;
+  /** The pointer is over the active VFO's passband. */
+  overPassband?: boolean;
 }): WheelAction {
   if (opts.ctrlKey || !opts.hasVfo) return "zoom";
-  return opts.shiftKey || opts.setting === "tune" ? "tune" : "zoom";
+  if (opts.shiftKey && opts.overPassband) return "bandwidth";
+  return opts.shiftKey || opts.altKey || opts.setting === "tune" ? "tune" : "zoom";
 }
 
 /** Turns wheel pixels into whole tuning steps; the remainder carries over, a reversal resets it. */

@@ -27,6 +27,7 @@ import { SpectrumSocket, clampBins, type SocketStatus } from "./socket";
 import type { TuningController } from "./tuning";
 import { ViewController, deviceSpan } from "./view";
 import { Waterfall } from "./waterfall";
+import { stepBandwidth } from "../vfo/bandwidth";
 
 interface Props {
   device: string;
@@ -199,6 +200,14 @@ export function SpectrumView({
         }
       },
       onBandwidth: (id, bandwidthHz) => vfoCtl.update(id, { bandwidthHz }),
+      onBandwidthStep: (id, steps) => {
+        const v = vfoCtl.getSnapshot().vfos.find((x) => x.id === id);
+        if (!v) return;
+        const rate = tuning.getSnapshot().state?.sampleRate ?? null;
+        const next = stepBandwidth(v.mode, v.bandwidthHz, steps, rate);
+        if (next !== v.bandwidthHz) vfoCtl.update(id, { bandwidthHz: next });
+      },
+      getSampleRate: () => tuning.getSnapshot().state?.sampleRate ?? null,
       // The axis strip sits at the bottom of the spectrum canvas.
       axis: () => {
         const bottom = plotCanvas.offsetTop + plotCanvas.clientHeight;
@@ -367,7 +376,7 @@ export function SpectrumView({
       <canvas
         ref={overlayRef}
         className="absolute inset-0 size-full cursor-crosshair touch-none"
-        aria-label="Spectrum: wheel zooms (Shift+wheel tunes the selected VFO), drag pans, click moves the selected VFO or tunes the centre, Alt/Ctrl-click creates a VFO, drag a VFO to retune it, drag a passband edge to change its bandwidth, double-click resets zoom"
+        aria-label="Spectrum: wheel zooms (Shift+wheel over the passband changes its bandwidth, elsewhere it tunes the selected VFO; Alt+wheel tunes), drag pans, click moves the selected VFO or tunes the centre, Alt/Ctrl-click creates a VFO, drag a VFO to retune it, drag a passband edge to change its bandwidth, double-click resets zoom"
       />
     </div>
   );

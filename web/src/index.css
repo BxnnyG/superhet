@@ -158,6 +158,14 @@
   }
 }
 
+/* Scrollable strips that show arrow buttons instead of a scrollbar. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @utility num {
   font-variant-numeric: tabular-nums;
 }

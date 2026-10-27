@@ -82,8 +82,9 @@ export function SettingsMenu({ theme, onTheme, onShortcuts }: Props) {
             />
           </Field>
           <p className="text-xs text-fg-subtle">
-            Zoom: the wheel zooms everywhere, Shift+wheel tunes the active VFO. Tune: the wheel
-            tunes the active VFO; Ctrl+wheel zooms. Saved in this browser.
+            Zoom: the wheel zooms everywhere, Shift+wheel over the active passband changes its
+            bandwidth, Shift or Alt+wheel elsewhere tunes the active VFO. Tune: the wheel tunes the
+            active VFO; Ctrl+wheel zooms. Saved in this browser.
           </p>
           <Button
             variant="ghost"

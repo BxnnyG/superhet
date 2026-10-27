@@ -1,5 +1,7 @@
 // Typed client for the auth routes (/api/v1/auth/*, docs/api-auth.md and docs/api-users.md).
 
+import type { ClientReportRequest } from "../clientreport/collect";
+
 export type Role = "admin" | "operator" | "listener";
 export const ROLES: readonly Role[] = ["admin", "operator", "listener"];
 
@@ -11,6 +13,8 @@ export interface GuestInfo {
   enabled: boolean;
   /** The notice shown before a guest session starts; only set while guest mode is on. */
   privacyText: string | null;
+  /** What a guest's browser will be asked to report (device details, public address lookup). */
+  clientReport?: ClientReportRequest | null;
 }
 
 export interface AuthStatus {
@@ -24,6 +28,8 @@ export interface AuthStatus {
   /** The account still has a one-time password: only the password change works. */
   mustChangePassword: boolean;
   guest: GuestInfo;
+  /** What this browser is asked to report about itself; null/absent: nothing. */
+  clientReport?: ClientReportRequest | null;
 }
 
 /** What the guest policy allows (reply of `POST /api/v1/auth/guest`). */
@@ -108,6 +114,7 @@ export function parseStatus(raw: unknown): AuthStatus {
     ? {
         enabled: raw.guest.enabled === true,
         privacyText: typeof raw.guest.privacy_text === "string" ? raw.guest.privacy_text : null,
+        ...withReport(parseClientReportRequest(raw.guest.client_report)),
       }
     : NO_GUEST;
   let role: Role | null = isRole(raw.role) ? raw.role : null;
@@ -122,7 +129,20 @@ export function parseStatus(raw: unknown): AuthStatus {
     kind: raw.authenticated ? (kind ?? "user") : null,
     mustChangePassword: raw.must_change_password === true,
     guest,
+    ...withReport(raw.authenticated ? parseClientReportRequest(raw.client_report) : null),
   };
+}
+
+/** The `clientReport` property only when the server asks for something. */
+function withReport(r: ClientReportRequest | null): { clientReport?: ClientReportRequest } {
+  return r ? { clientReport: r } : {};
+}
+
+/** `client_report` of the status reply: `{public_ip_service: string | null}` or null. */
+export function parseClientReportRequest(raw: unknown): ClientReportRequest | null {
+  if (!isRec(raw)) return null;
+  const service = typeof raw.public_ip_service === "string" ? raw.public_ip_service : null;
+  return { publicIpService: service !== null && service.startsWith("https://") ? service : null };
 }
 
 function numOrNull(v: unknown): number | null {
