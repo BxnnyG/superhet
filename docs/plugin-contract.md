@@ -214,7 +214,7 @@ Instance states (`InstanceState`): `starting`, `running`, `backoff`, `error`, `s
 - `stop` closes stdin, waits up to 5 s, kills, and removes the instance. On host shutdown all
   instances are stopped the same way.
 - Instances are persistent: with `SUPERHET_DATABASE_URL` the host stores every started instance in
-  `superhet.plugin_instances` (migration 0008) and deletes the row on `stop`; after a restart it
+  `superhet.plugin_instances` (migration 0009) and deletes the row on `stop`; after a restart it
   starts all rows again with the same instance id and binding (a row whose plugin is no longer
   installed or whose binding is refused is logged and kept). Without a database instances live
   in memory only. Installed plugins are persistent too (`SUPERHET_PLUGIN_DIR`, default

@@ -70,6 +70,13 @@ describe("AuthGate routing", () => {
     expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
   });
 
+  it("explains a banned address instead of offering a retry", async () => {
+    const status = vi.fn().mockRejectedValue(new AuthError("banned", "x"));
+    render(<AuthGate client={fakeClient(ANON, { status })}>child</AuthGate>);
+    expect(await screen.findByRole("heading", { name: "Access blocked" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
   it("signs in with Enter and lands in the app", async () => {
     const status = vi.fn().mockResolvedValueOnce(ANON).mockResolvedValue(AUTHED);
     const client = fakeClient(ANON, { status });

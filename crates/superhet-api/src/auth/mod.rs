@@ -11,6 +11,7 @@
 #![allow(clippy::result_large_err)]
 
 mod accounts;
+pub(crate) mod bans;
 mod limiter;
 pub(crate) mod password;
 mod routes;
@@ -57,6 +58,9 @@ const LIFETIMES: Lifetimes = Lifetimes {
     absolute: Duration::from_secs(token::COOKIE_MAX_AGE_SECS),
     touch_interval: Duration::from_secs(60),
 };
+
+/// Lifted and expired bans stay listed ("all") this long.
+const BAN_HISTORY_DAYS: i32 = 30;
 
 /// How often expired sessions are pruned in the background.
 const PRUNE_INTERVAL: Duration = Duration::from_secs(3600);
@@ -157,6 +161,7 @@ struct Inner {
     settings: Arc<SettingsStore>,
     audit: Audit,
     registry: Registry,
+    bans: Arc<bans::Bans>,
 }
 
 /// Shared state of the auth layer (cheap to clone).
@@ -206,6 +211,7 @@ impl AuthState {
             settings,
             audit,
             registry,
+            bans: Arc::new(bans::Bans::default()),
         })))
     }
 
@@ -285,6 +291,9 @@ impl AuthState {
                     Ok(0) => {}
                     Ok(n) => tracing::info!(removed = n, "pruned expired sessions"),
                     Err(err) => tracing::warn!(%err, "session pruning failed"),
+                }
+                if let Err(err) = superhet_db::bans::prune(&db, BAN_HISTORY_DAYS).await {
+                    tracing::warn!(%err, "ban history pruning failed");
                 }
             }
         });
@@ -561,6 +570,12 @@ async fn enforce(State(auth): State<AuthState>, mut request: Request, next: Next
 
 async fn not_found() -> Response {
     error(StatusCode::NOT_FOUND, "not_found", None)
+}
+
+/// Layer that refuses `/api/` requests from banned addresses; apply it outermost so it runs
+/// before every route, public or protected.
+pub fn ban_gate(router: Router, auth: AuthState) -> Router {
+    router.layer(middleware::from_fn_with_state(auth, bans::gate))
 }
 
 /// Put `routes` behind the session check. The check also covers unknown paths, so an

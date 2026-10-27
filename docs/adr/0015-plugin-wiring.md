@@ -35,7 +35,7 @@ first real plugins (multimon-ng, direwolf, rtl_433, readsb, welle-cli) need all 
    `superhet_sdrd_dropped_frames_total{stream="tap"}`. Host: bounded queue between subscription
    and `stdin`, drops counted in `input_dropped`. A slow plugin loses samples; nothing else
    suffers.
-5. **Instances persist in PostgreSQL** (`plugin_instances`, migration 0008), not JetStream KV.
+5. **Instances persist in PostgreSQL** (`plugin_instances`, migration 0009), not JetStream KV.
    The table is the desired state (row from `start` until `stop`), the host restores it at
    start-up. Postgres because the project already requires it for state that must survive
    (ADR-0006), the schema is queryable and migrations are versioned; KV would have needed its own

@@ -3,7 +3,7 @@
 A persistent log of what the decoders heard: DTMF bursts, CTCSS tone changes and RDS station
 name / RadioText / PI changes, plus the events of decoder plugins, each with time, device, VFO,
 tuned frequency and mode. Stored in PostgreSQL (table `superhet.decoder_events`, migrations 0006
-and 0008), so it survives restarts and can be searched, filtered and exported. DCS is part of the
+and 0009), so it survives restarts and can be searched, filtered and exported. DCS is part of the
 schema (`dcs`) but nothing detects it yet.
 
 Every row has a `source`: `core` for the built-in detectors above (kinds `dtmf, ctcss, dcs,

@@ -2,6 +2,7 @@
 
 pub mod audit;
 pub mod auth;
+pub mod bans;
 pub mod bookmarks;
 pub mod decoder_events;
 pub mod plugin_instances;

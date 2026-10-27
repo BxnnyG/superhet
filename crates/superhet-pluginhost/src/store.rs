@@ -1,4 +1,4 @@
-//! Persistence of the started instances (table `superhet.plugin_instances`, migration 0008).
+//! Persistence of the started instances (table `superhet.plugin_instances`, migration 0009).
 //!
 //! The table is the host's *desired* state: a row exists from `start` until `stop`. After a
 //! restart the host starts every row again with the same instance id. Without a database

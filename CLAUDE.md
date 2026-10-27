@@ -29,6 +29,7 @@ Self-hosted, single-user web SDR (modern alternative to OpenWebRX, SDR#-like fre
 - All checks: `scripts/check.sh`
 - Rust: `cargo fmt --all --check` · `cargo clippy --workspace --all-targets -q -- -D warnings` · `cargo nextest run --failure-output final` (fallback `cargo test -q`)
 - Web: `pnpm -C web install` · `pnpm -C web lint` · `pnpm -C web build` · `pnpm -C web test -- --silent`
+- Browser smoke test (Playwright, Chromium; needs Docker for a throwaway PostgreSQL + NATS): `scripts/e2e.sh` (builds, starts the stack on :18073, runs `web/e2e`; `E2E_SKIP_BUILD=1` reuses builds). CI job `e2e`. Never on :8073.
 - Security: `cargo deny check` (`deny.toml`) · `gitleaks` (`.gitleaks.toml`, run by pre-commit if installed and in CI)
 - Run: `scripts/gen-secrets.sh` (creates `.env` once) then `docker compose up --build`
 - DB tests: `DATABASE_URL=postgres://... cargo test -p superhet-db` (skipped when unset)

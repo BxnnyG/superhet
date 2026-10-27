@@ -28,4 +28,4 @@ ALTER TABLE superhet.decoder_events ADD CONSTRAINT decoder_events_kind_check CHE
 );
 CREATE INDEX decoder_events_source_ts_idx ON superhet.decoder_events (source, ts DESC, id DESC);
 
-UPDATE superhet.schema_version SET version = 8, applied_at = now();
+UPDATE superhet.schema_version SET version = 9, applied_at = now();

@@ -80,6 +80,32 @@ export interface MySession {
   current: boolean;
 }
 
+export type BanState = "active" | "expired" | "lifted";
+
+export interface Ban {
+  id: number;
+  /** CIDR text, e.g. `203.0.113.7/32`. */
+  network: string;
+  reason: string | null;
+  state: BanState;
+  createdAtMs: number;
+  createdBy: string;
+  /** Deadline; null = permanent. */
+  expiresAtMs: number | null;
+  liftedAtMs: number | null;
+  liftedBy: string | null;
+}
+
+/** What to ban: a network typed by the admin, or a live session (its exact address). */
+export interface BanRequest {
+  target: { network: string } | { session: string };
+  reason?: string;
+  /** Absent = permanent. */
+  expiresInMinutes?: number;
+  /** End matching sessions at once (server default: true). */
+  kick?: boolean;
+}
+
 export type Outcome = "ok" | "denied" | "error";
 export type ActorKind = "user" | "guest" | "system";
 
@@ -230,6 +256,22 @@ export function parseLiveSession(raw: unknown): LiveSession {
           ]
         : [],
     ),
+  };
+}
+
+export function parseBan(raw: unknown): Ban {
+  if (!isJson(raw)) return bad("ban");
+  const state = raw.state;
+  return {
+    id: num(raw.id),
+    network: str(raw.network),
+    reason: strOrNull(raw.reason),
+    state: state === "expired" || state === "lifted" ? state : "active",
+    createdAtMs: num(raw.created_at_ms),
+    createdBy: str(raw.created_by),
+    expiresAtMs: numOrNull(raw.expires_at_ms),
+    liftedAtMs: numOrNull(raw.lifted_at_ms),
+    liftedBy: strOrNull(raw.lifted_by),
   };
 }
 
@@ -408,6 +450,10 @@ export interface AdminApi {
   revokeInvite(id: number): Promise<void>;
   listSessions(signal?: AbortSignal): Promise<LiveSession[]>;
   kickSession(sid: string): Promise<void>;
+  listBans(all?: boolean, signal?: AbortSignal): Promise<Ban[]>;
+  /** Resolves with the new ban and the number of sessions that were ended. */
+  createBan(req: BanRequest): Promise<{ ban: Ban; kicked: number }>;
+  liftBan(id: number): Promise<void>;
   audit(
     filter: AuditFilter,
     page: { limit?: number; beforeId?: number },
@@ -492,6 +538,23 @@ export function createAdminApi(fetchImpl?: FetchLike): AdminApi {
     },
     async kickSession(sid) {
       await call("DELETE", `${ADMIN}/sessions/${id(sid)}`);
+    },
+    async listBans(all, signal) {
+      const r = await call("GET", `${ADMIN}/bans${all ? "?state=all" : ""}`, undefined, signal);
+      return isJson(r.body) ? list(r.body.bans).map(parseBan) : bad("bans");
+    },
+    async createBan({ target, reason, expiresInMinutes, kick }) {
+      const r = await call("POST", `${ADMIN}/bans`, {
+        ...target,
+        ...(reason ? { reason } : {}),
+        ...(expiresInMinutes !== undefined ? { expires_in_minutes: expiresInMinutes } : {}),
+        ...(kick !== undefined ? { kick } : {}),
+      });
+      if (!isJson(r.body)) return bad("create ban");
+      return { ban: parseBan(r.body.ban), kicked: num(r.body.kicked) };
+    },
+    async liftBan(banId) {
+      await call("DELETE", `${ADMIN}/bans/${banId}`);
     },
     async audit(filter, page, signal) {
       const r = await call(

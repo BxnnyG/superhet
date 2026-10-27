@@ -6,6 +6,7 @@
 #![allow(clippy::result_large_err)]
 
 mod audit_routes;
+mod bans;
 mod sessions;
 mod settings_routes;
 mod users;
@@ -67,6 +68,11 @@ pub fn router(state: AdminState) -> Router {
         .route("/api/v1/admin/invites/{id}", delete(users::revoke_invite))
         .route("/api/v1/admin/sessions", get(sessions::list))
         .route("/api/v1/admin/sessions/{sid}", delete(sessions::kick))
+        .route(
+            "/api/v1/admin/bans",
+            get(bans::list).post(bans::create).layer(limit),
+        )
+        .route("/api/v1/admin/bans/{id}", delete(bans::lift))
         .route("/api/v1/me/sessions", get(sessions::mine))
         .route("/api/v1/me/sessions/{sid}", delete(sessions::revoke_mine))
         .route("/api/v1/admin/audit", get(audit_routes::query))
