@@ -11,4 +11,4 @@ CREATE TABLE superhet.channel_plans (
 
 CREATE INDEX channel_plans_name_idx ON superhet.channel_plans (lower(name), id);
 
-UPDATE superhet.schema_version SET version = 10, applied_at = now();
+UPDATE superhet.schema_version SET version = 11, applied_at = now();

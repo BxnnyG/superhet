@@ -5,7 +5,7 @@ with the web UI (`web/src/channels/plans/*.json`, see `docs/channel-plans.md`) a
 This API only stores the plans operators **import** (a plan JSON or a CHIRP CSV converted by the
 browser). Custom plans are shared: every signed-in user and guest reads them, operators and admins
 edit them (same model as bookmarks). Stored in PostgreSQL (`superhet.channel_plans`, migration
-`0010`).
+`0011`).
 
 All routes are under `/api/v1`, behind the session check. Mutations check the `Origin` header like
 the other write routes. Errors are `{"v":1,"ok":false,"code":"...","error":"..."}`.
