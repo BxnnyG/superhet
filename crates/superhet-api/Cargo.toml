@@ -33,7 +33,7 @@ maxminddb = "0.32.0"
 
 [dev-dependencies]
 http-body-util.workspace = true
-tokio-tungstenite = "0.29"
+tokio-tungstenite = "0.30"
 sqlx.workspace = true
 
 [lints]
