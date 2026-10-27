@@ -1,0 +1,210 @@
+//! Control API of the plugin host on the bus (`sh.v1.plugin.ctl.<cmd>`, request/reply, JSON).
+//!
+//! Requests carry `"v":1`; replies are `{"v":1,"ok":true,...}` or
+//! `{"v":1,"ok":false,"code":"...","error":"..."}` like the device daemon. State changes of an
+//! instance are published as [`InstanceInfo`] on `sh.v1.plugin.state`.
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::manifest::Manifest;
+
+/// Command tokens (last token of `sh.v1.plugin.ctl.<cmd>`).
+pub mod cmd {
+    /// List installed plugins.
+    pub const LIST: &str = "list";
+    /// Install a plugin from a local path.
+    pub const INSTALL: &str = "install";
+    /// List instances.
+    pub const INSTANCES: &str = "instances";
+    /// Fetch one instance.
+    pub const GET: &str = "get";
+    /// Create and start an instance.
+    pub const START: &str = "start";
+    /// Stop and remove an instance.
+    pub const STOP: &str = "stop";
+    /// Start an instance in state `error` or `stopped` again.
+    pub const RESTART: &str = "restart";
+}
+
+/// Lifecycle state of an instance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceState {
+    /// Process is being spawned.
+    Starting,
+    /// Process is up.
+    Running,
+    /// Crashed; waiting before the next start.
+    Backoff,
+    /// Too many crashes (5 in 5 minutes) or not startable; needs `restart`.
+    Error,
+    /// Stopped on request.
+    Stopped,
+}
+
+/// Snapshot of an instance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct InstanceInfo {
+    /// Instance id.
+    pub id: String,
+    /// Plugin id.
+    pub plugin_id: String,
+    /// Device the instance is bound to.
+    pub device: Option<String>,
+    /// Frequency (Hz) the instance is bound to.
+    pub freq_hz: Option<u64>,
+    /// Operator configuration passed to the plugin.
+    pub config: Value,
+    /// Whether the plugin claims the device exclusively.
+    pub exclusive: bool,
+    /// Lifecycle state.
+    pub state: InstanceState,
+    /// Process id while running.
+    pub pid: Option<u32>,
+    /// How often the process was started again after a crash.
+    pub restarts: u32,
+    /// Crashes inside the current 5 minute window.
+    pub crashes_in_window: u32,
+    /// Milliseconds until the next start while in `backoff`.
+    pub retry_in_ms: Option<u64>,
+    /// Description of the last exit or failure.
+    pub last_error: Option<String>,
+    /// Valid events received.
+    pub events_ok: u64,
+    /// Rejected event lines (counted and dropped).
+    pub events_invalid: u64,
+    /// Unix milliseconds of the last state change.
+    pub updated_unix_ms: u64,
+}
+
+/// An installed plugin.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PluginInfo {
+    /// The validated manifest.
+    pub manifest: Manifest,
+}
+
+/// `install`: copy a plugin directory from a path on the host.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InstallRequest {
+    /// Contract version.
+    pub v: u32,
+    /// Directory containing `plugin.toml`, on the host running the plugin host.
+    pub path: String,
+}
+
+/// `start`: create an instance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StartRequest {
+    /// Contract version.
+    pub v: u32,
+    /// Plugin to run.
+    pub plugin_id: String,
+    /// Device to bind to.
+    #[serde(default)]
+    pub device: Option<String>,
+    /// Frequency (Hz) to bind to.
+    #[serde(default)]
+    pub freq_hz: Option<u64>,
+    /// Plugin specific configuration.
+    #[serde(default)]
+    pub config: Value,
+}
+
+/// `get`, `stop`, `restart`: address one instance.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InstanceRef {
+    /// Contract version.
+    pub v: u32,
+    /// Instance id.
+    pub id: String,
+}
+
+/// Machine-readable error classes.
+pub mod code {
+    /// Malformed request or manifest.
+    pub const INVALID: &str = "invalid";
+    /// Unknown plugin or instance.
+    pub const NOT_FOUND: &str = "not_found";
+    /// Refused because of current state (for example an exclusive plugin is already running).
+    pub const CONFLICT: &str = "conflict";
+    /// Valid but not supported by this host (container plugins, UI plugins).
+    pub const UNSUPPORTED: &str = "unsupported";
+    /// Host failure.
+    pub const INTERNAL: &str = "internal";
+}
+
+/// Failure reply.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ErrorReply {
+    /// Contract version.
+    pub v: u32,
+    /// Always false.
+    pub ok: bool,
+    /// One of [`code`].
+    pub code: String,
+    /// Human readable explanation.
+    pub error: String,
+}
+
+impl ErrorReply {
+    /// Build a failure reply.
+    #[must_use]
+    pub fn new(code: &str, error: impl Into<String>) -> Self {
+        Self {
+            v: crate::PROTOCOL_VERSION,
+            ok: false,
+            code: code.to_owned(),
+            error: error.into(),
+        }
+    }
+}
+
+/// Reply to `list` and `install`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PluginsReply {
+    /// Contract version.
+    pub v: u32,
+    /// Always true.
+    pub ok: bool,
+    /// Installed plugins.
+    pub plugins: Vec<PluginInfo>,
+}
+
+/// Reply to `install`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PluginReply {
+    /// Contract version.
+    pub v: u32,
+    /// Always true.
+    pub ok: bool,
+    /// The installed plugin.
+    pub plugin: PluginInfo,
+}
+
+/// Reply to `instances`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct InstancesReply {
+    /// Contract version.
+    pub v: u32,
+    /// Always true.
+    pub ok: bool,
+    /// All instances.
+    pub instances: Vec<InstanceInfo>,
+}
+
+/// Reply to `get`, `start`, `stop` (final snapshot) and `restart`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct InstanceReply {
+    /// Contract version.
+    pub v: u32,
+    /// Always true.
+    pub ok: bool,
+    /// The instance.
+    pub instance: InstanceInfo,
+}

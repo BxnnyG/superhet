@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "An event as the host forwards it on the bus (`sh.v1.events.<plugin>.<type>`): the plugin's\nenvelope plus the identity of the instance and the host's receive time.",
+  "properties": {
+    "data": {
+      "additionalProperties": true,
+      "description": "Plugin specific payload.",
+      "type": "object"
+    },
+    "device": {
+      "description": "Device the instance is bound to.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "freq_hz": {
+      "description": "Frequency (Hz) the instance is bound to.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "host_ts_ms": {
+      "description": "Receive time at the host (Unix milliseconds).",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "instance_id": {
+      "description": "Instance id.",
+      "type": "string"
+    },
+    "plugin_id": {
+      "description": "Plugin id.",
+      "type": "string"
+    },
+    "ts": {
+      "description": "Time stamped by the plugin, if any.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "type": {
+      "description": "Event type.",
+      "type": "string"
+    },
+    "v": {
+      "description": "Contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "plugin_id",
+    "instance_id",
+    "type",
+    "host_ts_ms",
+    "data"
+  ],
+  "title": "HostEvent",
+  "type": "object"
+}

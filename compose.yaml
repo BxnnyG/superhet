@@ -121,6 +121,10 @@ services:
       SUPERHET_NATS_URL: nats://nats:4222
       SUPERHET_NATS_USER: pluginhost
       SUPERHET_NATS_PASSWORD: ${NATS_PLUGINHOST_PASSWORD}
+      SUPERHET_PLUGIN_DIR: /data/plugins
+    # Installed plugins survive container re-creation.
+    volumes:
+      - plugin-data:/data/plugins
     depends_on:
       nats: { condition: service_healthy }
     healthcheck:
@@ -153,3 +157,4 @@ networks:
 volumes:
   postgres-data:
   nats-data:
+  plugin-data:

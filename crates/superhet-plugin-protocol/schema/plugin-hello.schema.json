@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Plugin handshake (`hello` plugin to host).",
+  "properties": {
+    "capabilities": {
+      "default": [],
+      "description": "Optional feature names the plugin supports (informational in v1).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "protocol": {
+      "description": "Contract version the plugin speaks; must equal the host's.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "protocol"
+  ],
+  "title": "PluginHello",
+  "type": "object"
+}

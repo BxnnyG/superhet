@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The envelope of an event.",
+  "properties": {
+    "data": {
+      "additionalProperties": true,
+      "default": {},
+      "description": "Plugin specific payload (an object).",
+      "type": "object"
+    },
+    "ts": {
+      "description": "Time of the observation, RFC 3339. The host stamps its own time when absent.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "type": {
+      "description": "Dotted type such as `pocsag.message`: 1-8 segments of `[a-z][a-z0-9-]*`, at most 64\ncharacters. `heartbeat` is reserved.",
+      "type": "string"
+    },
+    "v": {
+      "description": "Contract version; must be 1.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "type"
+  ],
+  "title": "Event",
+  "type": "object"
+}

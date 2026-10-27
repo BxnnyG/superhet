@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Failure reply.",
+  "properties": {
+    "code": {
+      "description": "One of [`code`].",
+      "type": "string"
+    },
+    "error": {
+      "description": "Human readable explanation.",
+      "type": "string"
+    },
+    "ok": {
+      "description": "Always false.",
+      "type": "boolean"
+    },
+    "v": {
+      "description": "Contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "ok",
+    "code",
+    "error"
+  ],
+  "title": "ErrorReply",
+  "type": "object"
+}

@@ -162,7 +162,7 @@ All decoders are plugins (separate processes). Without a codec plugin, voice dec
 | Feature | Prio | Notes |
 |---|---|---|
 | Plugin types `decoder`, `codec`, `lookup`, `ui` | v1 (P2: decoder; P3: codec, lookup; P5: ui) | – |
-| Manifest `plugin.toml`, versioned contract | v1 (P2) | See ARCHITECTURE §6 |
+| Manifest `plugin.toml`, versioned contract | v1 (P2) | `docs/plugin-contract.md` (ADR-0014) |
 | Host-side channelisation (DDC/resampling) | v1 (P2) | Plugins never see the full-band IQ unless they request it (exclusive) |
 | JSON Lines events (schema validated), audio/frame output | v1 (P2) | – |
 | Execution as local process or own container | v1 (P2 process, P3 container) | Container plugins declared in `compose.plugins.yaml`, no Docker socket (ADR-0003) |
