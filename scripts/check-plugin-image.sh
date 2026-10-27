@@ -32,4 +32,14 @@ for entry in "${cases[@]}"; do
         fail=1
     fi
 done
+
+# DAB: the plugin wraps welle-cli, which must start and have all its libraries (a missing one
+# would only show when somebody tunes a block).
+if docker run --rm --entrypoint sh "$image" -c 'welle-cli -v >/dev/null 2>&1 && ! ldd /usr/bin/welle-cli | grep -q "not found"'; then
+    echo "ok   welle-cli starts and links"
+else
+    echo "FAIL welle-cli is missing or lacks a library"
+    docker run --rm --entrypoint sh "$image" -c 'ldd /usr/bin/welle-cli | grep "not found"' || true
+    fail=1
+fi
 exit "$fail"

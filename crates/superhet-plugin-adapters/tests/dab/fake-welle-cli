@@ -20,7 +20,7 @@ args = sys.argv[1:]
 block = args[args.index("-c") + 1]
 web_port = int(args[args.index("-w") + 1])
 host, _, port = args[args.index("-F") + 1].split(",", 1)[1].rpartition(":")
-with_ensemble = os.environ.get("FAKE_WELLE_BLOCKS", "").split(",")
+with_ensemble = os.environ.get("FAKE_WELLE_BLOCKS", "5C,6A").split(",")
 log_dir = os.environ.get("FAKE_WELLE_DIR", "")
 
 started = time.time()

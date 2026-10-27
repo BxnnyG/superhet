@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Throwaway stack for the browser smoke tests (web/e2e): superhet-api + superhet-sdrd (file
 # backend with a noise capture) + superhet-worker + superhet-pluginhost on loopback test ports,
-# serving web/dist. The plugin host seeds the first-party plugins (plugins/pocsag, aprs, rtl433;
+# serving web/dist. The plugin host seeds the first-party plugins (plugins/pocsag, aprs, rtl433, dab;
 # their tools are not needed until an instance starts) and gets a private plugin directory;
 # the plugin smoke test installs plugins/example-echo (python3) from its path.
 # Runs in the foreground until it gets a signal (Playwright's webServer does that), then stops
@@ -44,7 +44,7 @@ trap cleanup EXIT INT TERM
 
 # The bundled plugins as the image has them: copies of the first-party plugin directories.
 mkdir -p "$work/bundled" "$work/plugins"
-for name in pocsag aprs rtl433; do cp -r "plugins/$name" "$work/bundled/$name"; done
+for name in pocsag aprs rtl433 dab; do cp -r "plugins/$name" "$work/bundled/$name"; done
 
 # 1 s of random cu8 samples at 2.048 MS/s: valid IQ, plays in a loop.
 head -c 4096000 /dev/urandom >"$work/noise.cu8"

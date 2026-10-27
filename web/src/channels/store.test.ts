@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { createChannelPlanApi, parsePlanList, serverId, type ChannelPlanApi } from "./api";
-import { DAB_BLOCK_HZ, dabSampleRate } from "./dab";
 import { planFromFile } from "./import";
 import { DEFAULT_PREFS, effectiveRegion, loadPrefs, savePrefs } from "./prefs";
 import { browserRegion, regionFromLocale, regionMatches, regionTokens } from "./regions";
@@ -232,26 +231,5 @@ describe("importing a file", () => {
       ["2", "Relais", 438_700_000, null],
     ]);
     expect(planFromFile(csv, "x.csv", null).regions).toEqual(["WORLD"]);
-  });
-});
-
-describe("DAB sample rate", () => {
-  const rates = [250_000, 1_024_000, 1_400_000, 1_800_000, 2_048_000, 2_400_000, 3_200_000];
-
-  it("keeps a rate whose usable window covers the block", () => {
-    expect(dabSampleRate(2_400_000, rates)).toBe(2_400_000);
-    expect(dabSampleRate(2_048_000, rates)).toBe(2_048_000);
-  });
-
-  it("widens a rate that is too small to the smallest offered one that covers", () => {
-    // 85 % of 1.8 MS/s is 1.53 MHz: just short of 1.536.
-    expect(dabSampleRate(1_800_000, rates)).toBe(2_048_000);
-    expect(dabSampleRate(250_000, rates)).toBe(2_048_000);
-    expect(dabSampleRate(null, rates)).toBe(2_048_000);
-  });
-
-  it("uses the largest rate when none is enough", () => {
-    expect(dabSampleRate(1_000_000, [1_000_000, 1_400_000])).toBe(1_400_000);
-    expect(dabSampleRate(null, [])).toBeGreaterThanOrEqual(DAB_BLOCK_HZ);
   });
 });

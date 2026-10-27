@@ -2,6 +2,9 @@
 
 import { vi } from "vitest";
 import type { AudioController } from "../audio/controller";
+import type { DabApi } from "../dab/api";
+import { DabStore } from "../dab/store";
+import type { EventApi } from "../decoders/api";
 import type { PluginApi } from "../plugins/api";
 import { PluginStore } from "../plugins/store";
 import type { DeviceState, LockHolder } from "../spectrum/api";
@@ -74,6 +77,7 @@ export function fake(vfos: Vfo[], selectedId: number | null, locks: LockHolder[]
     channels: { setStepByChannel: vi.fn() },
     // Never started: the snapshot stays empty.
     plugins: new PluginStore({} as PluginApi),
+    dab: new DabStore("dev0", {} as DabApi, {} as EventApi),
     stepChannels: () => false,
   } as unknown as Receiver;
   return { r, fns };
