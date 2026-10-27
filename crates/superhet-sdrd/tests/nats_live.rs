@@ -572,3 +572,107 @@ async fn zoom_lease_produces_fine_frames_and_expires() {
         "zoom frames after off"
     );
 }
+
+/// Collect tap bytes until `quiet` passes without a message (at most `max` in total).
+async fn drain_tap(sub: &mut async_nats::Subscriber, quiet: Duration, max: usize) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    while let Ok(Some(msg)) = tokio::time::timeout(quiet, sub.next()).await {
+        bytes.extend_from_slice(&msg.payload);
+        if bytes.len() >= max {
+            break;
+        }
+    }
+    bytes
+}
+
+#[tokio::test]
+async fn plugin_taps_and_claims_work_over_the_bus() {
+    let Ok(url) = std::env::var("SUPERHET_TEST_NATS_URL") else {
+        eprintln!("SUPERHET_TEST_NATS_URL not set; skipping");
+        return;
+    };
+    let pid = std::process::id();
+    let device_id = format!("tap{pid}");
+    let path = std::env::temp_dir().join(format!("superhet-sdrd-tap-{pid}.cu8"));
+    write_tone(&path);
+
+    let client = connect(&url).await;
+    let mut audio = client
+        .subscribe(format!("sh.v1.dev.{device_id}.tap.i-audio"))
+        .await
+        .expect("subscribe");
+    let mut window = client
+        .subscribe(format!("sh.v1.dev.{device_id}.tap.i-window"))
+        .await
+        .expect("subscribe");
+    client.flush().await.expect("flush");
+    let _daemon = start_daemon(&url, &device_id, &path).await;
+    let _ = std::fs::remove_file(&path);
+    let ctl = |cmd: &str| format!("sh.v1.dev.{device_id}.ctl.{cmd}");
+
+    // Unknown VFO and malformed requests are refused.
+    let reply = request_json(
+        &client,
+        ctl("tap.open"),
+        r#"{"v":1,"id":"i-audio","kind":"audio","vfo":99,"rate":22050,"format":"s16le"}"#,
+    )
+    .await;
+    assert_eq!(reply["ok"], false);
+    assert_eq!(reply["code"], "not_found");
+    let reply = request_json(&client, ctl("tap.open"), r#"{"v":1,"id":"a.b"}"#).await;
+    assert_eq!(reply["code"], "invalid");
+
+    // An audio tap on the default VFO yields s16le at the requested rate.
+    let open = r#"{"v":1,"id":"i-audio","kind":"audio","vfo":1,"rate":22050,"format":"s16le"}"#;
+    let reply = request_json(&client, ctl("tap.open"), open).await;
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(
+        reply["subject"],
+        format!("sh.v1.dev.{device_id}.tap.i-audio")
+    );
+    let bytes = drain_tap(&mut audio, Duration::from_millis(500), 44_100).await;
+    assert!(bytes.len() >= 30_000, "only {} bytes", bytes.len());
+    assert_eq!(bytes.len() % 2, 0);
+    // Refreshing the lease is harmless; closing stops the stream.
+    assert_eq!(
+        request_json(&client, ctl("tap.open"), open).await["ok"],
+        true
+    );
+    let closed = request_json(&client, ctl("tap.close"), r#"{"v":1,"id":"i-audio"}"#).await;
+    assert_eq!(closed["ok"], true);
+    drain_tap(&mut audio, Duration::from_millis(300), usize::MAX).await;
+    assert!(
+        drain_tap(&mut audio, Duration::from_millis(500), usize::MAX)
+            .await
+            .is_empty(),
+        "audio after close"
+    );
+
+    // An exclusive claim retunes, locks and restores on release; the window tap carries cu8 IQ.
+    let claim = r#"{"v":1,"id":"i-window","center_hz":434500000,"sample_rate":1024000}"#;
+    let reply = request_json(&client, ctl("claim.acquire"), claim).await;
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["state"]["center_hz"], 434_500_000);
+    assert_eq!(reply["state"]["locks"][0]["kind"], "claim");
+    let other = request_json(
+        &client,
+        ctl("claim.acquire"),
+        r#"{"v":1,"id":"i-other","center_hz":433000000}"#,
+    )
+    .await;
+    assert_eq!(other["code"], "conflict");
+    let tune = request_json(&client, ctl("tune"), r#"{"v":1,"center_hz":100000000}"#).await;
+    assert_eq!(tune["code"], "locked");
+    let open = r#"{"v":1,"id":"i-window","kind":"window","rate":1024000,"format":"cu8","center_hz":434500000}"#;
+    assert_eq!(
+        request_json(&client, ctl("tap.open"), open).await["ok"],
+        true
+    );
+    let bytes = drain_tap(&mut window, Duration::from_millis(500), 200_000).await;
+    assert!(bytes.len() >= 100_000, "{} window bytes", bytes.len());
+    assert_eq!(bytes.len() % 2, 0);
+    let released = request_json(&client, ctl("claim.release"), r#"{"v":1,"id":"i-window"}"#).await;
+    assert_eq!(released["state"]["center_hz"], 433_920_000);
+    assert_eq!(released["state"]["locks"], serde_json::json!([]));
+    request_json(&client, ctl("tap.close"), r#"{"v":1,"id":"i-window"}"#).await;
+}

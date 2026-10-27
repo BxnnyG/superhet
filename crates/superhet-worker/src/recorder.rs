@@ -102,10 +102,11 @@ fn event(
     NewEvent {
         ts_ms,
         device: device.to_owned(),
-        vfo: i32::try_from(vfo).unwrap_or(i32::MAX),
+        vfo: Some(i32::try_from(vfo).unwrap_or(i32::MAX)),
         freq_hz: ctx.map(|c| c.freq_hz),
         mode: ctx.map(|c| c.mode.clone()),
         kind: kind.to_owned(),
+        source: superhet_db::decoder_events::CORE.to_owned(),
         value,
         meta,
     }

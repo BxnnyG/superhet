@@ -18,10 +18,14 @@ Status: protocol version `1`. Plugin `plugin.protocol` must equal it; incompatib
 | Framed transport wire format (frame codec, hello, samples / voice-frame headers) | types and tests only; the host refuses to start framed plugins (`unsupported`) |
 | Supervisor: spawn, health, restart with backoff, `error` after 5 crashes in 5 min | done |
 | Control API on the bus (list, install from local path, instances, start, stop, restart) | done |
-| Feeding IQ / audio from sdrd into `stdin` | not yet (next step) |
-| Exclusive device claims | declared in the manifest; host allows one exclusive instance per device; sdrd claim command not yet |
+| Feeding VFO audio / IQ and the whole window from sdrd into `stdin` | done ("Feeding input") |
+| Exclusive device claims | done: manifest, one claim per device in the host, `claim.*` in sdrd |
+| Instances survive a host restart | done (PostgreSQL, `plugin_instances`) |
+| Events durable and in the decoder history | done (JetStream `EVENTS`, stored by the worker) |
+| Process-group kill on stop / crash | done |
+| Admin API in `superhet-api` (`docs/api-plugins.md`) | done |
+| UI | not yet |
 | Container plugins, install from Git URL, resource limits | not yet (P3) |
-| Admin API in `superhet-api`, UI | not yet |
 
 ## Manifest
 
@@ -80,9 +84,50 @@ command.
 `[device] exclusive = true` declares that an instance takes the whole device and receives the
 complete window as IQ (ADS-B at 1090 MHz, DAB blocks, ADR-0013). Required then: `sample_rate`,
 `input.kind = "iq"`, and either a fixed `center_hz` or a range `center_hz_min` / `center_hz_max`
-the instance config picks from (DAB: Band III blocks). Only decoders can claim. The daemon side
-(snapshot state, retune, pause VFOs, restore on release, ARCHITECTURE 3.4) is not implemented yet;
-today the host only refuses a second exclusive instance on the same device (`conflict`).
+the instance picks from with `freq_hz` of its start request (DAB: Band III blocks).
+`input.sample_rate` must equal `device.sample_rate`. Only decoders can claim. The host refuses a
+second exclusive instance on the same device (`conflict`); the daemon takes the claim as
+described under "Feeding input".
+
+## Feeding input
+
+An instance with an `[input]` section is fed by the device daemon (`sdrd`) over the bus
+(`superhet_bus::tap`, implemented in `crates/superhet-bus/src/tap.rs`). Which feed an instance
+gets follows from its binding in the `start` request:
+
+| Start request | Input | Tap |
+|---|---|---|
+| `device` + `vfo` | what the VFO demodulates, mono, squelch included: `input.kind = audio` and `discriminator` get the audio of the VFO's mode (use an NFM VFO for a discriminator decoder), converted to `input.sample_rate` as `s16le` / `f32le` | `audio` |
+| `device` + `vfo`, `input.kind = iq` | complex baseband of the VFO (shifted to DC, filtered to the VFO bandwidth) resampled to `input.sample_rate` as `cu8` / `cs16` / `cf32` | `iq` |
+| exclusive plugin: `device` + `freq_hz` (centre, if not fixed by the manifest) | the whole sample window at the device rate; the host first claims the device | `window` |
+| `device` only, or nothing | no input; `stdin` stays open and idle | - |
+
+`vfo` without `device` and `voice_frames` input are refused; a VFO the daemon does not know is
+reported in `input_error` of the instance (and retried); a `device` without `vfo` is only
+metadata (environment, event fields).
+
+Mechanics, per process start of an instance:
+
+- The host subscribes to `sh.v1.dev.<dev>.tap.<instance id>` and sends `ctl.tap.open` (and for
+  exclusive plugins `ctl.claim.acquire` first) to `sh.v1.dev.<dev>.ctl.`. The daemon replies with
+  the subject; it publishes the sample bytes in chunks of about 20 ms (at most 64 KiB); the payloads
+  concatenated in order are the plugin's `stdin`. Requests and replies: `superhet_bus::tap`.
+- Taps and claims are **leases**: the host repeats the requests every 4 s, the daemon drops them
+  15 s after the last one (a crashed host, a restarted daemon and a lost bus heal themselves; the
+  claim is released and the tuning restored the same way). At most 16 taps per device.
+- **Claims** (ARCHITECTURE 3.4): the daemon remembers centre and rate, tunes to the claimed ones,
+  adds a lock holder `{kind:"claim", id:<instance>}` (so nothing retunes; VFOs outside the new
+  window are paused by the usual rules), and goes back to the remembered tuning on `claim.release`
+  or lease expiry. One claim per device; a user lock or another claim answers `locked` /
+  `conflict`. Limit: the state snapshot a restarting daemon restores is written while the claim is
+  held, so a daemon restart during a claim keeps the claimed tuning.
+- **Backpressure** never stalls the receiver or the bus: the daemon drops chunks when its publisher
+  queue is full or the bus is down (`superhet_sdrd_dropped_frames_total{stream="tap"}` on
+  `/metrics`), the host drops chunks when the plugin reads `stdin` too slowly (`input_dropped` in
+  the instance state, first and every 1000th drop logged). A dropped chunk is a gap in the sample
+  stream; plugins that care resynchronise on their own framing.
+- When the process ends (any reason) the host closes `stdin`, releases the tap and the claim and
+  kills the whole process group, so helpers a wrapped tool started cannot outlive it.
 
 ## Process environment and working directory
 
@@ -94,7 +139,7 @@ never passed on) and:
 |---|---|
 | `SUPERHET_PLUGIN_ID`, `SUPERHET_INSTANCE_ID` | identity |
 | `SUPERHET_PLUGIN_DIR` | plugin directory |
-| `SUPERHET_DEVICE`, `SUPERHET_FREQ_HZ` | binding of the instance (when set) |
+| `SUPERHET_DEVICE`, `SUPERHET_VFO`, `SUPERHET_FREQ_HZ` | binding of the instance (when set) |
 | `SUPERHET_CONFIG` | instance config as one line of JSON (`null` when none) |
 | `SUPERHET_SOCKET` | Unix socket path (framed transport only) |
 
@@ -121,10 +166,19 @@ first 5 and every 1000th logged). Type `heartbeat` is reserved: a liveness marke
 validated against `events_schema` nor forwarded.
 
 Valid events are enriched (`HostEvent`, `schema/host-event.schema.json`: plugin id, instance id,
-device, frequency, host time) and published on `sh.v1.events.<plugin>.<type...>` where `<plugin>`
-is the plugin id with `.` replaced by `_` and the type contributes one token per segment, e.g.
-`sh.v1.events.org_superhet_example_echo.echo.block`. Core NATS today; the durable `EVENTS` stream
-and persistence come with the first real decoder plugin.
+device, VFO, frequency, host time) and published on `sh.v1.events.<plugin>.<type...>` where
+`<plugin>` is the plugin id with `.` replaced by `_` and the type contributes one token per
+segment, e.g. `sh.v1.events.org_superhet_example_echo.echo.block`.
+
+Events are published into the durable JetStream stream `EVENTS` (subjects `sh.v1.events.>`, file
+storage, 7 days / 512 MiB, created by the host and the worker with the same configuration,
+`superhet_bus::events_stream_config`) and acknowledged by the server; if the stream does not take
+an event it is still published on core NATS for live subscribers. The worker's durable pull
+consumer `worker-plugin-events` stores every event in `decoder_events` (`source` = plugin id,
+`kind` = event type, `value` = the first string among `data.summary|text|message|value` or the
+compact JSON of `data`, at most 256 characters; `meta` = `{instance, ts, data}`) and announces the
+stored row on `sh.v1.events.core.decoder.<dev>`; it acknowledges after the insert, so a worker or
+database outage loses nothing within the stream's retention. See `docs/api-decoder-events.md`.
 
 ## Framed transport (wire format)
 
@@ -159,8 +213,12 @@ Instance states (`InstanceState`): `starting`, `running`, `backoff`, `error`, `s
   history and starts again.
 - `stop` closes stdin, waits up to 5 s, kills, and removes the instance. On host shutdown all
   instances are stopped the same way.
-- Instances are not persisted yet: after a host restart they must be started again. Installed
-  plugins are (`SUPERHET_PLUGIN_DIR`, default `/data/plugins`, layout `<dir>/<id>/<version>/`).
+- Instances are persistent: with `SUPERHET_DATABASE_URL` the host stores every started instance in
+  `superhet.plugin_instances` (migration 0008) and deletes the row on `stop`; after a restart it
+  starts all rows again with the same instance id and binding (a row whose plugin is no longer
+  installed or whose binding is refused is logged and kept). Without a database instances live
+  in memory only. Installed plugins are persistent too (`SUPERHET_PLUGIN_DIR`, default
+  `/data/plugins`, layout `<dir>/<id>/<version>/`).
 
 ## Control API (bus)
 
@@ -172,23 +230,29 @@ Request/reply JSON on `sh.v1.plugin.ctl.<cmd>`. Requests carry `"v":1`; replies 
 | Command | Body | Reply |
 |---|---|---|
 | `list` | `{"v":1}` | `{"plugins":[{"manifest":{...}}]}` (active version of each plugin) |
+| `remove` | `{"v":1,"plugin_id":"..."}` | `{"plugin_id","versions":[...]}`; deletes every version from disk; `conflict` while an instance of it exists, `not_found` if unknown |
 | `install` | `{"v":1,"path":"/host/dir"}` | `{"plugin":{"manifest":{...}}}`; validates, refuses symlinks, copies to `<dir>/<id>/<version>`; same id and version is `conflict`; build commands are not run |
 | `instances` | `{"v":1}` | `{"instances":[InstanceInfo]}` |
 | `get` | `{"v":1,"id":"i-ab12cd34"}` | `{"instance":InstanceInfo}` |
-| `start` | `{"v":1,"plugin_id":"...","device":"dev0","freq_hz":144800000,"config":{...}}` | `{"instance":InstanceInfo}`; `unsupported` for framed / container / ui plugins, `conflict` for a second exclusive claim on a device |
+| `start` | `{"v":1,"plugin_id":"...","device":"dev0","vfo":1,"freq_hz":144800000,"config":{...}}` | `{"instance":InstanceInfo}`; `invalid` for a binding that does not fit the plugin, `unsupported` for framed / container / ui plugins, `conflict` for a second exclusive claim on a device |
 | `stop` | `{"v":1,"id":"..."}` | `{"instance":InstanceInfo}` with state `stopped`; the instance is gone afterwards |
 | `restart` | `{"v":1,"id":"..."}` | `{"instance":InstanceInfo}`; only for state `error` (`conflict` otherwise) |
 
 Every state change of an instance is also published as `InstanceInfo` JSON on
-`sh.v1.plugin.state` (core NATS). `InstanceInfo`: `id`, `plugin_id`, `device`, `freq_hz`, `config`,
-`exclusive`, `state`, `pid`, `restarts`, `crashes_in_window`, `retry_in_ms`, `last_error`,
-`events_ok`, `events_invalid`, `updated_unix_ms` (`schema/instance-info.schema.json`).
+`sh.v1.plugin.state` (core NATS). `InstanceInfo`: `id`, `plugin_id`, `device`, `vfo`, `freq_hz`,
+`config`, `exclusive`, `state`, `pid`, `restarts`, `crashes_in_window`, `retry_in_ms`,
+`last_error`, `events_ok`, `events_invalid`, `input_dropped`, `input_error`, `updated_unix_ms`
+(`schema/instance-info.schema.json`).
+
+The API edge (`docs/api-plugins.md`) is the only caller in production: install and remove are
+`admin`, listing plugins and start / stop / restart are `operator` or `admin` (ROADMAP P2
+criterion 8), declared in `access::RULES`, every change audited.
 
 NATS permissions (`deploy/nats/nats.conf`): the `pluginhost` user subscribes to
-`sh.v1.plugin.ctl.>` and publishes `sh.v1.events.>` and `sh.v1.plugin.state`. The `api` user has no
-plugin rights yet; the admin endpoints (install/remove `admin`, start/stop/restart `operator` or
-`admin`, ROADMAP P2 criterion 8) must grant them when they are added, and declare their roles in
-`access::RULES`. Existing copies of `nats.conf` need the changed `pluginhost` entry.
+`sh.v1.plugin.ctl.>` and `sh.v1.dev.*.tap.>`, publishes `sh.v1.events.>`, `sh.v1.plugin.state`,
+`sh.v1.dev.*.ctl.tap.>` and `sh.v1.dev.*.ctl.claim.>` and uses JetStream (`$JS.API.>`). The `api`
+user publishes `sh.v1.plugin.ctl.>`; the `worker` user consumes the `EVENTS` stream. Existing
+copies of `nats.conf` need the changed `pluginhost` entry.
 
 ## Contract test suite
 

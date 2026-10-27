@@ -116,7 +116,7 @@ Example scrape config for a Prometheus container on the compose network:
 | `superhet_sdrd_iq_blocks_total` | counter | IQ blocks the DSP thread processed |
 | `superhet_sdrd_iq_samples_total` | counter | IQ samples processed (rate check: should grow by the sample rate per second) |
 | `superhet_sdrd_dropped_blocks_total{stage}` | counter | blocks dropped because a consumer lagged: `device` (device thread to DSP thread), `vfo` (DSP thread to VFO thread) |
-| `superhet_sdrd_dropped_frames_total{stream}` | counter | output frames dropped by the publishers (bus down or lagging): `spectrum`, `zoom`, `audio`, `rds`, `tones` |
+| `superhet_sdrd_dropped_frames_total{stream}` | counter | output frames dropped by the publishers (bus down or lagging): `spectrum`, `zoom`, `audio`, `rds`, `tones`, `tap` (plugin input) |
 | `superhet_sdrd_clipped_percent{device}` | gauge | share of samples at the ADC rails in the last 5 s |
 | `superhet_sdrd_adc_overload{device}` | gauge | 1 while more than 1 % clips |
 | `superhet_sdrd_sample_rate_hertz{device}` | gauge | current sample rate |

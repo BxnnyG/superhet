@@ -516,6 +516,9 @@ pub struct Channel {
     audio_d: Vec<f32>,
     out_l: Vec<f32>,
     out_r: Vec<f32>,
+    /// Keep the channel-filtered baseband of each processed block (for plugin taps).
+    capture_iq: bool,
+    iq_out: Vec<Complex32>,
 }
 
 fn validate_offset(offset_hz: f64, rate: u32) -> Result<(), DspError> {
@@ -561,7 +564,24 @@ impl Channel {
             audio_d: Vec::new(),
             out_l: Vec::new(),
             out_r: Vec::new(),
+            capture_iq: false,
+            iq_out: Vec::new(),
         })
+    }
+
+    /// Keeps (or stops keeping) the complex baseband of every processed block, available through
+    /// [`Self::captured_iq`]. Off by default; costs one copy per block when on.
+    pub fn set_iq_capture(&mut self, enabled: bool) {
+        self.capture_iq = enabled;
+        if !enabled {
+            self.iq_out.clear();
+        }
+    }
+
+    /// The baseband (shifted to DC, channel filtered, at [`Self::channel_rate`]) of the last
+    /// [`Self::process`] call; empty unless [`Self::set_iq_capture`] is on.
+    pub fn captured_iq(&self) -> &[Complex32] {
+        &self.iq_out
     }
 
     /// Current configuration.
@@ -799,6 +819,7 @@ impl Channel {
     pub fn process(&mut self, iq: &[Complex32], out: &mut Vec<f32>) -> ChannelStats {
         let mut power_sum = 0.0f64;
         let mut power_n = 0usize;
+        self.iq_out.clear();
         for chunk in iq.chunks(CHUNK) {
             self.nco.mix(chunk, &mut self.buf_a);
             for st in &mut self.chain.stages {
@@ -815,6 +836,9 @@ impl Channel {
                 .channel_filter
                 .process(&self.buf_a, &mut self.buf_b);
             std::mem::swap(&mut self.buf_a, &mut self.buf_b);
+            if self.capture_iq {
+                self.iq_out.extend_from_slice(&self.buf_a);
+            }
 
             let e: f64 = self
                 .buf_a
@@ -1524,6 +1548,39 @@ mod tests {
         let (_, out, open) = run_with(Some(100.0));
         assert!(open.iter().all(|o| !o.1));
         assert!(rms(&out[480..]) < 1e-3);
+    }
+
+    #[test]
+    fn iq_capture_yields_the_baseband_at_the_channel_rate() {
+        let rate = 250_000;
+        let mut ch = Channel::new(cfg(rate, 20_000.0, Mode::nfm())).expect("valid config");
+        let input: Vec<Complex32> = (0..rate as usize / 2)
+            .map(|n| fm_sample(rate, n, 20_000.0, 0.5, 0.0, 1_000.0))
+            .collect();
+        let mut out = Vec::new();
+        ch.process(&input[..1000], &mut out);
+        assert!(ch.captured_iq().is_empty(), "off by default");
+
+        ch.set_iq_capture(true);
+        let mut captured = Vec::new();
+        for block in input.chunks(4096) {
+            out.clear();
+            ch.process(block, &mut out);
+            captured.extend_from_slice(ch.captured_iq());
+        }
+        let expected = input.len() as f64 * ch.channel_rate() / f64::from(rate);
+        assert!(
+            (captured.len() as f64 - expected).abs() < 64.0,
+            "{} samples, expected about {expected}",
+            captured.len()
+        );
+        // The carrier sits on the VFO, so the baseband is (nearly) a constant phasor.
+        let tail = &captured[captured.len() / 2..];
+        let mean = tail.iter().sum::<Complex32>() / tail.len() as f32;
+        assert!(mean.norm() > 0.4, "carrier not at DC: {}", mean.norm());
+
+        ch.set_iq_capture(false);
+        assert!(ch.captured_iq().is_empty());
     }
 
     #[test]

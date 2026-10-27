@@ -3,6 +3,7 @@
 //! reference plugin).
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -10,7 +11,11 @@ use serde_json::{Value, json};
 use superhet_plugin_protocol::Package;
 use superhet_plugin_protocol::ctl::{InstanceInfo, InstanceState};
 use superhet_plugin_protocol::event::HostEvent;
-use superhet_pluginhost::supervisor::{EventSink, Policy, StartError, StartSpec, Supervisor};
+use superhet_pluginhost::supervisor::{
+    Attachment, EventSink, InputHealth, InputRequest, Inputs, Policy, StartError, StartSpec,
+    Supervisor,
+};
+use tokio::sync::mpsc;
 
 struct TempDir(PathBuf);
 
@@ -211,6 +216,7 @@ async fn events_are_validated_counted_and_enriched() {
             shell_plugin(&dir, script, ""),
             StartSpec {
                 device: Some("dev0".into()),
+                vfo: None,
                 freq_hz: Some(144_800_000),
                 config: Value::Null,
             },
@@ -450,4 +456,212 @@ sample_rate = 2400000
         Err(StartError::Unsupported(_))
     ));
     supervisor.shutdown().await;
+}
+
+/// An input provider that records the request, sends fixed chunks and notes when it is released.
+struct FakeInputs {
+    requests: Mutex<Vec<InputRequest>>,
+    chunks: Vec<Vec<u8>>,
+    released: Arc<AtomicBool>,
+}
+
+struct Released(Arc<AtomicBool>);
+
+impl Drop for Released {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+impl Inputs for FakeInputs {
+    fn attach(&self, request: &InputRequest, health: InputHealth) -> Option<Attachment> {
+        self.requests.lock().expect("lock").push(request.clone());
+        let (tx, rx) = mpsc::channel(16);
+        for chunk in &self.chunks {
+            tx.try_send(chunk.clone()).expect("queue");
+        }
+        let _ = health.status.send(Some("daemon says hello".into()));
+        // The sender stays alive in the guard: the input stays open until the guard is dropped.
+        Some(Attachment {
+            chunks: rx,
+            guard: Box::new((tx, Released(Arc::clone(&self.released)))),
+        })
+    }
+}
+
+fn fake_inputs(chunks: Vec<Vec<u8>>) -> Arc<FakeInputs> {
+    Arc::new(FakeInputs {
+        requests: Mutex::new(Vec::new()),
+        chunks,
+        released: Arc::new(AtomicBool::new(false)),
+    })
+}
+
+#[tokio::test]
+async fn bound_instances_get_their_input_on_stdin_and_release_it_when_stopped() {
+    let dir = TempDir::new();
+    let inputs = fake_inputs(vec![b"hello ".to_vec(), b"plugin".to_vec()]);
+    let supervisor = Supervisor::with_inputs(
+        fast_policy(),
+        Arc::new(Collect::default()),
+        Arc::clone(&inputs) as Arc<dyn Inputs>,
+    );
+    // `cat` copies stdin into a file in the plugin directory until stdin is closed.
+    let package = shell_plugin(&dir, "cat > fed.bin", "");
+    let info = supervisor
+        .start(
+            Arc::clone(&package),
+            StartSpec {
+                device: Some("rtl0".into()),
+                vfo: Some(3),
+                ..StartSpec::default()
+            },
+        )
+        .expect("start");
+    assert_eq!(info.vfo, Some(3));
+    let info = wait_for(&supervisor, &info.id, "input status", |i| {
+        i.input_error.is_some()
+    })
+    .await;
+    assert_eq!(info.input_error.as_deref(), Some("daemon says hello"));
+
+    let request = inputs.requests.lock().expect("lock")[0].clone();
+    assert_eq!(request.device, "rtl0");
+    assert_eq!(request.tap.id, info.id);
+    assert_eq!(request.tap.vfo, Some(3));
+    assert_eq!(request.tap.rate, 48_000);
+    assert!(request.claim.is_none());
+
+    let fed = package.dir.join("fed.bin");
+    for _ in 0..200 {
+        if std::fs::read(&fed).is_ok_and(|b| b.len() == 12) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(std::fs::read(&fed).expect("fed"), b"hello plugin");
+
+    assert!(!inputs.released.load(Ordering::SeqCst));
+    supervisor.stop(&info.id).await.expect("stopped");
+    assert!(inputs.released.load(Ordering::SeqCst), "input released");
+}
+
+#[tokio::test]
+async fn bindings_are_checked_and_exclusive_plugins_claim_the_window() {
+    let dir = TempDir::new();
+    let inputs = fake_inputs(Vec::new());
+    let supervisor = Supervisor::with_inputs(
+        fast_policy(),
+        Arc::new(Collect::default()),
+        Arc::clone(&inputs) as Arc<dyn Inputs>,
+    );
+    // A VFO needs its device.
+    let err = supervisor
+        .start(
+            shell_plugin(&dir, "sleep 60", ""),
+            StartSpec {
+                vfo: Some(1),
+                ..StartSpec::default()
+            },
+        )
+        .expect_err("vfo without device");
+    assert!(matches!(err, StartError::Invalid(_)), "{err:?}");
+
+    // A tunable exclusive plugin: the instance picks the centre inside the declared range.
+    let exclusive = shell_plugin(&dir, "sleep 60", "");
+    std::fs::write(
+        exclusive.dir.join("plugin.toml"),
+        r#"
+[plugin]
+id = "org.superhet.test.dab"
+name = "dab"
+version = "0.0.1"
+protocol = 1
+license = "AGPL-3.0-only"
+type = "decoder"
+
+[runtime]
+command = ["sh", "-c", "sleep 60"]
+
+[input]
+kind = "iq"
+sample_rate = 2048000
+format = "cu8"
+
+[device]
+exclusive = true
+center_hz_min = 174928000
+center_hz_max = 239200000
+sample_rate = 2048000
+"#,
+    )
+    .expect("manifest");
+    let exclusive = Arc::new(Package::load(&exclusive.dir).expect("package"));
+    let on = |device: Option<&str>, freq_hz: Option<u64>| StartSpec {
+        device: device.map(Into::into),
+        freq_hz,
+        ..StartSpec::default()
+    };
+    for bad in [
+        on(None, Some(200_000_000)),
+        on(Some("rtl0"), None),
+        on(Some("rtl0"), Some(100_000_000)),
+    ] {
+        let err = supervisor
+            .start(Arc::clone(&exclusive), bad)
+            .expect_err("invalid binding");
+        assert!(matches!(err, StartError::Invalid(_)), "{err:?}");
+    }
+    let info = supervisor
+        .start(exclusive, on(Some("rtl0"), Some(190_640_000)))
+        .expect("claim");
+    wait_for(&supervisor, &info.id, "attached", |i| {
+        i.input_error.is_some()
+    })
+    .await;
+    let request = inputs.requests.lock().expect("lock")[0].clone();
+    let claim = request.claim.expect("claim");
+    assert_eq!(
+        (claim.center_hz, claim.sample_rate),
+        (190_640_000, Some(2_048_000))
+    );
+    assert_eq!(request.tap.center_hz, Some(190_640_000));
+    assert_eq!(request.tap.vfo, None);
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn stopping_kills_the_whole_process_group() {
+    let dir = TempDir::new();
+    let supervisor = Supervisor::new(fast_policy(), Arc::new(Collect::default()));
+    // The plugin starts a helper that would outlive it, like a wrapped decoder binary does.
+    let package = shell_plugin(&dir, "sleep 300 & echo $! > helper.pid; wait", "");
+    let info = supervisor
+        .start(Arc::clone(&package), StartSpec::default())
+        .expect("start");
+    let pid_file = package.dir.join("helper.pid");
+    let mut helper = None;
+    for _ in 0..300 {
+        if let Some(pid) = std::fs::read_to_string(&pid_file)
+            .ok()
+            .and_then(|t| t.trim().parse::<u32>().ok())
+        {
+            helper = Some(pid);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let helper = helper.expect("helper pid");
+    assert!(!zombie_or_gone(helper), "helper should be running");
+    supervisor.stop(&info.id).await.expect("stopped");
+    for _ in 0..200 {
+        if zombie_or_gone(helper) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        zombie_or_gone(helper),
+        "helper {helper} survived the plugin"
+    );
 }

@@ -122,10 +122,13 @@ services:
       SUPERHET_NATS_USER: pluginhost
       SUPERHET_NATS_PASSWORD: ${NATS_PLUGINHOST_PASSWORD}
       SUPERHET_PLUGIN_DIR: /data/plugins
+      # Started instances are stored here and come back after a restart (never passed to plugins).
+      SUPERHET_DATABASE_URL: postgres://superhet:${POSTGRES_PASSWORD}@postgres:5432/superhet
     # Installed plugins survive container re-creation.
     volumes:
       - plugin-data:/data/plugins
     depends_on:
+      postgres: { condition: service_healthy }
       nats: { condition: service_healthy }
     healthcheck:
       <<: *healthcheck-defaults

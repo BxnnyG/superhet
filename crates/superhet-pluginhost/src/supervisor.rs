@@ -6,6 +6,12 @@
 //! [`Policy::max_crashes`] inside the window puts the instance into
 //! [`InstanceState::Error`], where it stays until `restart`. Simple transport only; the framed
 //! transport, container and UI plugins are refused with [`StartError::Unsupported`].
+//!
+//! Input: an instance bound to a device and a VFO (or an exclusive plugin bound to a device) gets
+//! its samples through an [`Inputs`] provider, which the supervisor attaches for every process
+//! start and drops when the process ends; the bytes are written to the plugin's `stdin`. When
+//! the process ends, its whole process group is killed, so helpers the plugin started cannot
+//! outlive it.
 
 use std::collections::{HashMap, VecDeque};
 use std::process::Stdio;
@@ -14,13 +20,16 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
+use superhet_bus::tap::{ClaimAcquire, TapFormat, TapKind, TapOpen};
 use superhet_plugin_protocol::ctl::{InstanceInfo, InstanceState};
 use superhet_plugin_protocol::event::{HostEvent, Line, MAX_EVENT_LINE};
-use superhet_plugin_protocol::manifest::{PluginType, RuntimeKind, Transport};
+use superhet_plugin_protocol::manifest::{
+    InputKind, PluginType, RuntimeKind, SampleFormat, Transport,
+};
 use superhet_plugin_protocol::{InstanceEnv, PROTOCOL_VERSION, Package};
-use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
-use tokio::process::{Child, Command};
-use tokio::sync::{broadcast, watch};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStdin, Command};
+use tokio::sync::{broadcast, mpsc, watch};
 
 /// Environment variables passed through to plugins; everything else (NATS and database
 /// credentials in particular) is withheld.
@@ -78,12 +87,59 @@ impl EventSink for NullSink {
     fn emit(&self, _event: HostEvent) {}
 }
 
+/// What an instance needs from the device daemon.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputRequest {
+    /// Device the daemon serves.
+    pub device: String,
+    /// The tap to open (its id is the instance id).
+    pub tap: TapOpen,
+    /// The exclusive claim to hold while the tap is open.
+    pub claim: Option<ClaimAcquire>,
+}
+
+/// Counters and status an [`Inputs`] provider reports about one attachment.
+#[derive(Debug, Clone)]
+pub struct InputHealth {
+    /// Chunks dropped because the plugin did not read fast enough.
+    pub dropped: Arc<AtomicU64>,
+    /// Why the input is not flowing; `None` while it is.
+    pub status: watch::Sender<Option<String>>,
+}
+
+/// A live input: chunks of sample bytes for `stdin`. Dropping the guard releases the tap and the
+/// claim.
+pub struct Attachment {
+    /// Sample bytes in order.
+    pub chunks: mpsc::Receiver<Vec<u8>>,
+    /// Keeps the tap (and claim) alive.
+    pub guard: Box<dyn Send>,
+}
+
+/// Source of plugin input (the bus in production). `attach` must not block.
+pub trait Inputs: Send + Sync + 'static {
+    /// Start delivering the input of `request`; `None` when this provider cannot.
+    fn attach(&self, request: &InputRequest, health: InputHealth) -> Option<Attachment>;
+}
+
+/// No input source: instances keep their `stdin` open and idle.
+#[derive(Debug, Default)]
+pub struct NoInputs;
+
+impl Inputs for NoInputs {
+    fn attach(&self, _request: &InputRequest, _health: InputHealth) -> Option<Attachment> {
+        None
+    }
+}
+
 /// Parameters of a new instance.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct StartSpec {
     /// Device to bind to.
     pub device: Option<String>,
-    /// Frequency (Hz) to bind to.
+    /// VFO of the device that feeds the instance.
+    pub vfo: Option<u32>,
+    /// Frequency (Hz) to bind to; the centre of the claim for exclusive plugins.
     pub freq_hz: Option<u64>,
     /// Plugin specific configuration.
     pub config: Value,
@@ -98,6 +154,9 @@ pub enum StartError {
     /// Refused because of the current state.
     #[error("{0}")]
     Conflict(String),
+    /// The binding does not fit the plugin.
+    #[error("{0}")]
+    Invalid(String),
     /// Unknown instance.
     #[error("no such instance")]
     NotFound,
@@ -107,6 +166,8 @@ struct Shared {
     id: String,
     package: Arc<Package>,
     spec: StartSpec,
+    input: Option<InputRequest>,
+    input_dropped: Arc<AtomicU64>,
     info: Mutex<Mutable>,
     events_ok: AtomicU64,
     events_invalid: AtomicU64,
@@ -120,6 +181,7 @@ struct Mutable {
     crashes_in_window: u32,
     retry_in: Option<Duration>,
     last_error: Option<String>,
+    input_error: Option<String>,
     updated_unix_ms: u64,
 }
 
@@ -136,6 +198,7 @@ impl Shared {
             id: self.id.clone(),
             plugin_id: self.package.manifest.plugin.id.clone(),
             device: self.spec.device.clone(),
+            vfo: self.spec.vfo,
             freq_hz: self.spec.freq_hz,
             config: self.spec.config.clone(),
             exclusive: self.package.manifest.is_exclusive(),
@@ -149,6 +212,8 @@ impl Shared {
             last_error: m.last_error.clone(),
             events_ok: self.events_ok.load(Ordering::Relaxed),
             events_invalid: self.events_invalid.load(Ordering::Relaxed),
+            input_dropped: self.input_dropped.load(Ordering::Relaxed),
+            input_error: m.input_error.clone(),
             updated_unix_ms: m.updated_unix_ms,
         }
     }
@@ -174,6 +239,7 @@ struct Entry {
 struct Inner {
     policy: Policy,
     sink: Arc<dyn EventSink>,
+    inputs: Arc<dyn Inputs>,
     tx: broadcast::Sender<InstanceInfo>,
     instances: Mutex<HashMap<String, Entry>>,
 }
@@ -188,11 +254,18 @@ impl Supervisor {
     /// Create a supervisor.
     #[must_use]
     pub fn new(policy: Policy, sink: Arc<dyn EventSink>) -> Self {
+        Self::with_inputs(policy, sink, Arc::new(NoInputs))
+    }
+
+    /// Create a supervisor that feeds instances from `inputs`.
+    #[must_use]
+    pub fn with_inputs(policy: Policy, sink: Arc<dyn EventSink>, inputs: Arc<dyn Inputs>) -> Self {
         let (tx, _) = broadcast::channel(256);
         Self {
             inner: Arc::new(Inner {
                 policy,
                 sink,
+                inputs,
                 tx,
                 instances: Mutex::new(HashMap::new()),
             }),
@@ -222,9 +295,30 @@ impl Supervisor {
         package: Arc<Package>,
         spec: StartSpec,
     ) -> Result<InstanceInfo, StartError> {
+        self.start_as(None, package, spec)
+    }
+
+    /// Like [`Self::start`], with a given instance id (restoring a stored instance).
+    ///
+    /// # Errors
+    /// As [`Self::start`]; [`StartError::Conflict`] also when `id` is taken, and
+    /// [`StartError::Invalid`] when the binding does not fit the plugin.
+    pub fn start_as(
+        &self,
+        id: Option<String>,
+        package: Arc<Package>,
+        spec: StartSpec,
+    ) -> Result<InstanceInfo, StartError> {
         check_runnable(&package)?;
-        let id = format!("i-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+        let id =
+            id.unwrap_or_else(|| format!("i-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
+        let input = input_request(&package, &id, &spec)?;
         let mut instances = self.instances();
+        if instances.contains_key(&id) {
+            return Err(StartError::Conflict(format!(
+                "instance {id} already exists"
+            )));
+        }
         if package.manifest.is_exclusive()
             && let Some(other) = instances.values().find(|e| {
                 e.shared.package.manifest.is_exclusive()
@@ -241,12 +335,15 @@ impl Supervisor {
             id: id.clone(),
             package,
             spec,
+            input,
+            input_dropped: Arc::new(AtomicU64::new(0)),
             info: Mutex::new(Mutable {
                 state: InstanceState::Starting,
                 pid: None,
                 crashes_in_window: 0,
                 retry_in: None,
                 last_error: None,
+                input_error: None,
                 updated_unix_ms: unix_ms(),
             }),
             events_ok: AtomicU64::new(0),
@@ -266,6 +363,7 @@ impl Supervisor {
         let task = tokio::spawn(run_instance(
             self.inner.policy.clone(),
             Arc::clone(&self.inner.sink),
+            Arc::clone(&self.inner.inputs),
             Arc::clone(&shared),
             stop_rx,
         ));
@@ -369,9 +467,111 @@ fn check_runnable(package: &Package) -> Result<(), StartError> {
     Ok(())
 }
 
+/// What the daemon has to deliver for this instance, if anything.
+fn input_request(
+    package: &Package,
+    id: &str,
+    spec: &StartSpec,
+) -> Result<Option<InputRequest>, StartError> {
+    let manifest = &package.manifest;
+    let Some(input) = &manifest.input else {
+        return Ok(None);
+    };
+    let format = match input.format {
+        SampleFormat::Cf32 => TapFormat::Cf32,
+        SampleFormat::Cs16 => TapFormat::Cs16,
+        SampleFormat::Cu8 => TapFormat::Cu8,
+        SampleFormat::S16le => TapFormat::S16le,
+        SampleFormat::F32le => TapFormat::F32le,
+    };
+    let invalid = StartError::Invalid;
+    let request = if manifest.is_exclusive() {
+        let device = spec
+            .device
+            .clone()
+            .ok_or_else(|| invalid("exclusive plugins need a device".into()))?;
+        let dev = &manifest.device;
+        let center = match (dev.center_hz, spec.freq_hz) {
+            (Some(fixed), _) => fixed,
+            (None, Some(chosen)) => chosen,
+            (None, None) => {
+                return Err(invalid("freq_hz (the centre frequency) is required".into()));
+            }
+        };
+        if let (Some(min), Some(max)) = (dev.center_hz_min, dev.center_hz_max)
+            && !(min..=max).contains(&center)
+        {
+            return Err(invalid(format!("freq_hz must be within {min}..={max}")));
+        }
+        let rate = dev.sample_rate.unwrap_or(input.sample_rate);
+        if rate != input.sample_rate {
+            return Err(invalid(
+                "exclusive plugins receive the window at device.sample_rate; input.sample_rate must match"
+                    .into(),
+            ));
+        }
+        InputRequest {
+            device,
+            tap: TapOpen {
+                v: superhet_bus::tap::VERSION,
+                id: id.to_owned(),
+                kind: TapKind::Window,
+                vfo: None,
+                rate,
+                format,
+                center_hz: Some(center),
+            },
+            claim: Some(ClaimAcquire {
+                v: superhet_bus::tap::VERSION,
+                id: id.to_owned(),
+                center_hz: center,
+                sample_rate: Some(rate),
+            }),
+        }
+    } else {
+        let (device, vfo) = match (&spec.device, spec.vfo) {
+            // Bound for information only (environment, event metadata); nothing to feed.
+            (_, None) => return Ok(None),
+            (Some(device), Some(vfo)) => (device.clone(), vfo),
+            (None, Some(_)) => return Err(invalid("a vfo needs a device".into())),
+        };
+        let kind = match input.kind {
+            InputKind::Iq => TapKind::Iq,
+            // The VFO's demodulated audio; a discriminator plugin uses an NFM VFO.
+            InputKind::Discriminator | InputKind::Audio => TapKind::Audio,
+            InputKind::VoiceFrames => {
+                return Err(StartError::Unsupported(
+                    "voice-frame input is not available yet".into(),
+                ));
+            }
+        };
+        InputRequest {
+            device,
+            tap: TapOpen {
+                v: superhet_bus::tap::VERSION,
+                id: id.to_owned(),
+                kind,
+                vfo: Some(vfo),
+                rate: input.sample_rate,
+                format,
+                center_hz: None,
+            },
+            claim: None,
+        }
+    };
+    request
+        .tap
+        .validate()
+        .map_err(|err| StartError::Invalid(err.to_string()))?;
+    superhet_bus::subjects::tap(&request.device, &request.tap.id)
+        .map_err(|err| StartError::Invalid(err.to_string()))?;
+    Ok(Some(request))
+}
+
 async fn run_instance(
     policy: Policy,
     sink: Arc<dyn EventSink>,
+    inputs: Arc<dyn Inputs>,
     shared: Arc<Shared>,
     mut stop: watch::Receiver<bool>,
 ) {
@@ -383,7 +583,7 @@ async fn run_instance(
             m.retry_in = None;
         });
         let outcome = match spawn(&shared) {
-            Ok(child) => run_process(child, &policy, &sink, &shared, &mut stop).await,
+            Ok(child) => run_process(child, &policy, &sink, &inputs, &shared, &mut stop).await,
             Err(err) => Outcome::Crashed(format!("spawn failed: {err}")),
         };
         let reason = match outcome {
@@ -461,6 +661,7 @@ fn spawn(shared: &Shared) -> std::io::Result<Child> {
         instance_id: &shared.id,
         plugin_dir: &package.dir,
         device: shared.spec.device.as_deref(),
+        vfo: shared.spec.vfo,
         freq_hz: shared.spec.freq_hz,
         config: &shared.spec.config,
     };
@@ -485,10 +686,91 @@ fn spawn(shared: &Shared) -> std::io::Result<Child> {
     command.spawn()
 }
 
+/// Kill every process in the group `pid` leads (the plugin and whatever it started).
+#[allow(unsafe_code)]
+fn kill_group(pid: u32) {
+    // Never signal group 0/1 (our own group, init) because of a bad pid.
+    let Ok(pid) = i32::try_from(pid) else { return };
+    if pid <= 1 {
+        return;
+    }
+    // SAFETY: kill(2) with a negative pid only sends a signal to a process group; it touches
+    // no memory. The plugin was spawned as the leader of its own group (`process_group(0)`).
+    unsafe {
+        libc::kill(-pid, libc::SIGKILL);
+    }
+}
+
+/// What holds the plugin's `stdin`: the input feeder, or just the open pipe.
+enum Stdin {
+    /// Held open and idle until the host wants the plugin to end.
+    Idle(Option<ChildStdin>),
+    /// The feeder owns the pipe and the attachment; aborting it closes both.
+    Feeding(tokio::task::JoinHandle<()>),
+}
+
+impl Stdin {
+    /// Close the pipe (and release the input) and wait until that has happened.
+    async fn close(self) {
+        match self {
+            Self::Idle(stdin) => drop(stdin),
+            Self::Feeding(task) => {
+                task.abort();
+                let _ = task.await;
+            }
+        }
+    }
+}
+
+/// Write the attachment's chunks to the plugin until either side ends.
+async fn feed_stdin(mut stdin: ChildStdin, mut attachment: Attachment) {
+    while let Some(chunk) = attachment.chunks.recv().await {
+        if stdin.write_all(&chunk).await.is_err() {
+            break;
+        }
+    }
+    // The plugin closed its stdin or the input ended; keep the pipe (and the attachment) until
+    // the process is stopped, so the plugin is not told to end by accident.
+    std::future::pending::<()>().await;
+}
+
+/// Attach the instance's input to `stdin`, if it has one and a provider takes it.
+fn open_stdin(stdin: Option<ChildStdin>, inputs: &Arc<dyn Inputs>, shared: &Arc<Shared>) -> Stdin {
+    let Some(request) = shared.input.as_ref() else {
+        return Stdin::Idle(stdin);
+    };
+    let Some(pipe) = stdin else {
+        return Stdin::Idle(None);
+    };
+    let (status, mut state) = watch::channel(None);
+    let health = InputHealth {
+        dropped: Arc::clone(&shared.input_dropped),
+        status,
+    };
+    let Some(attachment) = inputs.attach(request, health) else {
+        return Stdin::Idle(Some(pipe));
+    };
+    let shared = Arc::clone(shared);
+    Stdin::Feeding(tokio::spawn(async move {
+        let watcher = {
+            let shared = Arc::clone(&shared);
+            tokio::spawn(async move {
+                while state.changed().await.is_ok() {
+                    let error = state.borrow_and_update().clone();
+                    shared.update(|m| m.input_error = error);
+                }
+            })
+        };
+        feed_stdin(pipe, attachment).await;
+        watcher.abort();
+    }))
+}
+
 async fn run_process(
     mut child: Child,
     policy: &Policy,
     sink: &Arc<dyn EventSink>,
+    inputs: &Arc<dyn Inputs>,
     shared: &Arc<Shared>,
     stop: &mut watch::Receiver<bool>,
 ) -> Outcome {
@@ -496,11 +778,12 @@ async fn run_process(
     shared.update(|m| {
         m.state = InstanceState::Running;
         m.pid = pid;
+        m.input_error = None;
     });
     let started = Instant::now();
     let activity = Arc::new(AtomicU64::new(0));
     // Held open so the plugin sees EOF only when the host wants it to end.
-    let stdin = child.stdin.take();
+    let mut stdin = Some(open_stdin(child.stdin.take(), inputs, shared));
     let readers = [
         child.stdout.take().map(|out| {
             tokio::spawn(read_events(
@@ -532,7 +815,9 @@ async fn run_process(
                 });
             }
             _ = stop.changed() => {
-                drop(stdin);
+                if let Some(stdin) = stdin.take() {
+                    stdin.close().await;
+                }
                 if tokio::time::timeout(policy.stop_grace, child.wait()).await.is_err() {
                     let _ = child.kill().await;
                 }
@@ -547,6 +832,13 @@ async fn run_process(
             }
         }
     };
+    // Release the input and take down anything the plugin left running in its group.
+    if let Some(stdin) = stdin.take() {
+        stdin.close().await;
+    }
+    if let Some(pid) = pid {
+        kill_group(pid);
+    }
     // Drain what the process wrote right before it ended.
     for reader in readers.into_iter().flatten() {
         let _ = tokio::time::timeout(Duration::from_secs(1), reader).await;
@@ -585,6 +877,7 @@ async fn read_events(
                     plugin_id: shared.package.manifest.plugin.id.clone(),
                     instance_id: shared.id.clone(),
                     device: shared.spec.device.clone(),
+                    vfo: shared.spec.vfo,
                     freq_hz: shared.spec.freq_hz,
                     event_type: event.event_type,
                     ts: event.ts,

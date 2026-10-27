@@ -8,6 +8,7 @@
 //! - `sh.v1.dev.<dev>.spectrum.zoom` – zoom spectrum frames (narrow slice, real resolution)
 //! - `sh.v1.dev.<dev>.audio.<stream>` – demodulated audio streams
 //! - `sh.v1.dev.<dev>.rds.<vfo>` – decoded RDS state of a WFM VFO (JSON, see [`rds`])
+//! - `sh.v1.dev.<dev>.tap.<id>` – raw sample bytes for a plugin instance (see [`tap`])
 //! - `sh.v1.dev.<dev>.tones.<vfo>` – CTCSS tone and DTMF digits of an NFM / AM VFO (JSON, see [`tones`])
 //! - `sh.v1.events.core.decoder.<dev>` – stored decoder history events (JSON, published by the worker)
 //! - `sh.v1.events.<plugin>.<type...>` – plugin events (`<plugin>` = plugin id, dots as `_`)
@@ -25,10 +26,33 @@ pub mod profile;
 pub mod rds;
 pub mod spectrum;
 pub mod subjects;
+pub mod tap;
 pub mod tones;
 pub mod zoom;
 
 pub use config::{Auth, BusConfig, ConfigError};
+
+/// How long the `EVENTS` stream keeps plugin events (the worker normally consumes them within
+/// seconds; this is the window in which it may be down).
+pub const EVENTS_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 3600);
+/// Size cap of the `EVENTS` stream.
+pub const EVENTS_MAX_BYTES: i64 = 512 * 1024 * 1024;
+
+/// Configuration of the durable `EVENTS` stream, shared by every service that creates it
+/// (plugin host and worker both call `get_or_create_stream` and must agree).
+#[must_use]
+pub fn events_stream_config() -> async_nats::jetstream::stream::Config {
+    async_nats::jetstream::stream::Config {
+        name: subjects::EVENTS_STREAM.to_owned(),
+        subjects: vec![subjects::ALL_EVENTS.to_owned()],
+        retention: async_nats::jetstream::stream::RetentionPolicy::Limits,
+        storage: async_nats::jetstream::stream::StorageType::File,
+        discard: async_nats::jetstream::stream::DiscardPolicy::Old,
+        max_age: EVENTS_MAX_AGE,
+        max_bytes: EVENTS_MAX_BYTES,
+        ..Default::default()
+    }
+}
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};

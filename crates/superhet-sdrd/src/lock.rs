@@ -17,6 +17,8 @@ use crate::control::{CtlError, ErrorCode};
 pub enum HolderKind {
     /// The user's manual lock.
     User,
+    /// An exclusive device claim of a plugin instance (`ctl.claim.acquire`).
+    Claim,
 }
 
 /// One lock holder as shown in the state document and in `locked` errors.
@@ -47,6 +49,17 @@ impl Holder {
             kind: HolderKind::User,
             id: "user".into(),
             since_ms,
+            name: None,
+        }
+    }
+
+    /// The exclusive claim of plugin instance `id`, taken now.
+    #[must_use]
+    pub fn claim(id: &str) -> Self {
+        Self {
+            kind: HolderKind::Claim,
+            id: id.to_owned(),
+            since_ms: unix_ms(),
             name: None,
         }
     }
@@ -124,6 +137,7 @@ impl LockSet {
             .map(|h| match (h.kind, &h.name) {
                 (HolderKind::User, Some(name)) => format!("user {name}"),
                 (HolderKind::User, None) => "user".to_owned(),
+                (HolderKind::Claim, _) => format!("exclusive plugin {}", h.id),
             })
             .collect();
         CtlError {

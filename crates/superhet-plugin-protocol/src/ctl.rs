@@ -26,6 +26,8 @@ pub mod cmd {
     pub const STOP: &str = "stop";
     /// Start an instance in state `error` or `stopped` again.
     pub const RESTART: &str = "restart";
+    /// Remove an installed plugin (all versions); refused while instances of it exist.
+    pub const REMOVE: &str = "remove";
 }
 
 /// Lifecycle state of an instance.
@@ -53,6 +55,9 @@ pub struct InstanceInfo {
     pub plugin_id: String,
     /// Device the instance is bound to.
     pub device: Option<String>,
+    /// VFO of the device whose audio or IQ feeds the instance.
+    #[serde(default)]
+    pub vfo: Option<u32>,
     /// Frequency (Hz) the instance is bound to.
     pub freq_hz: Option<u64>,
     /// Operator configuration passed to the plugin.
@@ -75,6 +80,12 @@ pub struct InstanceInfo {
     pub events_ok: u64,
     /// Rejected event lines (counted and dropped).
     pub events_invalid: u64,
+    /// Input chunks dropped because the plugin did not read its `stdin` fast enough.
+    #[serde(default)]
+    pub input_dropped: u64,
+    /// Why the input is not flowing (VFO missing, device claimed, daemon unreachable).
+    #[serde(default)]
+    pub input_error: Option<String>,
     /// Unix milliseconds of the last state change.
     pub updated_unix_ms: u64,
 }
@@ -107,12 +118,39 @@ pub struct StartRequest {
     /// Device to bind to.
     #[serde(default)]
     pub device: Option<String>,
-    /// Frequency (Hz) to bind to.
+    /// VFO of the device to take audio or IQ from (with `device`; absent for exclusive plugins,
+    /// which get the whole window).
+    #[serde(default)]
+    pub vfo: Option<u32>,
+    /// Frequency (Hz) to bind to; for exclusive plugins the centre frequency of the claim.
     #[serde(default)]
     pub freq_hz: Option<u64>,
     /// Plugin specific configuration.
     #[serde(default)]
     pub config: Value,
+}
+
+/// `remove`: delete an installed plugin.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoveRequest {
+    /// Contract version.
+    pub v: u32,
+    /// Plugin id.
+    pub plugin_id: String,
+}
+
+/// Reply to `remove`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemovedReply {
+    /// Contract version.
+    pub v: u32,
+    /// Always true.
+    pub ok: bool,
+    /// Plugin id.
+    pub plugin_id: String,
+    /// Versions that were deleted.
+    pub versions: Vec<String>,
 }
 
 /// `get`, `stop`, `restart`: address one instance.

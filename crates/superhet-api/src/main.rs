@@ -13,6 +13,7 @@ mod hub;
 mod maintenance;
 mod metrics;
 mod origin;
+mod plugins;
 mod profiles;
 mod registry;
 mod settings;
@@ -70,6 +71,7 @@ fn app(
             auth.clone(),
             devices.clone(),
         )))
+        .merge(plugins::router(devices.clone()))
         .merge(devices::router(devices));
     Router::new()
         .route("/healthz", get(healthz))

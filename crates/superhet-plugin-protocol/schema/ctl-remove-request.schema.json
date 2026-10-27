@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`remove`: delete an installed plugin.",
+  "properties": {
+    "plugin_id": {
+      "description": "Plugin id.",
+      "type": "string"
+    },
+    "v": {
+      "description": "Contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "plugin_id"
+  ],
+  "title": "RemoveRequest",
+  "type": "object"
+}

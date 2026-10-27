@@ -1,13 +1,32 @@
-//! Queries for the decoder event history (DTMF bursts, tone changes, RDS changes;
-//! `docs/api-decoder-events.md`). The worker inserts, the API lists and clears.
+//! Queries for the decoder event history (DTMF bursts, tone changes, RDS changes and the events
+//! of decoder plugins; `docs/api-decoder-events.md`). The worker inserts, the API lists and
+//! clears.
 
 use serde_json::{Value, json};
 use sqlx::Row;
 
 use crate::{Error, PgPool};
 
-/// Event kinds the table accepts.
+/// Event kinds of the built-in detectors (`source` [`CORE`]); plugins use their own event types.
 pub const KINDS: [&str; 6] = ["dtmf", "ctcss", "dcs", "rds_ps", "rds_rt", "rds_pi"];
+
+/// `source` of the built-in detectors; plugin events carry the plugin id.
+pub const CORE: &str = "core";
+
+/// Whether `kind` is a plugin event type as the table accepts it: 1-8 dotted segments of
+/// `[a-z][a-z0-9-]*`, at most 64 characters (the plugin contract's event type rule).
+#[must_use]
+pub fn is_plugin_kind(kind: &str) -> bool {
+    !kind.is_empty()
+        && kind.len() <= 64
+        && kind.split('.').count() <= 8
+        && kind.split('.').all(|segment| {
+            segment.starts_with(|c: char| c.is_ascii_lowercase())
+                && segment
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        })
+}
 
 /// Most rows kept by [`prune`]; the oldest go first. A safety net against a runaway producer
 /// filling the disk within the retention window.
@@ -18,16 +37,18 @@ pub const MAX_ROWS: i64 = 2_000_000;
 pub struct NewEvent {
     /// Event time, Unix milliseconds.
     pub ts_ms: i64,
-    /// Device id.
+    /// Device id (`-` for a plugin instance that is not bound to a device).
     pub device: String,
-    /// VFO id on the device.
-    pub vfo: i32,
+    /// VFO id on the device; absent for plugin instances without a VFO.
+    pub vfo: Option<i32>,
     /// Tuned frequency of the VFO at that time, Hz.
     pub freq_hz: Option<i64>,
     /// Demodulation mode of the VFO.
     pub mode: Option<String>,
-    /// One of [`KINDS`].
+    /// One of [`KINDS`] for source [`CORE`], a plugin event type otherwise.
     pub kind: String,
+    /// [`CORE`] or the id of the plugin that produced the event.
+    pub source: String,
     /// Human-readable value (digits, tone, station name, text).
     pub value: String,
     /// Kind-specific extras (JSON object).
@@ -56,6 +77,7 @@ impl Event {
             "freq_hz": d.freq_hz,
             "mode": d.mode,
             "kind": d.kind,
+            "source": d.source,
             "value": d.value,
             "meta": d.meta,
         })
@@ -71,6 +93,8 @@ pub struct Query {
     pub device: Option<String>,
     /// Only this VFO.
     pub vfo: Option<i32>,
+    /// Only this source ([`CORE`] or a plugin id).
+    pub source: Option<String>,
     /// Only events at or after this time, Unix milliseconds.
     pub from_ms: Option<i64>,
     /// Only events before this time, Unix milliseconds.
@@ -89,7 +113,7 @@ fn ts_of(param: &str) -> String {
 }
 
 const COLUMNS: &str = "id, floor(extract(epoch FROM ts) * 1000)::bigint AS ts_ms, device, vfo, \
-    freq_hz, mode, kind, value, meta::text AS meta";
+    freq_hz, mode, kind, source, value, meta::text AS meta";
 
 fn event(row: &sqlx::postgres::PgRow) -> Result<Event, sqlx::Error> {
     let meta: String = row.try_get("meta")?;
@@ -102,6 +126,7 @@ fn event(row: &sqlx::postgres::PgRow) -> Result<Event, sqlx::Error> {
             freq_hz: row.try_get("freq_hz")?,
             mode: row.try_get("mode")?,
             kind: row.try_get("kind")?,
+            source: row.try_get("source")?,
             value: row.try_get("value")?,
             meta: serde_json::from_str(&meta).unwrap_or(Value::Null),
         },
@@ -114,8 +139,8 @@ fn event(row: &sqlx::postgres::PgRow) -> Result<Event, sqlx::Error> {
 /// Fails if the query fails or a CHECK constraint rejects the values.
 pub async fn insert(pool: &PgPool, new: &NewEvent) -> Result<Event, Error> {
     let sql = format!(
-        "INSERT INTO superhet.decoder_events (ts, device, vfo, freq_hz, mode, kind, value, meta) \
-         VALUES ({}, $2, $3, $4, $5, $6, $7, $8::text::jsonb) RETURNING {COLUMNS}",
+        "INSERT INTO superhet.decoder_events (ts, device, vfo, freq_hz, mode, kind, source, value, meta) \
+         VALUES ({}, $2, $3, $4, $5, $6, $7, $8, $9::text::jsonb) RETURNING {COLUMNS}",
         ts_of("$1")
     );
     let row = sqlx::query(sqlx::AssertSqlSafe(sql))
@@ -125,6 +150,7 @@ pub async fn insert(pool: &PgPool, new: &NewEvent) -> Result<Event, Error> {
         .bind(new.freq_hz)
         .bind(&new.mode)
         .bind(&new.kind)
+        .bind(&new.source)
         .bind(&new.value)
         .bind(new.meta.to_string())
         .fetch_one(pool)
@@ -146,6 +172,7 @@ pub async fn list(pool: &PgPool, q: &Query) -> Result<Vec<Event>, Error> {
            AND ($5::bigint IS NULL OR ts < {to}) \
            AND ($6::text IS NULL OR strpos(lower(value), lower($6)) > 0) \
            AND ($7::bigint IS NULL OR (ts, id) < ({after}, $8::bigint)) \
+           AND ($10::text IS NULL OR source = $10) \
          ORDER BY ts DESC, id DESC LIMIT $9",
         from = ts_of("$4"),
         to = ts_of("$5"),
@@ -161,6 +188,7 @@ pub async fn list(pool: &PgPool, q: &Query) -> Result<Vec<Event>, Error> {
         .bind(q.after.map(|(ts, _)| ts))
         .bind(q.after.map_or(0, |(_, id)| id))
         .bind(q.limit.clamp(1, 10_000))
+        .bind(&q.source)
         .fetch_all(pool)
         .await?;
     Ok(rows.iter().map(event).collect::<Result<_, _>>()?)
@@ -208,10 +236,11 @@ mod tests {
             data: NewEvent {
                 ts_ms: 1_700_000_000_123,
                 device: "rtl0".into(),
-                vfo: 2,
+                vfo: Some(2),
                 freq_hz: Some(433_500_000),
                 mode: Some("nfm".into()),
                 kind: "dtmf".into(),
+                source: CORE.into(),
                 value: "123#".into(),
                 meta: json!({"digits": 4}),
             },
@@ -221,6 +250,25 @@ mod tests {
         assert_eq!(v["ts_ms"], 1_700_000_000_123_i64);
         assert_eq!(v["freq_hz"], 433_500_000);
         assert_eq!(v["meta"]["digits"], 4);
+        assert_eq!(v["source"], "core");
+    }
+
+    #[test]
+    fn plugin_kinds_follow_the_event_type_rule() {
+        for ok in ["pocsag.message", "a", "x-1.y2", "a.b.c.d.e.f.g.h"] {
+            assert!(is_plugin_kind(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "A",
+            "1a",
+            "a..b",
+            "a.b.c.d.e.f.g.h.i",
+            "a_b",
+            &"a".repeat(65),
+        ] {
+            assert!(!is_plugin_kind(bad), "{bad}");
+        }
     }
 
     #[test]

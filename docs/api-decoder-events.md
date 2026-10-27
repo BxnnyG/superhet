@@ -1,9 +1,14 @@
 # Decoder event history
 
 A persistent log of what the decoders heard: DTMF bursts, CTCSS tone changes and RDS station
-name / RadioText / PI changes, each with time, device, VFO, tuned frequency and mode. Stored in
-PostgreSQL (table `superhet.decoder_events`, migration 0006), so it survives restarts and can be
-searched, filtered and exported. DCS is part of the schema (`dcs`) but nothing detects it yet.
+name / RadioText / PI changes, plus the events of decoder plugins, each with time, device, VFO,
+tuned frequency and mode. Stored in PostgreSQL (table `superhet.decoder_events`, migrations 0006
+and 0008), so it survives restarts and can be searched, filtered and exported. DCS is part of the
+schema (`dcs`) but nothing detects it yet.
+
+Every row has a `source`: `core` for the built-in detectors above (kinds `dtmf, ctcss, dcs,
+rds_ps, rds_rt, rds_pi`), the plugin id (`org.superhet.decoder.pocsag`) for plugin events, whose
+`kind` is the plugin's event type (`pocsag.message`). See "Plugin events" below.
 
 ## Write path
 
@@ -17,6 +22,19 @@ only serves `/healthz`.
 NATS note: the `worker` user needs subscribe rights on `sh.v1.dev.*.state`, `sh.v1.dev.*.tones.>`
 and `sh.v1.dev.*.rds.>` (see `deploy/nats/nats.conf`). If you keep your own copy of `nats.conf`,
 add them, otherwise the worker records nothing.
+
+### Plugin events
+
+The plugin host publishes the events of its instances into the durable JetStream stream `EVENTS`
+(`docs/plugin-contract.md`); the worker's durable consumer `worker-plugin-events` stores each one:
+`source` = plugin id, `kind` = event type, `device` / `vfo` / `freq_hz` = binding of the instance
+(`device` is `-` and `vfo` / `freq_hz` are `null` when the instance has none; `mode` is `null`),
+`ts` = receive time at the host, `value` = the first string among `data.summary`, `data.text`,
+`data.message`, `data.value`, else the compact JSON of `data` (cut at 256 characters), `meta` =
+`{"instance":"i-...","ts":<plugin's own timestamp or null>,"data":{...the event data...}}`. The
+message is acknowledged after the insert; while the database or the worker is down the stream
+keeps events for 7 days (512 MiB). Retention and the row cap below apply to plugin events too.
+The NATS user `worker` needs `$JS.API.>` / `$JS.ACK.>` (it has them in `deploy/nats/nats.conf`).
 
 ### Rules
 
@@ -42,18 +60,20 @@ hourly. Independent of the age, only the newest 2 000 000 rows are kept.
 All routes need a session (like the other `/api/v1` routes); `DELETE` also checks the Origin.
 
 `GET /api/v1/decoder-events` – newest first. Query parameters (all optional):
-`kind` (comma list of `dtmf,ctcss,dcs,rds_ps,rds_rt,rds_pi`), `dev`, `vfo`, `from` (Unix ms,
-inclusive), `to` (Unix ms, exclusive), `q` (case-insensitive substring of `value`, max 100
-characters), `limit` (1..=1000, default 100), `cursor` (the previous `next_cursor`).
+`kind` (comma list of `dtmf,ctcss,dcs,rds_ps,rds_rt,rds_pi` and/or plugin event types such as
+`pocsag.message`), `source` (`core` or a plugin id), `dev`, `vfo`, `from` (Unix ms, inclusive),
+`to` (Unix ms, exclusive), `q` (case-insensitive substring of `value`, max 100 characters),
+`limit` (1..=1000, default 100), `cursor` (the previous `next_cursor`).
 Unknown parameters and invalid values are `400 {"code":"invalid"}`.
 
 Response: `{"v":1,"events":[Event...],"next_cursor":null|"<ts_ms>.<id>"}`; `next_cursor` is `null`
-on the last page. Event: `{"id","ts_ms","device","vfo","freq_hz":null|int,"mode":null|string,
-"kind","value","meta":{}}`.
+on the last page. Event: `{"id","ts_ms","device","vfo":null|int,"freq_hz":null|int,
+"mode":null|string,"kind","source","value","meta":{}}` (`vfo` is only `null` for plugin events of
+instances without a VFO).
 
 `GET /api/v1/decoder-events/export.csv` – same filters (not `limit` / `cursor`), up to 100 000
 rows, `text/csv`, attachment `superhet-decoder-events.csv`. Columns:
-`time,ts_ms,device,vfo,freq_hz,mode,kind,value,meta`; `time` is ISO 8601 UTC. Fields starting with
+`time,ts_ms,device,vfo,freq_hz,mode,kind,value,meta,source`; `time` is ISO 8601 UTC. Fields starting with
 `= + - @` get a leading `'` so over-the-air RadioText cannot become a spreadsheet formula.
 
 `DELETE /api/v1/decoder-events` – removes the whole history: `200 {"v":1,"deleted":n}`.

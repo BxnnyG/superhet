@@ -178,6 +178,15 @@ pub const RULES: &[Rule] = &[
     rule("GET", "/api/v1/decoder-events", GuestDecoder),
     rule("GET", "/api/v1/decoder-events/export.csv", GuestDecoder),
     rule("DELETE", "/api/v1/decoder-events", Operator),
+    // Plugins: operators run instances, only admins change what is installed.
+    rule("GET", "/api/v1/plugins", Operator),
+    rule("POST", "/api/v1/plugins", Admin),
+    rule("DELETE", "/api/v1/plugins/{id}", Admin),
+    rule("GET", "/api/v1/plugin-instances", Operator),
+    rule("POST", "/api/v1/plugin-instances", Operator),
+    rule("GET", "/api/v1/plugin-instances/{id}", Operator),
+    rule("POST", "/api/v1/plugin-instances/{id}/stop", Operator),
+    rule("POST", "/api/v1/plugin-instances/{id}/restart", Operator),
     // Profiles.
     rule("GET", "/api/v1/profiles", Operator),
     rule("POST", "/api/v1/profiles", Operator),
@@ -367,6 +376,7 @@ mod tests {
             include_str!("decoder_events.rs"),
             include_str!("profiles.rs"),
             include_str!("bookmarks.rs"),
+            include_str!("plugins.rs"),
             include_str!("admin/mod.rs"),
         ];
         let mut paths = Vec::new();

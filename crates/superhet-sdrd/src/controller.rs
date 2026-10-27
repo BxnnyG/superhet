@@ -7,14 +7,16 @@
 //! from, so every change reaches the state subject and KV.
 
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use superhet_bus::profile::{self, ProfileData};
+use superhet_bus::tap::ClaimAcquire;
 use superhet_device::{DeviceControl, DeviceState, Gain, TuneRequest};
 use tokio::sync::watch;
 
 use crate::control::{
-    CtlError, LockRequest, Retune, VERSION, error_reply, ok_reply, state_json, vfo_reply,
+    CtlError, ErrorCode, LockRequest, Retune, VERSION, error_reply, ok_reply, state_json, vfo_reply,
 };
 use crate::lock::{Holder, HolderKind, LockSet};
 use crate::overload::OverloadStatus;
@@ -32,6 +34,15 @@ pub struct Controller {
     locks: Mutex<LockSet>,
     state: StateTx,
     overload: Arc<OverloadStatus>,
+    /// The exclusive claim, if any. Always locked after the lock set (`gate`).
+    claim: Mutex<Option<Claim>>,
+}
+
+/// An exclusive claim: who holds it, until when, and what to go back to.
+struct Claim {
+    id: String,
+    deadline: Instant,
+    previous: (u64, u32),
 }
 
 fn tuning_of(state: &DeviceState) -> Tuning {
@@ -113,6 +124,7 @@ impl Controller {
             locks: Mutex::new(LockSet::default()),
             state,
             overload: Arc::default(),
+            claim: Mutex::new(None),
         }
     }
 
@@ -127,6 +139,125 @@ impl Controller {
         self.locks
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn claim_slot(&self) -> MutexGuard<'_, Option<Claim>> {
+        self.claim
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Take the device for plugin instance `request.id`, or refresh the lease of its claim.
+    ///
+    /// The current centre and sample rate are remembered, the requested ones applied and a
+    /// `claim` holder joins the lock set, so nothing retunes until the claim is released or its
+    /// lease (`ttl` from now) runs out. VFOs that do not fit the new window are paused by the
+    /// usual rules. One claim at a time.
+    ///
+    /// # Errors
+    /// `invalid` for a bad request, `conflict` when another instance holds the claim, `locked`
+    /// when a user lock is held, or the device's error.
+    pub fn claim_acquire(
+        &self,
+        request: &ClaimAcquire,
+        ttl: Duration,
+    ) -> Result<Arc<str>, CtlError> {
+        if request.v != superhet_bus::tap::VERSION || !superhet_bus::tap::is_valid_id(&request.id) {
+            return Err(CtlError::new(ErrorCode::Invalid, "invalid claim request"));
+        }
+        let mut locks = self.gate();
+        let mut claim = self.claim_slot();
+        if let Some(held) = claim.as_mut() {
+            if held.id != request.id {
+                return Err(CtlError::new(
+                    ErrorCode::Conflict,
+                    format!("device is claimed by {}", held.id),
+                ));
+            }
+            held.deadline = Instant::now() + ttl;
+            return Ok(self.publish(&locks, &self.control.state()));
+        }
+        if locks.is_locked() {
+            return Err(locks.error("tuning"));
+        }
+        let before = self.control.state();
+        let tune = TuneRequest {
+            center_hz: Some(request.center_hz),
+            sample_rate: request.sample_rate,
+            ..TuneRequest::default()
+        };
+        match self.control.apply(&tune) {
+            Ok(state) => {
+                tracing::info!(
+                    claim = %request.id,
+                    center_hz = state.center_hz,
+                    sample_rate = state.sample_rate,
+                    "device claimed"
+                );
+                locks.acquire(Holder::claim(&request.id));
+                *claim = Some(Claim {
+                    id: request.id.clone(),
+                    deadline: Instant::now() + ttl,
+                    previous: (before.center_hz, before.sample_rate),
+                });
+                Ok(self.publish(&locks, &state))
+            }
+            Err(err) => {
+                tracing::warn!(claim = %request.id, error = %err, "claim failed");
+                self.publish(&locks, &self.control.state());
+                Err(err.into())
+            }
+        }
+    }
+
+    /// Give a claim back and return to the centre and rate from before it (idempotent: an
+    /// unknown id changes nothing).
+    pub fn claim_release(&self, id: &str) -> Arc<str> {
+        let mut locks = self.gate();
+        self.release_claim(&mut locks, id);
+        self.publish(&locks, &self.control.state())
+    }
+
+    /// Release the claim if its lease ran out. Returns whether one was released.
+    pub fn claim_expire(&self, now: Instant) -> bool {
+        let mut locks = self.gate();
+        let expired = self
+            .claim_slot()
+            .as_ref()
+            .filter(|c| c.deadline <= now)
+            .map(|c| c.id.clone());
+        let Some(id) = expired else {
+            return false;
+        };
+        tracing::warn!(claim = %id, "claim lease expired; releasing the device");
+        self.release_claim(&mut locks, &id);
+        self.publish(&locks, &self.control.state());
+        true
+    }
+
+    fn release_claim(&self, locks: &mut LockSet, id: &str) {
+        let mut claim = self.claim_slot();
+        if claim.as_ref().is_none_or(|c| c.id != id) {
+            return;
+        }
+        let Some(held) = claim.take() else {
+            return;
+        };
+        locks.release(HolderKind::Claim, id);
+        let back = TuneRequest {
+            center_hz: Some(held.previous.0),
+            sample_rate: Some(held.previous.1),
+            ..TuneRequest::default()
+        };
+        match self.control.apply(&back) {
+            Ok(state) => tracing::info!(
+                claim = %id,
+                center_hz = state.center_hz,
+                sample_rate = state.sample_rate,
+                "claim released"
+            ),
+            Err(err) => tracing::warn!(claim = %id, error = %err, "could not restore the tuning"),
+        }
     }
 
     /// Encode the state for `device_state` plus the current VFOs and `locks`, and publish it if
@@ -847,6 +978,103 @@ mod tests {
         assert_eq!(state(&c)["locks"].as_array().map(Vec::len), Some(0));
         tune(&c, &center(101_000_000)).expect("unlocked");
         assert_eq!(state(&c)["center_hz"], 101_000_000);
+        let _ = std::fs::remove_file(path);
+    }
+
+    fn claim(id: &str, center_hz: u64, sample_rate: Option<u32>) -> ClaimAcquire {
+        ClaimAcquire {
+            v: 1,
+            id: id.into(),
+            center_hz,
+            sample_rate,
+        }
+    }
+
+    #[test]
+    fn a_claim_retunes_pauses_vfos_and_restores_on_release() {
+        let (control, _device, path) = file_device("claim");
+        let c = controller(control);
+        let reply = create(&c, 100_100_000);
+        let id = reply["vfo"]["id"].clone();
+        let ttl = Duration::from_secs(60);
+
+        c.claim_acquire(&claim("i-1", 120_000_000, None), ttl)
+            .expect("claimed");
+        let s = state(&c);
+        assert_eq!(s["center_hz"], 120_000_000);
+        assert_eq!(s["locks"][0]["kind"], "claim");
+        assert_eq!(s["locks"][0]["id"], "i-1");
+        let vfo = s["vfos"]
+            .as_array()
+            .and_then(|v| v.iter().find(|v| v["id"] == id))
+            .expect("vfo");
+        assert_eq!(
+            vfo["status"], "paused",
+            "a VFO outside the window is paused"
+        );
+
+        // Nobody else can retune or claim; the holder named in the error is the claim.
+        let err = tune(&c, &center(101_000_000)).expect_err("locked");
+        assert_eq!(err.code, ErrorCode::Locked);
+        assert!(err.message.contains("i-1"), "{}", err.message);
+        let err = c
+            .claim_acquire(&claim("i-2", 130_000_000, None), ttl)
+            .expect_err("conflict");
+        assert_eq!(err.code, ErrorCode::Conflict);
+        // Releasing a foreign or unknown claim changes nothing.
+        c.claim_release("i-2");
+        assert_eq!(state(&c)["center_hz"], 120_000_000);
+        // The user cannot drop the claim through the lock API.
+        c.set_user_lock(false);
+        assert_eq!(state(&c)["locks"][0]["kind"], "claim");
+        // The same id refreshes the lease without touching the tuning.
+        c.claim_acquire(&claim("i-1", 120_000_000, None), ttl)
+            .expect("refreshed");
+        assert_eq!(state(&c)["tuning_epoch"], 1);
+
+        c.claim_release("i-1");
+        let s = state(&c);
+        assert_eq!(s["center_hz"], 100_000_000);
+        assert_eq!(s["locks"].as_array().map(Vec::len), Some(0));
+        let vfo = s["vfos"]
+            .as_array()
+            .and_then(|v| v.iter().find(|v| v["id"] == id))
+            .expect("vfo");
+        assert_eq!(vfo["status"], "active", "the VFO is back");
+        c.claim_release("i-1");
+        tune(&c, &center(101_000_000)).expect("free again");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_user_lock_blocks_claims_and_an_expired_lease_releases() {
+        let (control, _device, path) = file_device("claim-lease");
+        let c = controller(control);
+        c.set_user_lock(true);
+        let err = c
+            .claim_acquire(&claim("i-1", 120_000_000, None), Duration::from_secs(60))
+            .expect_err("locked");
+        assert_eq!(err.code, ErrorCode::Locked);
+        c.set_user_lock(false);
+
+        c.claim_acquire(&claim("i-1", 120_000_000, None), Duration::from_secs(10))
+            .expect("claimed");
+        assert!(!c.claim_expire(Instant::now()), "lease still valid");
+        assert!(c.claim_expire(Instant::now() + Duration::from_secs(11)));
+        assert_eq!(state(&c)["center_hz"], 100_000_000);
+        assert_eq!(state(&c)["locks"].as_array().map(Vec::len), Some(0));
+        assert!(!c.claim_expire(Instant::now() + Duration::from_secs(60)));
+
+        let bad = ClaimAcquire {
+            v: 2,
+            ..claim("i-1", 120_000_000, None)
+        };
+        assert_eq!(
+            c.claim_acquire(&bad, Duration::from_secs(1))
+                .expect_err("v")
+                .code,
+            ErrorCode::Invalid
+        );
         let _ = std::fs::remove_file(path);
     }
 

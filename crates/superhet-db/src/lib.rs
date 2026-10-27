@@ -4,6 +4,7 @@ pub mod audit;
 pub mod auth;
 pub mod bookmarks;
 pub mod decoder_events;
+pub mod plugin_instances;
 pub mod profiles;
 pub mod settings;
 pub mod users;

@@ -7,7 +7,9 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
+use async_nats::jetstream;
 use futures_util::StreamExt;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -15,12 +17,13 @@ use superhet_bus::subjects;
 use superhet_plugin_protocol::PROTOCOL_VERSION;
 use superhet_plugin_protocol::ctl::{
     ErrorReply, InstallRequest, InstanceRef, InstanceReply, InstancesReply, PluginInfo,
-    PluginReply, PluginsReply, StartRequest, cmd, code,
+    PluginReply, PluginsReply, RemoveRequest, RemovedReply, StartRequest, cmd, code,
 };
 use superhet_plugin_protocol::event::HostEvent;
 use tokio::sync::mpsc;
 
 use crate::registry::{Registry, RegistryError};
+use crate::store::InstanceStore;
 use crate::supervisor::{EventSink, StartError, StartSpec, Supervisor};
 
 /// Everything a request needs.
@@ -30,6 +33,30 @@ pub struct Host {
     pub registry: Arc<Registry>,
     /// Running instances.
     pub supervisor: Supervisor,
+    /// Persistent record of the started instances.
+    pub store: InstanceStore,
+}
+
+/// Start every stored instance again (host start-up). Instances whose plugin is gone or whose
+/// binding is refused stay in the store and are reported.
+pub async fn restore(host: &Host) {
+    for stored in host.store.load().await {
+        let Some(package) = host.registry.get(&stored.plugin_id) else {
+            tracing::warn!(instance = %stored.id, plugin = %stored.plugin_id, "stored instance: plugin is not installed");
+            continue;
+        };
+        match host
+            .supervisor
+            .start_as(Some(stored.id.clone()), package, stored.spec)
+        {
+            Ok(info) => {
+                tracing::info!(instance = %info.id, plugin = %info.plugin_id, "restored plugin instance");
+            }
+            Err(err) => {
+                tracing::warn!(instance = %stored.id, plugin = %stored.plugin_id, %err, "stored instance could not be restored");
+            }
+        }
+    }
 }
 
 fn ok_json<T: serde::Serialize>(reply: &T) -> Value {
@@ -54,6 +81,7 @@ fn start_error(err: &StartError) -> Value {
     let class = match err {
         StartError::Unsupported(_) => code::UNSUPPORTED,
         StartError::Conflict(_) => code::CONFLICT,
+        StartError::Invalid(_) => code::INVALID,
         StartError::NotFound => code::NOT_FOUND,
     };
     error(class, err.to_string())
@@ -107,6 +135,38 @@ async fn handle_inner(host: &Host, command: &str, payload: &[u8]) -> Result<Valu
                 Err(RegistryError::Exists(msg)) => {
                     Err(error(code::CONFLICT, format!("{msg} is already installed")))
                 }
+                Err(RegistryError::NotFound(msg)) => Err(error(code::NOT_FOUND, msg)),
+                Err(RegistryError::Io(err)) => Err(error(code::INTERNAL, err.to_string())),
+            }
+        }
+        cmd::REMOVE => {
+            let req: RemoveRequest = parse(payload)?;
+            if let Some(running) = host
+                .supervisor
+                .list()
+                .iter()
+                .find(|i| i.plugin_id == req.plugin_id)
+            {
+                return Err(error(
+                    code::CONFLICT,
+                    format!("instance {} is still running; stop it first", running.id),
+                ));
+            }
+            let registry = Arc::clone(&host.registry);
+            let id = req.plugin_id.clone();
+            let removed = tokio::task::spawn_blocking(move || registry.remove(&id))
+                .await
+                .map_err(|err| error(code::INTERNAL, err.to_string()))?;
+            match removed {
+                Ok(versions) => Ok(ok_json(&RemovedReply {
+                    v: PROTOCOL_VERSION,
+                    ok: true,
+                    plugin_id: req.plugin_id,
+                    versions,
+                })),
+                Err(RegistryError::NotFound(msg)) => Err(error(code::NOT_FOUND, msg)),
+                Err(RegistryError::Invalid(msg)) => Err(error(code::INVALID, msg)),
+                Err(RegistryError::Exists(msg)) => Err(error(code::CONFLICT, msg)),
                 Err(RegistryError::Io(err)) => Err(error(code::INTERNAL, err.to_string())),
             }
         }
@@ -130,25 +190,28 @@ async fn handle_inner(host: &Host, command: &str, payload: &[u8]) -> Result<Valu
                     format!("plugin {} is not installed", req.plugin_id),
                 )
             })?;
-            host.supervisor
-                .start(
-                    package,
-                    StartSpec {
-                        device: req.device,
-                        freq_hz: req.freq_hz,
-                        config: req.config,
-                    },
-                )
-                .map(instance)
-                .map_err(|err| start_error(&err))
+            let spec = StartSpec {
+                device: req.device,
+                vfo: req.vfo,
+                freq_hz: req.freq_hz,
+                config: req.config,
+            };
+            let info = host
+                .supervisor
+                .start(package, spec.clone())
+                .map_err(|err| start_error(&err))?;
+            host.store.save(&info.id, &info.plugin_id, &spec).await;
+            Ok(instance(info))
         }
         cmd::STOP => {
             let req: InstanceRef = parse(payload)?;
-            host.supervisor
+            let info = host
+                .supervisor
                 .stop(&req.id)
                 .await
-                .map(instance)
-                .ok_or_else(|| start_error(&StartError::NotFound))
+                .ok_or_else(|| start_error(&StartError::NotFound))?;
+            host.store.forget(&req.id).await;
+            Ok(instance(info))
         }
         cmd::RESTART => {
             let req: InstanceRef = parse(payload)?;
@@ -236,17 +299,61 @@ impl EventSink for QueueSink {
     }
 }
 
-/// Publish queued events on `sh.v1.events.<plugin>.<type>` (core NATS; the durable stream and
-/// persistence follow with the worker).
+/// How long publishing one event to the stream may take before it falls back to core NATS.
+const PUBLISH_TIMEOUT: Duration = Duration::from_secs(3);
+/// Retry delay while the durable stream cannot be created.
+const STREAM_RETRY: Duration = Duration::from_secs(5);
+
+/// Create the durable `EVENTS` stream (idempotent), retrying until the server accepts it.
+pub async fn ensure_events_stream(client: async_nats::Client) {
+    let js = jetstream::new(client);
+    loop {
+        match tokio::time::timeout(
+            PUBLISH_TIMEOUT,
+            js.get_or_create_stream(superhet_bus::events_stream_config()),
+        )
+        .await
+        {
+            Ok(Ok(_)) => return,
+            Ok(Err(err)) => tracing::warn!(%err, "cannot create the EVENTS stream; retrying"),
+            Err(_) => tracing::warn!("creating the EVENTS stream timed out; retrying"),
+        }
+        tokio::time::sleep(STREAM_RETRY).await;
+    }
+}
+
+/// Publish queued events on `sh.v1.events.<plugin>.<type>` into the durable `EVENTS` stream
+/// (acknowledged by the server; the worker stores them in the decoder history). If the stream
+/// does not take an event the event is still published on core NATS for live subscribers.
 pub async fn publish_events(client: async_nats::Client, mut rx: mpsc::Receiver<HostEvent>) {
+    let js = jetstream::new(client.clone());
+    let mut failures = 0u64;
     while let Some(event) = rx.recv().await {
         let Ok(subject) = subjects::plugin_event(&event.plugin_id, &event.event_type) else {
             continue;
         };
-        if let Ok(body) = serde_json::to_vec(&event)
-            && let Err(err) = client.publish(subject, body.into()).await
-        {
-            tracing::warn!(%err, "could not publish plugin event");
+        let Ok(body) = serde_json::to_vec(&event) else {
+            continue;
+        };
+        let durable = async {
+            js.publish(subject.clone(), body.clone().into())
+                .await
+                .map_err(|err| err.to_string())?
+                .await
+                .map_err(|err| err.to_string())
+        };
+        let outcome = match tokio::time::timeout(PUBLISH_TIMEOUT, durable).await {
+            Ok(result) => result.map(|_| ()),
+            Err(_) => Err("timed out".to_owned()),
+        };
+        if let Err(err) = outcome {
+            failures += 1;
+            if failures == 1 || failures.is_multiple_of(100) {
+                tracing::warn!(%err, failures, "event not stored durably; publishing on core NATS");
+            }
+            if let Err(err) = client.publish(subject, body.into()).await {
+                tracing::warn!(%err, "could not publish plugin event");
+            }
         }
     }
 }

@@ -20,6 +20,9 @@ pub enum RegistryError {
     /// The same id and version is already installed.
     #[error("{0} is already installed")]
     Exists(String),
+    /// No plugin with this id is installed.
+    #[error("plugin {0} is not installed")]
+    NotFound(String),
     /// Filesystem failure.
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
@@ -109,6 +112,35 @@ impl Registry {
             .values()
             .next_back()
             .cloned()
+    }
+
+    /// Delete every installed version of `id` from memory and disk. The caller makes sure no
+    /// instance of it is running. Returns the versions that were removed.
+    ///
+    /// # Errors
+    /// [`RegistryError::NotFound`] for unknown ids, [`RegistryError::Io`] when the files cannot
+    /// be deleted (the plugin then stays registered).
+    pub fn remove(&self, id: &str) -> Result<Vec<String>, RegistryError> {
+        if !superhet_plugin_protocol::manifest::is_valid_plugin_id(id) {
+            return Err(RegistryError::Invalid(format!("{id:?} is not a plugin id")));
+        }
+        let mut plugins = self
+            .plugins
+            .write()
+            .map_err(|_| RegistryError::Invalid("registry lock poisoned".into()))?;
+        let versions: Vec<String> = plugins
+            .get(id)
+            .ok_or_else(|| RegistryError::NotFound(id.to_owned()))?
+            .keys()
+            .map(ToString::to_string)
+            .collect();
+        match std::fs::remove_dir_all(self.dir.join(id)) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
+        plugins.remove(id);
+        Ok(versions)
     }
 
     /// Install the plugin directory at `source` (validated first, copied to

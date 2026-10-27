@@ -17,7 +17,7 @@
     },
     "freq_hz": {
       "default": null,
-      "description": "Frequency (Hz) to bind to.",
+      "description": "Frequency (Hz) to bind to; for exclusive plugins the centre frequency of the claim.",
       "format": "uint64",
       "minimum": 0,
       "type": [
@@ -34,6 +34,16 @@
       "format": "uint32",
       "minimum": 0,
       "type": "integer"
+    },
+    "vfo": {
+      "default": null,
+      "description": "VFO of the device to take audio or IQ from (with `device`; absent for exclusive plugins,\nwhich get the whole window).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     }
   },
   "required": [

@@ -51,6 +51,7 @@ async fn control_state_and_events_over_nats() {
     let host = Host {
         registry,
         supervisor: supervisor.clone(),
+        store: Default::default(),
     };
     let server = tokio::spawn(ctl::serve(client.clone(), host));
     let states = tokio::spawn(ctl::publish_state(client.clone(), supervisor.clone()));

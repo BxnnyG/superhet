@@ -81,17 +81,18 @@ Concurrency inside sdrd: tokio for I/O; DSP runs on dedicated OS threads (device
 
 | Subject | Kind | Producer → consumer |
 |---|---|---|
-| `sh.v1.dev.<dev>.ctl.<cmd>` | request/reply | api/pluginhost → sdrd (tune, state, vfo.create/update/delete, lock.acquire/release, profile.load implemented; claim planned; see `docs/api-devices.md`) |
+| `sh.v1.dev.<dev>.ctl.<cmd>` | request/reply | api/pluginhost → sdrd (tune, state, vfo.create/update/delete, lock.acquire/release, profile.load, tap.open/close, claim.acquire/release implemented; see `docs/api-devices.md`, `docs/plugin-contract.md`) |
+| `sh.v1.dev.<dev>.tap.<id>` | pub/sub (core NATS, lossy) | sdrd → pluginhost (raw sample bytes in the format a plugin instance asked for with `ctl.tap.open`; leases, see `docs/plugin-contract.md` "Feeding input") |
 | `sh.v1.dev.<dev>.state` | pub/sub + KV bucket `STATE` (key `dev.<dev>`) | sdrd → all (tuning, VFOs and lock holders implemented, one document per change; decoder bindings planned). The KV key `restore.<dev>` keeps the last state across restarts. Browsers receive the documents through `/api/v1/ws/state` (`docs/protocol-ws.md`) |
 | `sh.v1.dev.<dev>.spectrum` | pub/sub | sdrd → api (quantised FFT frames, full band) |
 | `sh.v1.dev.<dev>.spectrum.zoom` | pub/sub | sdrd → api (frames of the leased zoom slice, same format; ADR-0009) |
 | `sh.v1.dev.<dev>.ctl.spectrum.zoom` | publish | api → sdrd (lease a zoom slice or release it; repeated every 3 s) |
 | `sh.v1.dev.<dev>.audio.<stream>` | pub/sub (core NATS, lossy) | sdrd / pluginhost → api, recorder (binary `AudioFrame` v1 with one Opus packet each, mono or stereo, see `docs/protocol-audio.md`; `<stream>` is the VFO id for device VFOs) |
 | `sh.v1.dev.<dev>.rds.<vfo>` | pub/sub (core NATS, lossy) | sdrd → api (JSON RDS state of a WFM VFO, repeated every second; api forwards it as a text frame on the audio WebSocket; `docs/protocol-audio.md`) |
-| `sh.v1.events.<plugin>.<type...>` | core NATS today, JetStream `EVENTS` planned | pluginhost → worker (persist), api (live); `<plugin>` = plugin id with `.` as `_`, one token per type segment (ADR-0014) |
+| `sh.v1.events.<plugin>.<type...>` | JetStream `EVENTS` (7 days) plus core delivery | pluginhost → worker (durable consumer, persists into `decoder_events`), api (live); `<plugin>` = plugin id with `.` as `_`, one token per type segment (ADR-0014) |
 | `sh.v1.lookup.<key>` | request/reply | api/worker → worker lookup service |
 | `sh.v1.audit.<source>` | core NATS | sdrd/pluginhost → worker (persist as `audit_events`, `docs/api-audit.md`) |
-| `sh.v1.plugin.ctl.<cmd>` | request/reply | api → pluginhost (`list`, `install`, `instances`, `get`, `start`, `stop`, `restart`; `docs/plugin-contract.md`) |
+| `sh.v1.plugin.ctl.<cmd>` | request/reply | api → pluginhost (`list`, `install`, `remove`, `instances`, `get`, `start`, `stop`, `restart`; `docs/plugin-contract.md`, REST in `docs/api-plugins.md`) |
 | `sh.v1.plugin.state` | pub/sub (core NATS) | pluginhost → api (JSON `InstanceInfo` on every instance state change) |
 
 ## 2. Data flow: stick → browser
@@ -102,7 +103,7 @@ Concurrency inside sdrd: tokio for I/O; DSP runs on dedicated OS threads (device
 3a. Spectrum frames are published on NATS; **api** crops/decimates per browser client (requested span and bin count). Zoomed views get real resolution from a zoom FFT in sdrd (shift to the view centre, decimate, FFT; ADR-0009): api leases the slice the user looks at and serves the client from `spectrum.zoom` frames while they cover its view.
 4. **Channelizer**: per channel (VFO or plugin input) a numerically controlled oscillator shifts the channel to baseband, then a multi-stage polyphase FIR decimates to the channel rate. If more than ~8 channels are active, switch to an FFT overlap-save filterbank (decision deferred to measurement in P1/P2).
 5. **Demodulators** (VFOs) produce 48 kHz mono/stereo `f32` audio → squelch → AGC → **audio pipeline**: Opus encoder (20 ms frames) → WebSocket clients, recorder and always-on audio ring buffer.
-6. **pluginhost** subscribes channels on the sdrd sample socket and feeds channelised data (IQ, FM discriminator output or 48 kHz audio, per manifest) into plugin processes and reads events/audio/voice frames back (§6).
+6. **pluginhost** asks sdrd for per-instance taps (`ctl.tap.open`, ADR-0015; implemented as bus subjects `sh.v1.dev.<dev>.tap.<id>`, not as a socket) and feeds channelised data (IQ, the VFO's demodulated audio, or the whole window for exclusive claims, per manifest) into plugin processes and reads events/audio/voice frames back (§6).
 7. **Events** go to JetStream `EVENTS`; worker enriches them via lookups and persists them (PostgreSQL); api pushes them live to subscribed browser clients.
 8. **Browser**: one WebSocket per tab to **api** (the only exposed service); binary frames for spectrum/audio, JSON text frames for control and events. Waterfall rendered by WebGL2 (texture ring buffer, palette as 1D texture), audio decoded by WebCodecs `AudioDecoder` (Opus) with a WASM Opus fallback and played via an AudioWorklet jitter buffer.
 
