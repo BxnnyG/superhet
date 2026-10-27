@@ -450,11 +450,6 @@ sample_rate = 2400000
         .start(Arc::clone(&exclusive), spec("rtl1"))
         .expect("other device");
 
-    let framed = shell_plugin(&dir, "true", "transport = \"framed\"");
-    assert!(matches!(
-        supervisor.start(framed, StartSpec::default()),
-        Err(StartError::Unsupported(_))
-    ));
     supervisor.shutdown().await;
 }
 
@@ -483,6 +478,7 @@ impl Inputs for FakeInputs {
         let _ = health.status.send(Some("daemon says hello".into()));
         // The sender stays alive in the guard: the input stays open until the guard is dropped.
         Some(Attachment {
+            retune: None,
             chunks: rx,
             guard: Box::new((tx, Released(Arc::clone(&self.released)))),
         })

@@ -1,0 +1,75 @@
+{
+  "$defs": {
+    "MediaInfo": {
+      "description": "One stored media object.",
+      "properties": {
+        "key": {
+          "description": "Object key.",
+          "type": "string"
+        },
+        "mime": {
+          "description": "MIME type.",
+          "type": "string"
+        },
+        "revision": {
+          "description": "Counts the replacements of this key, starting at 1.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "size": {
+          "description": "Size in bytes.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "key",
+        "mime",
+        "size",
+        "revision"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Reply to `status`.",
+  "properties": {
+    "media": {
+      "default": [],
+      "description": "Receiver time of the object per key, so a client can tell whether a slide changed.",
+      "items": {
+        "$ref": "#/$defs/MediaInfo"
+      },
+      "type": "array"
+    },
+    "ok": {
+      "description": "Always true.",
+      "type": "boolean"
+    },
+    "status": {
+      "description": "The latest document the plugin sent, `null` before the first one."
+    },
+    "updated_unix_ms": {
+      "description": "Unix milliseconds at which the host received it (0 before the first one).",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "v": {
+      "description": "Contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "ok",
+    "status",
+    "updated_unix_ms"
+  ],
+  "title": "StatusReply",
+  "type": "object"
+}

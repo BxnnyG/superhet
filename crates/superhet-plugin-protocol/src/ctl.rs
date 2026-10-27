@@ -28,6 +28,34 @@ pub mod cmd {
     pub const RESTART: &str = "restart";
     /// Remove an installed plugin (all versions); refused while instances of it exist.
     pub const REMOVE: &str = "remove";
+    /// Send a control message to a framed instance.
+    pub const CONTROL: &str = "control";
+    /// Read the latest `status` document of a framed instance.
+    pub const STATUS: &str = "status";
+    /// Read the latest `media` object of a framed instance.
+    pub const MEDIA: &str = "media";
+}
+
+/// First id of the pseudo VFOs under which plugin audio is published
+/// (`sh.v1.dev.<dev>.audio.<id>`, `docs/protocol-audio.md`); real VFO ids are far below.
+pub const AUDIO_VFO_BASE: u32 = 1 << 30;
+
+/// Whether `vfo_id` names the audio of a plugin instance rather than a VFO.
+#[must_use]
+pub const fn is_plugin_audio_vfo(vfo_id: u32) -> bool {
+    vfo_id >= AUDIO_VFO_BASE
+}
+
+/// The pseudo VFO id under which instance `instance_id` publishes its audio (stable for the id).
+#[must_use]
+pub fn audio_vfo_of(instance_id: &str) -> u32 {
+    // FNV-1a, folded into the reserved range.
+    let mut hash: u32 = 0x811c_9dc5;
+    for byte in instance_id.bytes() {
+        hash ^= u32::from(byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    AUDIO_VFO_BASE | (hash & (AUDIO_VFO_BASE - 1))
 }
 
 /// Lifecycle state of an instance.
@@ -86,6 +114,10 @@ pub struct InstanceInfo {
     /// Why the input is not flowing (VFO missing, device claimed, daemon unreachable).
     #[serde(default)]
     pub input_error: Option<String>,
+    /// Pseudo VFO id the instance's audio is published under (plugins with `[output.audio]`),
+    /// subscribable on the audio WebSocket like a VFO.
+    #[serde(default)]
+    pub audio_vfo: Option<u32>,
     /// Unix milliseconds of the last state change.
     pub updated_unix_ms: u64,
 }
@@ -161,6 +193,104 @@ pub struct InstanceRef {
     pub v: u32,
     /// Instance id.
     pub id: String,
+}
+
+/// `control`: send a JSON message to a framed instance (plugin defined, for example a service
+/// selection). The plugin receives it as a `control` frame.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ControlRequest {
+    /// Contract version.
+    pub v: u32,
+    /// Instance id.
+    pub id: String,
+    /// The message (a JSON object, at most 64 KiB serialised).
+    pub message: Value,
+}
+
+/// `media`: address one stored object of an instance.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MediaRequest {
+    /// Contract version.
+    pub v: u32,
+    /// Instance id.
+    pub id: String,
+    /// Object key (`MediaHeader::valid_key`).
+    pub key: String,
+}
+
+/// Reply to `control`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct OkReply {
+    /// Contract version.
+    pub v: u32,
+    /// Always true.
+    pub ok: bool,
+}
+
+/// Reply to `status`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StatusReply {
+    /// Contract version.
+    pub v: u32,
+    /// Always true.
+    pub ok: bool,
+    /// The latest document the plugin sent, `null` before the first one.
+    pub status: Value,
+    /// Unix milliseconds at which the host received it (0 before the first one).
+    pub updated_unix_ms: u64,
+    /// Receiver time of the object per key, so a client can tell whether a slide changed.
+    #[serde(default)]
+    pub media: Vec<MediaInfo>,
+}
+
+/// One stored media object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MediaInfo {
+    /// Object key.
+    pub key: String,
+    /// MIME type.
+    pub mime: String,
+    /// Size in bytes.
+    pub size: usize,
+    /// Counts the replacements of this key, starting at 1.
+    pub revision: u64,
+}
+
+/// Header of a successful `media` reply. The reply payload is this JSON on one line, a newline
+/// and the object bytes; a failure is a plain [`ErrorReply`] without newline.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MediaReplyHeader {
+    /// Contract version.
+    pub v: u32,
+    /// Always true.
+    pub ok: bool,
+    /// Object key.
+    pub key: String,
+    /// MIME type.
+    pub mime: String,
+    /// Revision of the key.
+    pub revision: u64,
+}
+
+impl MediaReplyHeader {
+    /// The reply payload for `bytes`.
+    #[must_use]
+    pub fn encode(&self, bytes: &[u8]) -> Vec<u8> {
+        let mut out = serde_json::to_vec(self).unwrap_or_default();
+        out.push(b'\n');
+        out.extend_from_slice(bytes);
+        out
+    }
+
+    /// Split a successful reply payload; `None` for a failure reply or garbage.
+    #[must_use]
+    pub fn decode(payload: &[u8]) -> Option<(Self, &[u8])> {
+        let split = payload.iter().position(|&b| b == b'\n')?;
+        let header: Self = serde_json::from_slice(&payload[..split]).ok()?;
+        header.ok.then_some((header, &payload[split + 1..]))
+    }
 }
 
 /// Machine-readable error classes.
@@ -245,4 +375,34 @@ pub struct InstanceReply {
     pub ok: bool,
     /// The instance.
     pub instance: InstanceInfo,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_audio_ids_are_reserved_and_stable() {
+        let a = audio_vfo_of("i-ab12cd34");
+        assert!(is_plugin_audio_vfo(a));
+        assert_eq!(a, audio_vfo_of("i-ab12cd34"));
+        assert_ne!(a, audio_vfo_of("i-ab12cd35"));
+        assert!(!is_plugin_audio_vfo(64));
+    }
+
+    #[test]
+    fn media_reply_round_trips_and_rejects_errors() {
+        let head = MediaReplyHeader {
+            v: 1,
+            ok: true,
+            key: "slide.x".into(),
+            mime: "image/png".into(),
+            revision: 3,
+        };
+        let payload = head.encode(&[0, 10, 255]);
+        let (got, bytes) = MediaReplyHeader::decode(&payload).expect("decode");
+        assert_eq!((got, bytes), (head, &[0u8, 10, 255][..]));
+        let err = serde_json::to_vec(&ErrorReply::new(code::NOT_FOUND, "no")).expect("json");
+        assert!(MediaReplyHeader::decode(&err).is_none());
+    }
 }

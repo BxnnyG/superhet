@@ -34,6 +34,15 @@ pub fn all() -> Vec<(&'static str, Value)> {
         ("ctl-plugin-reply", schema_of::<ctl::PluginReply>()),
         ("ctl-instances-reply", schema_of::<ctl::InstancesReply>()),
         ("ctl-instance-reply", schema_of::<ctl::InstanceReply>()),
+        ("ctl-control-request", schema_of::<ctl::ControlRequest>()),
+        ("ctl-media-request", schema_of::<ctl::MediaRequest>()),
+        ("ctl-ok-reply", schema_of::<ctl::OkReply>()),
+        ("ctl-status-reply", schema_of::<ctl::StatusReply>()),
+        (
+            "ctl-media-reply-header",
+            schema_of::<ctl::MediaReplyHeader>(),
+        ),
+        ("tune-request", schema_of::<crate::framed::TuneRequest>()),
         ("instance-info", schema_of::<ctl::InstanceInfo>()),
     ]
 }

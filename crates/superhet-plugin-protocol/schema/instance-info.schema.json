@@ -34,6 +34,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Snapshot of an instance.",
   "properties": {
+    "audio_vfo": {
+      "default": null,
+      "description": "Pseudo VFO id the instance's audio is published under (plugins with `[output.audio]`),\nsubscribable on the audio WebSocket like a VFO.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "config": {
       "description": "Operator configuration passed to the plugin."
     },
