@@ -17,6 +17,8 @@ All events land in the decoder history (`source` = plugin id, `kind` = event typ
 
 ## Use
 
+In the web UI: Decoders tab, "Decoders on VFO n" (`docs/plugins-ui.md`). Over the API:
+
 ```
 # an NFM VFO (id 1) on the paging channel, then
 POST /api/v1/plugin-instances  {"plugin_id":"org.superhet.decoder.pocsag","device":"dev0","vfo":1}

@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
-# Throwaway stack for the browser smoke test (web/e2e): superhet-api + superhet-sdrd (file
-# backend with a noise capture) + superhet-worker on loopback test ports, serving web/dist.
+# Throwaway stack for the browser smoke tests (web/e2e): superhet-api + superhet-sdrd (file
+# backend with a noise capture) + superhet-worker + superhet-pluginhost on loopback test ports,
+# serving web/dist. The plugin host seeds the first-party plugins (plugins/pocsag, aprs, rtl433;
+# their tools are not needed until an instance starts) and gets a private plugin directory;
+# the plugin smoke test installs plugins/example-echo (python3) from its path.
 # Runs in the foreground until it gets a signal (Playwright's webServer does that), then stops
 # everything it started.
 #
 # Needs: a FRESH PostgreSQL database and a NATS server (JetStream not required), given as
-# SUPERHET_DATABASE_URL / SUPERHET_NATS_URL (optionally SUPERHET_NATS_USER/PASSWORD), the three
-# debug binaries (cargo build -p superhet-api -p superhet-sdrd -p superhet-worker) and web/dist
-# (pnpm -C web build). scripts/e2e.sh sets all of that up locally.
+# SUPERHET_DATABASE_URL / SUPERHET_NATS_URL (optionally SUPERHET_NATS_USER/PASSWORD; JetStream
+# enabled for the plugin events), the four debug binaries (cargo build -p superhet-api
+# -p superhet-sdrd -p superhet-worker -p superhet-pluginhost) and web/dist (pnpm -C web build).
+# scripts/e2e.sh sets all of that up locally.
 #
-# Ports (loopback only): api E2E_PORT (default 18073), sdrd +1, worker +3. Never 8073.
+# Ports (loopback only): api E2E_PORT (default 18073), sdrd +1, pluginhost +2, worker +3.
+# Never 8073.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -22,7 +27,7 @@ if [ "$port" = 8073 ]; then
 fi
 bins="${E2E_BIN_DIR:-target/debug}"
 web="${E2E_WEB_DIR:-web/dist}"
-for f in superhet-api superhet-sdrd superhet-worker; do
+for f in superhet-api superhet-sdrd superhet-worker superhet-pluginhost; do
     [ -x "$bins/$f" ] || { echo "missing $bins/$f (cargo build -p $f)" >&2; exit 1; }
 done
 [ -f "$web/index.html" ] || { echo "missing $web/index.html (pnpm -C web build)" >&2; exit 1; }
@@ -36,6 +41,10 @@ cleanup() {
     rm -rf "$work"
 }
 trap cleanup EXIT INT TERM
+
+# The bundled plugins as the image has them: copies of the first-party plugin directories.
+mkdir -p "$work/bundled" "$work/plugins"
+for name in pocsag aprs rtl433; do cp -r "plugins/$name" "$work/bundled/$name"; done
 
 # 1 s of random cu8 samples at 2.048 MS/s: valid IQ, plays in a loop.
 head -c 4096000 /dev/urandom >"$work/noise.cu8"
@@ -63,6 +72,12 @@ for _ in $(seq 1 120); do
 done
 
 SUPERHET_LISTEN="127.0.0.1:$((port + 3))" "$bins/superhet-worker" &
+pids+=($!)
+
+SUPERHET_LISTEN="127.0.0.1:$((port + 2))" \
+    SUPERHET_PLUGIN_DIR="$work/plugins" \
+    SUPERHET_BUNDLED_PLUGIN_DIR="$work/bundled" \
+    "$bins/superhet-pluginhost" &
 pids+=($!)
 
 # Stop as soon as any process dies; the caller sees a non-zero exit.

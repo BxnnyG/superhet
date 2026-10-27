@@ -26,6 +26,8 @@ describe("role matrix", () => {
       canProfiles: true,
       canEditBookmarks: true,
       canClearHistory: true,
+      canUsePlugins: true,
+      canInstallPlugins: true,
       canAdmin: true,
       seesAllVfos: true,
       canManageSessions: true,
@@ -43,6 +45,9 @@ describe("role matrix", () => {
     });
     expect(operator.canAdmin).toBe(false);
     expect(operator.canForceUnlock).toBe(false);
+    // Operators start and stop decoders; installing is the admin's.
+    expect(operator.canUsePlugins).toBe(true);
+    expect(operator.canInstallPlugins).toBe(false);
   });
 
   it("listener only listens: no tune, lock, profiles, bookmark edits or console", () => {
@@ -52,6 +57,8 @@ describe("role matrix", () => {
       canProfiles: false,
       canEditBookmarks: false,
       canClearHistory: false,
+      canUsePlugins: false,
+      canInstallPlugins: false,
       canAdmin: false,
       seesAllVfos: false,
       canReadBookmarks: true,
@@ -66,6 +73,7 @@ describe("role matrix", () => {
       canReadBookmarks: false,
       canManageSessions: false,
       canSeeDecoders: false,
+      canUsePlugins: false,
       canTune: false,
       canAdmin: false,
       holderId: null,

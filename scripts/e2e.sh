@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the Playwright smoke test of the multi-user flow against a throwaway stack: PostgreSQL and
+# Run the Playwright smoke tests (multi-user flow, plugin start to event) against a throwaway stack: PostgreSQL and
 # NATS in temporary containers on random loopback ports, the api/sdrd/worker debug binaries and
 # the built web UI. Never touches an instance on :8073.
 #
@@ -18,7 +18,7 @@ cleanup() {
 trap cleanup EXIT
 
 if [ -z "${E2E_SKIP_BUILD:-}" ]; then
-    cargo build -q -p superhet-api -p superhet-sdrd -p superhet-worker
+    cargo build -q -p superhet-api -p superhet-sdrd -p superhet-worker -p superhet-pluginhost
     pnpm -C web install --frozen-lockfile --silent
     pnpm -C web build
 fi

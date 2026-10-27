@@ -11,6 +11,7 @@ import {
   IconButton,
   ListIcon,
   Logo,
+  PlugIcon,
   LogOutIcon,
   ShieldIcon,
   SlidersIcon,
@@ -18,12 +19,14 @@ import {
   UsersIcon,
   cn,
 } from "../ui";
+import { createPluginApi, type PluginApi } from "../plugins/api";
 import { createAdminApi, type AdminApi } from "./api";
 import { AuditSection } from "./AuditSection";
 import { AuditSettingsSection } from "./AuditSettingsSection";
 import { BansSection } from "./BansSection";
 import { GuestSection } from "./GuestSection";
 import { LimitsSection } from "./LimitsSection";
+import { PluginsSection } from "./PluginsSection";
 import { SessionsSection } from "./SessionsSection";
 import { UsersSection } from "./UsersSection";
 
@@ -38,6 +41,7 @@ export const ADMIN_SECTIONS: readonly NavItem[] = [
   { id: "sessions", label: "Live sessions", Icon: ActivityIcon },
   { id: "audit", label: "Audit log", Icon: ListIcon },
   { id: "bans", label: "Address bans", Icon: BanIcon },
+  { id: "plugins", label: "Plugins", Icon: PlugIcon },
   { id: "guests", label: "Guest access", Icon: GlobeIcon },
   { id: "audit-settings", label: "Audit settings", Icon: ShieldIcon },
   { id: "limits", label: "Limits", Icon: SlidersIcon },
@@ -56,14 +60,20 @@ interface Props {
   /** Path segment after `/admin/`; "" shows the first section. */
   section: string;
   api?: AdminApi;
+  pluginApi?: PluginApi;
 }
 
 /**
  * Admin console at `/admin`: a sidebar of sections (a scrolling tab strip on narrow screens) and
  * the section body. Only admins get here; the server enforces it on every call regardless.
  */
-export default function AdminConsole({ section, api: injected }: Props) {
+export default function AdminConsole({
+  section,
+  api: injected,
+  pluginApi: injectedPlugins,
+}: Props) {
   const api = useMemo(() => injected ?? createAdminApi(), [injected]);
+  const pluginApi = useMemo(() => injectedPlugins ?? createPluginApi(), [injectedPlugins]);
   const auth = useAuth();
   const current = resolveSection(section);
   // `/admin` and unknown sections canonicalise to the first section's path.
@@ -126,7 +136,12 @@ export default function AdminConsole({ section, api: injected }: Props) {
         </nav>
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto" aria-label={current.label}>
           <div className="mx-auto w-full max-w-5xl px-4 py-6 shell:px-8">
-            <SectionBody id={current.id} api={api} selfId={auth?.userId ?? null} />
+            <SectionBody
+              id={current.id}
+              api={api}
+              pluginApi={pluginApi}
+              selfId={auth?.userId ?? null}
+            />
           </div>
         </main>
       </div>
@@ -166,7 +181,17 @@ function NavLink({
   );
 }
 
-function SectionBody({ id, api, selfId }: { id: string; api: AdminApi; selfId: number | null }) {
+function SectionBody({
+  id,
+  api,
+  pluginApi,
+  selfId,
+}: {
+  id: string;
+  api: AdminApi;
+  pluginApi: PluginApi;
+  selfId: number | null;
+}) {
   switch (id) {
     case "users":
       return <UsersSection api={api} selfId={selfId} />;
@@ -176,6 +201,8 @@ function SectionBody({ id, api, selfId }: { id: string; api: AdminApi; selfId: n
       return <AuditSection api={api} />;
     case "bans":
       return <BansSection api={api} />;
+    case "plugins":
+      return <PluginsSection api={pluginApi} />;
     case "guests":
       return <GuestSection api={api} />;
     case "audit-settings":

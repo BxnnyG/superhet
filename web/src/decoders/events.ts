@@ -5,22 +5,32 @@
 import { isRec, type Rec } from "../spectrum/api";
 import { VFO_MODES, type VfoMode } from "../vfo/api";
 
+/** Kinds of the built-in detectors (source `core`). Plugins add their own event types. */
 export const EVENT_KINDS = ["dtmf", "ctcss", "dcs", "rds_ps", "rds_rt", "rds_pi"] as const;
-export type EventKind = (typeof EVENT_KINDS)[number];
+export type CoreKind = (typeof EVENT_KINDS)[number];
+/** `source` of the built-in detectors; plugin events carry the plugin id. */
+export const CORE_SOURCE = "core";
+
+export const isCoreKind = (kind: string): kind is CoreKind =>
+  (EVENT_KINDS as readonly string[]).includes(kind);
 
 export interface DecoderEvent {
   id: number;
   tsMs: number;
   device: string;
-  vfo: number;
+  /** null for plugin events of an instance that is not bound to a VFO. */
+  vfo: number | null;
   freqHz: number | null;
   mode: VfoMode | null;
-  kind: EventKind;
+  /** A core kind or the event type of a plugin (`pocsag.message`). */
+  kind: string;
+  /** `core` or the plugin id. */
+  source: string;
   value: string;
   meta: Rec;
 }
 
-export const KIND_LABEL: Record<EventKind, string> = {
+export const KIND_LABEL: Record<CoreKind, string> = {
   dtmf: "DTMF",
   ctcss: "CTCSS",
   dcs: "DCS",
@@ -29,7 +39,7 @@ export const KIND_LABEL: Record<EventKind, string> = {
   rds_pi: "PI",
 };
 
-export const KIND_HINT: Record<EventKind, string> = {
+export const KIND_HINT: Record<CoreKind, string> = {
   dtmf: "DTMF digit sequence",
   ctcss: "CTCSS sub-tone start / stop",
   dcs: "DCS code",
@@ -39,14 +49,13 @@ export const KIND_HINT: Record<EventKind, string> = {
 };
 
 /** Filter chips: a label and the kinds it switches. */
-export const KIND_CHIPS: readonly { label: string; title: string; kinds: readonly EventKind[] }[] =
-  [
-    { label: "DTMF", title: KIND_HINT.dtmf, kinds: ["dtmf"] },
-    { label: "CTCSS/DCS", title: "CTCSS sub-tones and DCS codes", kinds: ["ctcss", "dcs"] },
-    { label: "PS", title: KIND_HINT.rds_ps, kinds: ["rds_ps"] },
-    { label: "RT", title: KIND_HINT.rds_rt, kinds: ["rds_rt"] },
-    { label: "PI", title: KIND_HINT.rds_pi, kinds: ["rds_pi"] },
-  ];
+export const KIND_CHIPS: readonly { label: string; title: string; kinds: readonly CoreKind[] }[] = [
+  { label: "DTMF", title: KIND_HINT.dtmf, kinds: ["dtmf"] },
+  { label: "CTCSS/DCS", title: "CTCSS sub-tones and DCS codes", kinds: ["ctcss", "dcs"] },
+  { label: "PS", title: KIND_HINT.rds_ps, kinds: ["rds_ps"] },
+  { label: "RT", title: KIND_HINT.rds_rt, kinds: ["rds_rt"] },
+  { label: "PI", title: KIND_HINT.rds_pi, kinds: ["rds_pi"] },
+];
 
 /** Events kept in memory; older ones are loaded on demand. */
 export const MAX_EVENTS = 2000;
@@ -54,21 +63,29 @@ export const MAX_EVENTS = 2000;
 /** Validate one event of the REST API or the live feed; null if it is malformed. */
 export function parseEvent(raw: unknown): DecoderEvent | null {
   if (!isRec(raw)) return null;
-  const { id, ts_ms, device, vfo, freq_hz, mode, kind, value, meta } = raw;
+  const { id, ts_ms, device, vfo, freq_hz, mode, kind, source, value, meta } = raw;
   if (typeof id !== "number" || !Number.isSafeInteger(id)) return null;
   if (typeof ts_ms !== "number" || !Number.isFinite(ts_ms)) return null;
   if (typeof device !== "string") return null;
-  if (typeof vfo !== "number" || !Number.isInteger(vfo) || vfo < 0) return null;
-  const k = EVENT_KINDS.find((x) => x === kind);
-  if (k === undefined || typeof value !== "string") return null;
+  // Plugin events of an instance without a VFO have none.
+  if (
+    vfo !== null &&
+    vfo !== undefined &&
+    (typeof vfo !== "number" || !Number.isInteger(vfo) || vfo < 0)
+  )
+    return null;
+  if (typeof kind !== "string" || kind === "" || typeof value !== "string") return null;
+  // Rows written before plugins existed (and old servers) have no source.
+  const src = typeof source === "string" && source !== "" ? source : CORE_SOURCE;
   return {
     id,
     tsMs: ts_ms,
     device,
-    vfo,
+    vfo: typeof vfo === "number" ? vfo : null,
     freqHz: typeof freq_hz === "number" && Number.isFinite(freq_hz) ? freq_hz : null,
     mode: VFO_MODES.find((m) => m === mode) ?? null,
-    kind: k,
+    kind,
+    source: src,
     value,
     meta: isRec(meta) ? meta : {},
   };
@@ -93,14 +110,17 @@ export function mergeEvents(
 
 export interface LogFilter {
   /** Empty = all kinds. */
-  kinds: readonly EventKind[];
+  kinds: readonly string[];
+  /** `core` or a plugin id; null = every source. */
+  source: string | null;
   /** Case-insensitive substring of the value. */
   q: string;
 }
 
-export const NO_FILTER: LogFilter = { kinds: [], q: "" };
+export const NO_FILTER: LogFilter = { kinds: [], source: null, q: "" };
 
 export function matches(filter: LogFilter, e: DecoderEvent): boolean {
+  if (filter.source !== null && filter.source !== e.source) return false;
   if (filter.kinds.length > 0 && !filter.kinds.includes(e.kind)) return false;
   const q = filter.q.trim().toLowerCase();
   return q === "" || e.value.toLowerCase().includes(q);
@@ -256,7 +276,7 @@ export function formatDuration(ms: number): string {
 
 /** Short note shown next to the value: tone start / stop, digit count. */
 export function eventNote(e: DecoderEvent): string | null {
-  if (e.kind === "ctcss" || e.kind === "dcs") {
+  if (e.source === CORE_SOURCE && (e.kind === "ctcss" || e.kind === "dcs")) {
     if (e.meta.edge === "start") return "on";
     if (e.meta.edge === "stop") {
       const d = e.meta.duration_ms;

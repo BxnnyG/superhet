@@ -187,6 +187,7 @@ function TabBody({ r, tab, phoneUp }: { r: Receiver; tab: InspectorTab; phoneUp:
           audio={r.audio}
           audioSnap={r.audioSnap}
           events={r.decoderEvents}
+          plugins={r.plugins}
           device={r.device}
           onUpdate={(id, patch) => r.vfoCtl.update(id, patch)}
           onTune={r.tuneTo}

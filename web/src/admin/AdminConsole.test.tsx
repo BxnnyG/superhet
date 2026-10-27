@@ -239,6 +239,7 @@ describe("console shell", () => {
       "Users and invites",
       "Live sessions",
       "Audit log",
+      "Plugins",
       "Guest access",
       "Audit settings",
       "Limits",
