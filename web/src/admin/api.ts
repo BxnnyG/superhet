@@ -4,6 +4,7 @@
 import type { Role } from "../auth/api";
 import { isRole } from "../auth/api";
 import { request, isJson, HttpError, type FetchLike, type Json } from "../http";
+import { parseClientInfo, type ClientInfo } from "./clientInfo";
 
 // ---------- models ----------
 
@@ -61,8 +62,11 @@ export interface LiveSession {
   userId: number | null;
   username: string | null;
   role: Role;
+  /** Client address (behind a trusted proxy the forwarded one, else the peer). */
   ip: string | null;
   userAgent: string | null;
+  /** Peer address, address type, reverse DNS, GeoIP and parsed browser. */
+  client: ClientInfo;
   createdAtMs: number;
   lastSeenMs: number | null;
   /** Guests only: seconds without a request. */
@@ -75,6 +79,7 @@ export interface MySession {
   sid: string;
   ip: string | null;
   userAgent: string | null;
+  client: ClientInfo;
   createdAtMs: number;
   lastSeenMs: number;
   current: boolean;
@@ -118,6 +123,7 @@ export interface AuditEvent {
   role: Role | null;
   ip: string | null;
   userAgent: string | null;
+  client: ClientInfo;
   action: string;
   target: string | null;
   outcome: Outcome;
@@ -237,6 +243,7 @@ export function parseLiveSession(raw: unknown): LiveSession {
     role: isRole(raw.role) ? raw.role : "listener",
     ip: strOrNull(raw.ip),
     userAgent: strOrNull(raw.user_agent),
+    client: parseClientInfo(raw),
     createdAtMs: num(raw.created_at_ms),
     lastSeenMs: numOrNull(raw.last_seen_ms),
     idleSecs: numOrNull(raw.idle_secs),
@@ -281,6 +288,7 @@ export function parseMySession(raw: unknown): MySession {
     sid: raw.sid,
     ip: strOrNull(raw.ip),
     userAgent: strOrNull(raw.user_agent),
+    client: parseClientInfo(raw),
     createdAtMs: num(raw.created_at_ms),
     lastSeenMs: num(raw.last_seen_ms),
     current: raw.current === true,
@@ -301,6 +309,7 @@ export function parseAuditEvent(raw: unknown): AuditEvent {
     role: isRole(raw.role) ? raw.role : null,
     ip: strOrNull(raw.ip),
     userAgent: strOrNull(raw.user_agent),
+    client: parseClientInfo(raw),
     action: str(raw.action),
     target: strOrNull(raw.target),
     outcome: OUTCOMES.find((o) => o === raw.outcome) ?? "ok",

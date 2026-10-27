@@ -58,6 +58,10 @@ export interface PaletteDeps {
   toggleAudio: () => void;
   exportLog: () => void;
   openSettings: () => void;
+  /** Open the admin console route; the item shows for admins only. */
+  openAdmin?: () => void;
+  /** Open the own-sessions dialog; the item shows for accounts. */
+  openSessions?: () => void;
   /** Inspector tabs the role can see; default all. */
   tabs?: readonly InspectorTab[];
   /** The role may add bookmarks; default true. */
@@ -287,6 +291,22 @@ function actionItems(deps: PaletteDeps): PaletteItem[] {
     ["preferences", "theme", "password", "account"],
     deps.openSettings,
   );
+  if (deps.openAdmin) {
+    add(
+      "admin",
+      "Open the admin console",
+      ["users", "audit", "sessions", "invites", "bans", "administration", "manage"],
+      deps.openAdmin,
+    );
+  }
+  if (deps.openSessions) {
+    add(
+      "my-sessions",
+      "Show my sessions",
+      ["browsers", "devices", "sign out", "account"],
+      deps.openSessions,
+    );
+  }
   add(
     "shortcuts",
     "Show keyboard shortcuts",

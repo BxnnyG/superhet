@@ -8,14 +8,16 @@ use axum::{
     response::Response,
 };
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use superhet_bus::audit::Outcome;
 use superhet_db::audit::{Event, Filter, MAX_PAGE};
 
 use super::{AdminState, bad};
 use crate::access::Principal;
 use crate::auth::{Reply, db_failed, flatten, json_reply};
+use crate::clientinfo::Subject;
 use crate::decoder_events::{csv_field, iso};
+use crate::settings::IpMode;
 
 /// Default page size.
 const DEFAULT_LIMIT: i64 = 100;
@@ -135,21 +137,74 @@ async fn query_inner(state: &AdminState, q: &AuditQuery) -> Reply {
         .last()
         .filter(|_| i64::try_from(events.len()).is_ok_and(|n| n == limit))
         .map(|e| e.id);
+    let info = describe(state, &events).await;
     Ok(json_reply(
         StatusCode::OK,
         &json!({
-            "events": events.iter().map(Event::to_json).collect::<Vec<_>>(),
+            "events": events.iter().zip(info).map(|(e, i)| event_json(e, i)).collect::<Vec<_>>(),
             "next_before_id": next,
         }),
     ))
 }
 
-const CSV_HEADER: &str =
-    "id,time,actor_kind,actor_id,actor_name,role,ip,user_agent,action,target,outcome,details\r\n";
+/// Enrichment (address type, reverse DNS, GeoIP, parsed user agent) of stored events. Computed
+/// from the stored values, so a truncated address never yields a name or a city.
+async fn describe(state: &AdminState, events: &[Event]) -> Vec<Map<String, Value>> {
+    let settings = state.auth.settings().audit().await;
+    let subjects: Vec<Subject> = events
+        .iter()
+        .map(|e| {
+            let d = &e.data;
+            let mode = match d.actor_kind.as_str() {
+                "guest" => settings.ip_mode_guest,
+                "user" => settings.ip_mode_user,
+                _ => IpMode::Full,
+            };
+            Subject {
+                ip: d.ip.as_deref().and_then(|v| v.parse().ok()),
+                peer: d.peer_ip.as_deref().and_then(|v| v.parse().ok()),
+                user_agent: d.user_agent.clone(),
+                precise: mode == IpMode::Full,
+            }
+        })
+        .collect();
+    state.auth.enricher().describe(&subjects).await
+}
 
-fn csv_row(e: &Event) -> String {
+fn event_json(event: &Event, info: Map<String, Value>) -> Value {
+    let mut value = event.to_json();
+    if let Value::Object(map) = &mut value {
+        map.extend(info);
+    }
+    value
+}
+
+/// The enrichment columns come last so the positions of the original ones stay put.
+const CSV_HEADER: &str = "id,time,actor_kind,actor_id,actor_name,role,ip,user_agent,action,target,outcome,details,peer_addr,address_type,reverse_dns,country,city,asn,as_org,browser,os,device\r\n";
+
+fn csv_row(e: &Event, info: &Map<String, Value>) -> String {
     let d = &e.data;
     let opt = |v: &Option<String>| csv_field(v.as_deref().unwrap_or(""));
+    let ip_info = |key: &str| {
+        info.get("ip_info")
+            .and_then(|i| i.get(key))
+            .map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_owned))
+            .unwrap_or_default()
+    };
+    let ua_info = |key: &str| {
+        let text = info
+            .get("ua_info")
+            .and_then(|i| i.get(key))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        text.to_owned()
+    };
+    let browser = format!("{} {}", ua_info("browser"), ua_info("browser_version"))
+        .trim()
+        .to_owned();
+    let os = format!("{} {}", ua_info("os"), ua_info("os_version"))
+        .trim()
+        .to_owned();
     let fields = [
         e.id.to_string(),
         iso(e.ts_ms),
@@ -163,6 +218,16 @@ fn csv_row(e: &Event) -> String {
         opt(&d.target),
         csv_field(&d.outcome),
         csv_field(&d.details.to_string()),
+        opt(&d.peer_ip),
+        csv_field(&ip_info("class")),
+        csv_field(&ip_info("rdns")),
+        csv_field(&ip_info("country")),
+        csv_field(&ip_info("city")),
+        csv_field(&ip_info("asn")),
+        csv_field(&ip_info("org")),
+        csv_field(&browser),
+        csv_field(&os),
+        csv_field(&ua_info("device")),
     ];
     format!("{}\r\n", fields.join(","))
 }
@@ -201,8 +266,13 @@ async fn export_inner(state: &AdminState, me: &Principal, q: &AuditQuery) -> Rep
         truncated = rows.len() >= EXPORT_MAX_ROWS;
     }
     rows.truncate(EXPORT_MAX_ROWS);
+    let info = describe(state, &rows).await;
     let (content_type, name, body) = if json_format {
-        let events: Vec<Value> = rows.iter().map(Event::to_json).collect();
+        let events: Vec<Value> = rows
+            .iter()
+            .zip(info)
+            .map(|(e, i)| event_json(e, i))
+            .collect();
         (
             "application/json",
             "superhet-audit.json",
@@ -210,8 +280,8 @@ async fn export_inner(state: &AdminState, me: &Principal, q: &AuditQuery) -> Rep
         )
     } else {
         let mut text = String::from(CSV_HEADER);
-        for event in &rows {
-            text.push_str(&csv_row(event));
+        for (event, i) in rows.iter().zip(&info) {
+            text.push_str(&csv_row(event, i));
         }
         ("text/csv; charset=utf-8", "superhet-audit.csv", text)
     };
@@ -298,6 +368,7 @@ mod tests {
                 actor_name: Some("=cmd|' /C calc'!A0".into()),
                 role: Some("admin".into()),
                 ip: None,
+                peer_ip: None,
                 user_agent: Some("a,b".into()),
                 action: "auth.login".into(),
                 target: None,
@@ -305,7 +376,7 @@ mod tests {
                 details: json!({"k": "v"}),
             },
         };
-        let row = csv_row(&event);
+        let row = csv_row(&event, &Map::new());
         assert!(row.starts_with("7,2023-11-14T22:13:20.123Z,user,1,"));
         assert!(row.contains(",'=cmd"), "formula defused: {row}");
         assert!(row.contains("\"a,b\""));

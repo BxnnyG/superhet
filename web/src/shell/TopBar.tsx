@@ -1,6 +1,7 @@
 import { AudioButton } from "../audio/AudioControls";
 import { IconButton, Kbd, Logo, PanelRightIcon, PlainButton, SearchIcon, Slider } from "../ui";
 import type { ThemePreference } from "../ui/theme";
+import { AccountMenu } from "./AccountMenu";
 import { DeviceSwitcher } from "./DeviceSwitcher";
 import type { InspectorState } from "./inspector";
 import { SettingsMenu } from "./SettingsMenu";
@@ -18,7 +19,8 @@ interface Props {
 
 /**
  * Top bar (no frequencies): logo, device switcher, command palette trigger, audio on/off with the
- * master volume, inspector toggle and settings. Below 600 px only logo, palette, audio, settings.
+ * master volume, inspector toggle, settings and the account menu (avatar, name, role). Below 600 px only logo,
+ * palette, audio, settings and the avatar.
  */
 export function TopBar({ r, theme, onTheme, onShortcuts, onPalette, inspector }: Props) {
   return (
@@ -68,6 +70,7 @@ export function TopBar({ r, theme, onTheme, onShortcuts, onPalette, inspector }:
         </div>
         <SettingsMenu theme={theme} onTheme={onTheme} onShortcuts={onShortcuts} />
       </div>
+      <AccountMenu />
     </header>
   );
 }

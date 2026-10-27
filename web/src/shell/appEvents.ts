@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 
 export const EDIT_FREQUENCY_EVENT = "superhet:edit-frequency";
 export const OPEN_SETTINGS_EVENT = "superhet:open-settings";
+export const OPEN_SESSIONS_EVENT = "superhet:open-sessions";
 
 export function emitAppEvent(name: string): void {
   window.dispatchEvent(new CustomEvent(name));

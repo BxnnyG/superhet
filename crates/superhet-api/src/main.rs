@@ -7,6 +7,7 @@ mod audio_ws;
 mod audit;
 mod auth;
 mod bookmarks;
+mod clientinfo;
 mod decoder_events;
 mod devices;
 mod hub;

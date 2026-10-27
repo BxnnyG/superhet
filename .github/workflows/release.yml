@@ -104,6 +104,7 @@ jobs:
           assets=(
             dist/install.sh dist/install.sh.sha256
             dist/compose.yaml dist/compose.yaml.sha256
+            dist/compose.hostnet.yaml
             "dist/superhet-${TAG}-compose.tar.gz" "dist/superhet-${TAG}-compose.tar.gz.sha256"
           )
           if gh release view "$TAG" >/dev/null 2>&1; then

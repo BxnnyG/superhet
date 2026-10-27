@@ -156,3 +156,16 @@ describe("buildSections", () => {
     expect(groups(value, "tower")[0]).toBe("Bookmarks");
   });
 });
+
+it("offers the admin console only when the deps provide it", () => {
+  const { value } = deps();
+  const ids = (d: PaletteDeps) => flatten(buildSections(d, "admin console")).map((i) => i.id);
+  expect(ids(value)).not.toContain("action:admin");
+  const withAdmin = { ...value, openAdmin: vi.fn() };
+  const item = flatten(buildSections(withAdmin, "admin console")).find(
+    (i) => i.id === "action:admin",
+  );
+  expect(item).toBeDefined();
+  item?.run({ newVfo: false });
+  expect(withAdmin.openAdmin).toHaveBeenCalled();
+});

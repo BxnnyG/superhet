@@ -3,9 +3,15 @@ import { usePermissions } from "../auth/context";
 import { downloadEventLog } from "../decoders/api";
 import { NO_FILTER } from "../decoders/events";
 import { visibleTabs, type InspectorState } from "../shell/inspector";
-import { EDIT_FREQUENCY_EVENT, OPEN_SETTINGS_EVENT, emitAppEvent } from "../shell/appEvents";
+import {
+  EDIT_FREQUENCY_EVENT,
+  OPEN_SESSIONS_EVENT,
+  OPEN_SETTINGS_EVENT,
+  emitAppEvent,
+} from "../shell/appEvents";
 import type { Receiver } from "../shell/useReceiver";
 import { runShortcut, type ShortcutContext } from "../shell/useShortcuts";
+import { navigate } from "../router";
 import { Palette } from "./Palette";
 import type { PaletteDeps } from "./items";
 import { loadRecent, pushRecent, saveRecent } from "./recent";
@@ -40,6 +46,8 @@ export function PaletteHost({ r, inspector, shortcutCtx, onClose }: Props) {
     toggleAudio: () => void (r.audioSnap.enabled ? r.audio.disable() : r.audio.enable()),
     exportLog: () => downloadEventLog(r.device, NO_FILTER),
     openSettings: () => emitAppEvent(OPEN_SETTINGS_EVENT),
+    ...(perms.canAdmin ? { openAdmin: () => navigate("/admin") } : {}),
+    ...(perms.canManageSessions ? { openSessions: () => emitAppEvent(OPEN_SESSIONS_EVENT) } : {}),
   };
   return <Palette deps={deps} onClose={onClose} />;
 }

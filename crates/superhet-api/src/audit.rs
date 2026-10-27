@@ -48,8 +48,12 @@ pub struct Who {
     pub name: Option<String>,
     /// Role at the time.
     pub role: Option<Role>,
-    /// Client address as the API saw it (truncated before it is stored).
+    /// Client address as the API resolved it (truncated before it is stored).
     pub ip: Option<IpAddr>,
+    /// TCP peer address (truncated before it is stored).
+    pub peer: Option<IpAddr>,
+    /// Forwarded chain of a trusted proxy (kept in the details, truncated like the address).
+    pub via: Vec<IpAddr>,
     /// Truncated user agent.
     pub user_agent: Option<String>,
 }
@@ -243,6 +247,15 @@ async fn write(
         ActorKind::User => settings.ip_mode_user,
         ActorKind::Guest => settings.ip_mode_guest,
     };
+    let mut details = details;
+    if !who.via.is_empty() && mode != IpMode::None && !details.contains_key("forwarded") {
+        let chain: Vec<String> = who
+            .via
+            .iter()
+            .filter_map(|ip| store_ip(Some(*ip), mode))
+            .collect();
+        details.insert("forwarded".into(), json!(chain));
+    }
     let event = NewEvent {
         ts_ms: None,
         actor_kind: who.kind.as_str().to_owned(),
@@ -250,6 +263,7 @@ async fn write(
         actor_name: who.name.clone(),
         role: who.role.map(|r| r.as_str().to_owned()),
         ip: store_ip(who.ip, mode),
+        peer_ip: store_ip(who.peer, mode),
         user_agent: who.user_agent.clone(),
         action: action.to_owned(),
         target: target.map(|t| t.chars().take(256).collect()),

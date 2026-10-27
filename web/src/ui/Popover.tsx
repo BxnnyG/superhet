@@ -16,7 +16,8 @@ interface Props {
   /** Accessible name of the popover dialog. */
   label: string;
   trigger: (t: TriggerProps) => ReactNode;
-  children: ReactNode;
+  /** Content; a function receives `close` for items that dismiss the popover. */
+  children: ReactNode | ((close: () => void) => ReactNode);
   align?: "start" | "end";
   className?: string;
   /** Classes of the panel (width, padding). */
@@ -76,7 +77,7 @@ export function Popover({
             panelClassName,
           )}
         >
-          {children}
+          {typeof children === "function" ? children(() => setOpen(false)) : children}
         </div>
       )}
     </div>

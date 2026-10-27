@@ -74,6 +74,7 @@ async fn guest_start_inner(auth: &AuthState, client: &ClientInfo, headers: &Head
         .guest_start(
             token::hash_token(&raw),
             client.ip,
+            client.peer,
             client.user_agent.clone(),
             &policy,
         )
@@ -89,6 +90,8 @@ async fn guest_start_inner(auth: &AuthState, client: &ClientInfo, headers: &Head
         name: Some("guest".to_owned()),
         role: Some(superhet_db::users::Role::Listener),
         ip: client.ip,
+        peer: client.peer,
+        via: client.chain.clone(),
         user_agent: client.user_agent.clone(),
     };
     auth.audit()
