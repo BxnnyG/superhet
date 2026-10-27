@@ -67,6 +67,10 @@ export function fake(vfos: Vfo[], selectedId: number | null, locks: LockHolder[]
     createVfoAt: fns.createVfoAt,
     startBookmark: fns.startBookmark,
     toggleLock: fns.toggleLock,
+    channelSnap: { prefs: { region: null, stepByChannel: true, rasters: {} } },
+    channelMatch: null,
+    channels: { setStepByChannel: vi.fn() },
+    stepChannels: () => false,
   } as unknown as Receiver;
   return { r, fns };
 }

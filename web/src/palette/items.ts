@@ -14,11 +14,13 @@ import type { Vfo } from "../vfo/api";
 import { MODE_LABEL } from "../vfo/model";
 import { INSPECTOR_LABEL, INSPECTOR_TABS, type InspectorTab } from "../shell/inspector";
 import { MODE_KEYS, shortcutKeys, type ShortcutAction } from "../shell/shortcuts";
+import type { Plan, PlanChannel } from "../channels/schema";
+import { channelItems } from "./channelItems";
 import { rankScored } from "./fuzzy";
 import { parseTuneCommand, type TuneCommand } from "./parse";
 import type { RecentEntry } from "./recent";
 
-export type PaletteGroup = "Tune" | "Bookmarks" | "Recent" | "VFOs" | "Actions";
+export type PaletteGroup = "Tune" | "Channels" | "Bookmarks" | "Recent" | "VFOs" | "Actions";
 
 export interface PaletteItem {
   id: string;
@@ -41,7 +43,16 @@ export interface PaletteSection {
   items: PaletteItem[];
 }
 
+/** Channel plans for words like "pmr 3" (absent = no channel entries). */
+export interface ChannelPaletteDeps {
+  plans: readonly Plan[];
+  region: string | null;
+  /** Tune a channel: a VFO for voice channels, the device centre for DAB blocks. */
+  tuneChannel: (plan: Plan, channel: PlanChannel, newVfo: boolean) => void;
+}
+
 export interface PaletteDeps {
+  channels?: ChannelPaletteDeps;
   vfos: readonly Vfo[];
   selectedId: number | null;
   bookmarks: readonly Bookmark[];
@@ -67,6 +78,7 @@ export interface PaletteDeps {
 /** Longest list per group while searching; the list is for picking, not browsing. */
 const LIMIT: Record<PaletteGroup, number> = {
   Tune: 1,
+  Channels: 6,
   Bookmarks: 8,
   Recent: 5,
   VFOs: 5,
@@ -75,6 +87,7 @@ const LIMIT: Record<PaletteGroup, number> = {
 /** Without a query: this many entries of each group. */
 const IDLE_LIMIT: Record<PaletteGroup, number> = {
   Tune: 0,
+  Channels: 0,
   Bookmarks: 5,
   Recent: 5,
   VFOs: 0,
@@ -309,7 +322,14 @@ function vfoItems(deps: PaletteDeps): PaletteItem[] {
   }));
 }
 
-const GROUP_ORDER: readonly PaletteGroup[] = ["Tune", "Bookmarks", "Recent", "VFOs", "Actions"];
+const GROUP_ORDER: readonly PaletteGroup[] = [
+  "Tune",
+  "Channels",
+  "Bookmarks",
+  "Recent",
+  "VFOs",
+  "Actions",
+];
 
 /**
  * The palette content for a query: a "Tune" entry first when the query is a frequency command,
@@ -327,7 +347,12 @@ export function buildSections(deps: PaletteDeps, query: string): PaletteSection[
     });
   }
 
-  const pools: Record<Exclude<PaletteGroup, "Tune">, PaletteItem[]> = {
+  const channelHits = deps.channels && q !== "" ? channelItems(deps.channels, q) : [];
+  if (channelHits.length > 0) {
+    sections.push({ section: { group: "Channels", items: channelHits }, top: Number.MAX_VALUE });
+  }
+
+  const pools: Record<Exclude<PaletteGroup, "Tune" | "Channels">, PaletteItem[]> = {
     Bookmarks: (q === ""
       ? [...deps.bookmarks].filter((b) => b.favourite)
       : [...deps.bookmarks]
@@ -349,7 +374,7 @@ export function buildSections(deps: PaletteDeps, query: string): PaletteSection[
   };
 
   for (const group of GROUP_ORDER) {
-    if (group === "Tune") continue;
+    if (group === "Tune" || group === "Channels") continue;
     const ranked = rankScored(pools[group], q, (i) => [i.title, ...i.keywords, i.subtitle ?? ""]);
     const limit = q === "" ? IDLE_LIMIT[group] : LIMIT[group];
     const items = ranked.slice(0, limit).map((r) => r.item);

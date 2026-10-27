@@ -18,6 +18,10 @@ import { builtinBandPlan, matchBandPlan, suggestName } from "../bandplan/model";
 import { OverlayStore } from "../bandplan/settings";
 import { newInput, receiverState } from "../bookmarks/model";
 import { BookmarkStore } from "../bookmarks/store";
+import { DAB_PLUGIN_NOTICE, dabSampleRate } from "../channels/dab";
+import { channelTarget, matchChannel, stepChannelBy } from "../channels/lookup";
+import { modeOf, type Plan, type PlanChannel } from "../channels/schema";
+import { ChannelStore } from "../channels/store";
 import { DecoderEventStore } from "../decoders/store";
 import { createProfileApi } from "../profiles/api";
 import type { StateDoc } from "../state/doc";
@@ -26,6 +30,7 @@ import type { AnnotationTarget } from "../spectrum/annotations";
 import { formatFrequency } from "../spectrum/freq";
 import { LevelController, loadLevelSettings } from "../spectrum/levels";
 import type { SocketStatus } from "../spectrum/socket";
+import { SAMPLE_RATES } from "../spectrum/TuningControls";
 import { TuningController } from "../spectrum/tuning";
 import { toasts } from "../ui/toast";
 import { AutoSquelch } from "../vfo/autoSquelch";
@@ -111,6 +116,9 @@ export function useReceiver(device: string) {
   const bookmarks = useMemo(() => new BookmarkStore(), []);
   const bookmarkSnap = useSyncExternalStore(bookmarks.subscribe, bookmarks.getSnapshot);
 
+  const channels = useMemo(() => new ChannelStore(), []);
+  const channelSnap = useSyncExternalStore(channels.subscribe, channels.getSnapshot);
+
   const [status, setStatus] = useState<SocketStatus>("connecting");
   const [info, setInfo] = useState<SpectrumInfo | null>(null);
   const [spectrumError, setSpectrumError] = useState<string | null>(null);
@@ -155,6 +163,73 @@ export function useReceiver(device: string) {
     [vfoCtl, applyStep],
   );
 
+  // A channel of a plan: voice channels tune a VFO like a bookmark; a DAB block moves the device
+  // centre (operators) to the block centre with a sample rate that covers the 1.536 MHz ensemble.
+  const tuneChannel = useCallback(
+    (plan: Plan, channel: PlanChannel, newVfo: boolean) => {
+      if (modeOf(plan, channel) !== "dab") {
+        const target = channelTarget(plan, channel);
+        if (target === null) return;
+        if (newVfo) tuneNew(target);
+        else tuneTo(target);
+        return;
+      }
+      if (!canTune) {
+        toasts.push({
+          key: "tune-denied",
+          tone: "warn",
+          title: "Operators and admins only",
+          body: "Only operators and admins can move the device centre to a DAB block.",
+        });
+        return;
+      }
+      const rate = dabSampleRate(tuning.getSnapshot().display?.sampleRate ?? null, SAMPLE_RATES);
+      tuning.request({ centerHz: channel.freqHz, sampleRate: rate });
+      toasts.push({
+        key: "dab-plugin",
+        tone: "info",
+        title: DAB_PLUGIN_NOTICE,
+        body: `Centre set to DAB block ${channel.number}.`,
+      });
+    },
+    [canTune, tuning, tuneTo, tuneNew],
+  );
+
+  // The < > buttons and the arrow keys: when the active VFO sits on a plan channel and channel
+  // stepping is on, they step channels. False = not handled (step by frequency).
+  const stepChannels = useCallback(
+    (steps: number): boolean => {
+      const cs = channels.getSnapshot();
+      if (!cs.prefs.stepByChannel) return false;
+      const snap = vfoCtl.getSnapshot();
+      const vfo = snap.vfos.find((v) => v.id === snap.selectedId);
+      if (!vfo) return false;
+      const match = matchChannel(cs.index, vfo.freqHz, {
+        region: cs.region,
+        rasters: cs.prefs.rasters,
+      });
+      if (!match) return false;
+      const next = stepChannelBy(match, steps);
+      if (next === null) {
+        toasts.push({
+          key: "channel-end",
+          tone: "info",
+          title: `${steps < 0 ? "First" : "Last"} channel of ${match.plan.name}`,
+          body: "Turn channel stepping off in the Channels tab to step by frequency here.",
+        });
+        return true;
+      }
+      const tone = next.channel.ctcssHz;
+      const toneOk = vfo.mode === "nfm" || vfo.mode === "am";
+      vfoCtl.update(vfo.id, {
+        freqHz: next.channel.freqHz,
+        ...(tone !== null && toneOk ? { toneSquelchHz: tone } : {}),
+      });
+      return true;
+    },
+    [channels, vfoCtl],
+  );
+
   // A plain click on the spectrum creates the first VFO instead of moving the device centre.
   const spectrumTuning = useMemo(
     // eslint-disable-next-line react-hooks/refs -- createVfoAt only reads its ref when called
@@ -186,6 +261,10 @@ export function useReceiver(device: string) {
   useEffect(() => {
     if (canReadBookmarks) void bookmarks.refresh();
   }, [bookmarks, feedUp, canReadBookmarks]);
+  // Custom channel plans live on the server too; the built-in ones need no request.
+  useEffect(() => {
+    void channels.refresh();
+  }, [channels, feedUp]);
 
   // The audio controller subscribes to the listened VFOs plus the active one (its S-meter and
   // squelch Auto need frames even when it is not in the mix). Wait for the first VFO list so
@@ -233,6 +312,17 @@ export function useReceiver(device: string) {
 
   const selected = vfoSnap.vfos.find((v) => v.id === vfoSnap.selectedId) ?? null;
   const centerHz = tuningSnap.display?.centerHz ?? null;
+  // The plan channel the active VFO sits on (drives the readout chip and channel stepping).
+  const channelMatch = useMemo(
+    () =>
+      selected === null
+        ? null
+        : matchChannel(channelSnap.index, selected.freqHz, {
+            region: channelSnap.region,
+            rasters: channelSnap.prefs.rasters,
+          }),
+    [selected, channelSnap],
+  );
 
   // Open the bookmark dialog for the active VFO (or the centre), named after the band plan entry.
   const canEditBookmarks = perms.canEditBookmarks;
@@ -298,6 +388,11 @@ export function useReceiver(device: string) {
     overlay,
     bookmarks,
     bookmarkSnap,
+    channels,
+    channelSnap,
+    channelMatch,
+    tuneChannel,
+    stepChannels,
     decoderEvents,
     tuneTo,
     tuneNew,

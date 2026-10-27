@@ -1,0 +1,82 @@
+{
+  "v": 1,
+  "id": "pmr446",
+  "name": "PMR446",
+  "service": "PMR446",
+  "chip": "PMR",
+  "aliases": ["pmr", "pmr446"],
+  "regions": ["CEPT"],
+  "licence": "licence-free",
+  "licence_note": "Licence-free in the CEPT countries with approved equipment: 0.5 W ERP, integral antenna, no repeaters.",
+  "mode": "nfm",
+  "bandwidth_hz": 12500,
+  "step_hz": 12500,
+  "note": "Channels 1-16 are the analogue 12.5 kHz channels (446.00625-446.19375 MHz). Digital PMR446 (dPMR446 on 6.25 kHz channels, DMR Tier 1 on 12.5 kHz) shares 446.1-446.2 MHz and is not listed here; the receiver demodulates it as noise until a digital decoder plugin exists.",
+  "source": "CEPT ERC Recommendation 70-03 Annex 1 (PMR446); ECC Decision (15)05; BNetzA Allgemeinzuteilung PMR446",
+  "channels": [
+    {
+      "number": "1",
+      "freq_hz": 446006250
+    },
+    {
+      "number": "2",
+      "freq_hz": 446018750
+    },
+    {
+      "number": "3",
+      "freq_hz": 446031250
+    },
+    {
+      "number": "4",
+      "freq_hz": 446043750
+    },
+    {
+      "number": "5",
+      "freq_hz": 446056250
+    },
+    {
+      "number": "6",
+      "freq_hz": 446068750
+    },
+    {
+      "number": "7",
+      "freq_hz": 446081250
+    },
+    {
+      "number": "8",
+      "freq_hz": 446093750
+    },
+    {
+      "number": "9",
+      "freq_hz": 446106250
+    },
+    {
+      "number": "10",
+      "freq_hz": 446118750
+    },
+    {
+      "number": "11",
+      "freq_hz": 446131250
+    },
+    {
+      "number": "12",
+      "freq_hz": 446143750
+    },
+    {
+      "number": "13",
+      "freq_hz": 446156250
+    },
+    {
+      "number": "14",
+      "freq_hz": 446168750
+    },
+    {
+      "number": "15",
+      "freq_hz": 446181250
+    },
+    {
+      "number": "16",
+      "freq_hz": 446193750
+    }
+  ]
+}

@@ -26,7 +26,7 @@ Coverage (Germany / IARU Region 1):
 | CB radio | 80 channels: 1-40 standard table (AM/FM), 41-80 on 26.565-26.955 MHz (FM) |
 | SRD / ISM | 433.05-434.79 MHz (433.92 marker), 863-870 MHz |
 | Aviation | VOR/ILS 108-117.975, voice 118-137 MHz, 121.5 emergency, military UHF 225-400 MHz, ADS-B 1090 MHz |
-| Marine VHF / AIS | 156-162.025 MHz, channels 06, 13, 16, 70, AIS 161.975 / 162.025 MHz |
+| Marine VHF / AIS | 156-162.025 MHz, the full ship-side channel table (taken from the Channels tab plan, `docs/channel-plans.md`), AIS 161.975 / 162.025 MHz |
 | Weather satellites | 137-138 MHz (approximate; the active satellites change) |
 | BOS / TETRA | 380-385 and 390-395 MHz, range only, labelled "BOS (TETRA) - reception not permitted, § 5 TDDDG" |
 | Business radio | coarse 4 m, 2 m and 70 cm ranges, all approximate, off by default |

@@ -28,6 +28,7 @@ it("the inspector tabs reach every former sidebar section", () => {
   expect(tabs.getAllByRole("tab").map((t) => t.textContent)).toEqual([
     "Receiver",
     "Bookmarks",
+    "Channels",
     "Decoders",
     "Display",
     "Source",
@@ -46,7 +47,7 @@ it("the inspector tabs reach every former sidebar section", () => {
   expect(tabs.getByRole("tab", { name: "Bookmarks" })).toHaveAttribute("aria-selected", "true");
   // Arrow keys move between tabs.
   fireEvent.keyDown(tabs.getByRole("tab", { name: "Bookmarks" }), { key: "ArrowRight" });
-  expect(tabs.getByRole("tab", { name: "Decoders" })).toHaveAttribute("aria-selected", "true");
+  expect(tabs.getByRole("tab", { name: "Channels" })).toHaveAttribute("aria-selected", "true");
 });
 
 it("] and the top bar button hide and show the inspector, and the choice persists", () => {

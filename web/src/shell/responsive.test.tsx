@@ -50,6 +50,7 @@ it("phone width: a bottom tab bar opens the inspector sheet on a tab and moves m
   expect([...buttons].map((b) => b.textContent)).toEqual([
     "Receiver",
     "Bookmarks",
+    "Channels",
     "Display",
     "Source",
   ]);

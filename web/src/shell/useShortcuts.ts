@@ -28,6 +28,11 @@ export interface ShortcutContext {
   openPalette: () => void;
   /** Open or close the command palette (Ctrl/Cmd+K, also while typing). */
   togglePalette: () => void;
+  /**
+   * Step the active VFO by channels when it sits on a plan channel and channel stepping is on;
+   * false = not handled, step by frequency.
+   */
+  stepChannels?: (steps: number) => boolean;
 }
 
 /** Run one shortcut; true when it did something (the caller then swallows the key event). */
@@ -37,6 +42,7 @@ export function runShortcut(action: ShortcutAction, ctx: ShortcutContext): boole
   switch (action.type) {
     case "step":
       if (!active) return false;
+      if (ctx.stepChannels?.(action.steps)) return true;
       ctx.vfoCtl.update(active.id, {
         freqHz: stepFrequency(active.freqHz, stepFor(ctx.step, active.mode), action.steps),
       });

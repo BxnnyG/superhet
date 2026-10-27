@@ -7,7 +7,10 @@ import {
   type PointerEvent,
 } from "react";
 import { enabledCategories, type OverlayStore } from "../bandplan/settings";
+import { builtinBandPlan, buildBandPlan } from "../bandplan/model";
 import type { BookmarkStore } from "../bookmarks/store";
+import { overlayPlans } from "../channels/overlay";
+import type { ChannelStore } from "../channels/store";
 import type { SpectrumInfo, ViewActions } from "../shell/useReceiver";
 import type { SpectrumMetrics } from "../shell/metrics";
 import type { VfoController } from "../vfo/controller";
@@ -35,6 +38,8 @@ interface Props {
   /** Band plan / bookmark overlay settings and the bookmarks drawn on the spectrum. */
   overlaySettings: OverlayStore;
   bookmarks: BookmarkStore;
+  /** Custom channel plans drawn as ticks in the overlay (optional). */
+  channels?: ChannelStore;
   /** A tunable channel or bookmark in the overlay strip was clicked (`newVfo`: Alt/Ctrl-click). */
   onAnnotationTune: (target: AnnotationTarget, newVfo: boolean) => void;
   metrics: SpectrumMetrics;
@@ -80,6 +85,7 @@ export function SpectrumView({
   createVfoAt,
   overlaySettings,
   bookmarks,
+  channels,
   onAnnotationTune,
   metrics,
   registerView,
@@ -206,6 +212,16 @@ export function SpectrumView({
       interaction?.refresh();
     };
     syncAnnotations();
+    const syncPlan = () => {
+      if (!channels) return;
+      const custom = overlayPlans(channels.getSnapshot().custom);
+      annotations.setPlan(
+        custom.length > 0 ? buildBandPlan({ ranges: [], plans: custom }) : builtinBandPlan(),
+      );
+      interaction?.refresh();
+    };
+    syncPlan();
+    const offChannels = channels?.subscribe(syncPlan);
     const offOverlay = overlaySettings.subscribe(syncAnnotations);
     const offBookmarks = bookmarks.subscribe(syncAnnotations);
     const pushVfos = () => {
@@ -262,6 +278,7 @@ export function SpectrumView({
       offVfos();
       offOverlay();
       offBookmarks();
+      offChannels?.();
       tuning.stop();
       view.dispose();
       interaction?.destroy();
@@ -271,7 +288,17 @@ export function SpectrumView({
       plot.destroy();
       waterfall?.destroy();
     };
-  }, [device, controller, tuning, vfoCtl, createVfoAt, overlaySettings, bookmarks, metrics]);
+  }, [
+    device,
+    controller,
+    tuning,
+    vfoCtl,
+    createVfoAt,
+    overlaySettings,
+    bookmarks,
+    channels,
+    metrics,
+  ]);
 
   const clampPlot = useCallback((px: number) => {
     const h = containerRef.current?.clientHeight ?? 0;

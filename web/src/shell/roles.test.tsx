@@ -177,9 +177,17 @@ describe("tuning strip", () => {
 describe("inspector tabs", () => {
   it("guests lose the bookmarks, and decoders unless the policy shows them", () => {
     const base = { canReadBookmarks: true, canSeeDecoders: true };
-    expect(visibleTabs(base)).toEqual(["receiver", "bookmarks", "decoders", "display", "source"]);
+    expect(visibleTabs(base)).toEqual([
+      "receiver",
+      "bookmarks",
+      "channels",
+      "decoders",
+      "display",
+      "source",
+    ]);
     expect(visibleTabs({ canReadBookmarks: false, canSeeDecoders: false })).toEqual([
       "receiver",
+      "channels",
       "display",
       "source",
     ]);

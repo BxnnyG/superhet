@@ -4,7 +4,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { SHELL_QUERY, useMediaQuery } from "./useMediaQuery";
 
-export const INSPECTOR_TABS = ["receiver", "bookmarks", "decoders", "display", "source"] as const;
+export const INSPECTOR_TABS = [
+  "receiver",
+  "bookmarks",
+  "channels",
+  "decoders",
+  "display",
+  "source",
+] as const;
 export type InspectorTab = (typeof INSPECTOR_TABS)[number];
 
 /** Tabs the viewer may see: guests have no bookmarks, and decoder history only if the policy shows it. */
@@ -21,6 +28,7 @@ export function visibleTabs(perms: {
 export const INSPECTOR_LABEL: Record<InspectorTab, string> = {
   receiver: "Receiver",
   bookmarks: "Bookmarks",
+  channels: "Channels",
   decoders: "Decoders",
   display: "Display",
   source: "Source",

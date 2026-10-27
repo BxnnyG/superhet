@@ -3,6 +3,7 @@
 // docs/bandplan.md. Anything not verified against a primary source carries `approx: true`.
 // Frequencies are written through mhz()/khz() so no float error creeps into channel math.
 
+import { builtinPlans } from "../channels/catalog";
 import type { VfoMode } from "../vfo/api";
 
 export type CategoryId =
@@ -496,6 +497,12 @@ const DAB_BLOCKS: readonly (readonly [string, number])[] = [
   ["13F", 239.2],
 ];
 
+const MARINE_SHIP = (() => {
+  const plan = builtinPlans().find((p) => p.id === "marine-vhf");
+  if (!plan) throw new Error("built-in plan marine-vhf is missing");
+  return plan;
+})();
+
 export const CHANNEL_PLANS: readonly ChannelPlan[] = [
   {
     kind: "list",
@@ -661,17 +668,14 @@ export const CHANNEL_PLANS: readonly ChannelPlan[] = [
     mode: "nfm",
     bandwidthHz: 25_000,
     source: SRC_MARINE,
-    channels: [
-      { label: "06", freqHz: khz(156300), name: "Marine ch 06", note: "Intership safety." },
-      { label: "70", freqHz: khz(156525), name: "Marine ch 70", note: "DSC (digital, not voice)." },
-      { label: "13", freqHz: khz(156650), name: "Marine ch 13", note: "Bridge-to-bridge." },
-      {
-        label: "16",
-        freqHz: khz(156800),
-        name: "Marine ch 16",
-        note: "Distress, safety and calling.",
-      },
-    ],
+    note: "Ship-station transmit frequencies; duplex channels answer 4.6 MHz higher.",
+    // The full international table comes from the Channels tab's plan (one source of truth).
+    channels: MARINE_SHIP.channels.map((c) => ({
+      label: c.number,
+      freqHz: c.freqHz,
+      name: `Marine ch ${c.number}`,
+      ...(c.name ? { note: c.name } : {}),
+    })),
   },
   {
     kind: "list",

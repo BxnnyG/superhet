@@ -1,0 +1,289 @@
+{
+  "v": 1,
+  "id": "marine-vhf",
+  "name": "Marine VHF (ship side)",
+  "service": "Marine VHF",
+  "chip": "Marine",
+  "aliases": ["marine", "ch", "vhf"],
+  "regions": ["WORLD"],
+  "licence": "licensed",
+  "licence_note": "Transmitting needs a ship radio licence and an operator certificate. Receiving is open to everybody.",
+  "mode": "nfm",
+  "bandwidth_hz": 25000,
+  "step_hz": 25000,
+  "note": "International channel table, ship-station transmit frequencies. Regional variants (for example the US and Canadian channel names) are not included.",
+  "source": "ITU Radio Regulations Appendix 18; ITU-R M.1084-5 Annex 4",
+  "channels": [
+    {
+      "number": "01",
+      "freq_hz": 156050000,
+      "note": "Duplex: the coast station transmits on 160.650 MHz."
+    },
+    {
+      "number": "02",
+      "freq_hz": 156100000,
+      "note": "Duplex: the coast station transmits on 160.700 MHz."
+    },
+    {
+      "number": "03",
+      "freq_hz": 156150000,
+      "note": "Duplex: the coast station transmits on 160.750 MHz."
+    },
+    {
+      "number": "04",
+      "freq_hz": 156200000,
+      "note": "Duplex: the coast station transmits on 160.800 MHz."
+    },
+    {
+      "number": "05",
+      "freq_hz": 156250000,
+      "note": "Duplex: the coast station transmits on 160.850 MHz."
+    },
+    {
+      "number": "06",
+      "freq_hz": 156300000,
+      "name": "Intership safety, SAR with aircraft"
+    },
+    {
+      "number": "07",
+      "freq_hz": 156350000,
+      "note": "Duplex: the coast station transmits on 160.950 MHz."
+    },
+    {
+      "number": "08",
+      "freq_hz": 156400000
+    },
+    {
+      "number": "09",
+      "freq_hz": 156450000
+    },
+    {
+      "number": "10",
+      "freq_hz": 156500000
+    },
+    {
+      "number": "11",
+      "freq_hz": 156550000
+    },
+    {
+      "number": "12",
+      "freq_hz": 156600000
+    },
+    {
+      "number": "13",
+      "freq_hz": 156650000,
+      "name": "Intership navigation safety (bridge to bridge)"
+    },
+    {
+      "number": "14",
+      "freq_hz": 156700000
+    },
+    {
+      "number": "15",
+      "freq_hz": 156750000,
+      "name": "On-board communications, low power"
+    },
+    {
+      "number": "16",
+      "freq_hz": 156800000,
+      "name": "International distress, safety and calling",
+      "note": "Listen here first; monitored by coast stations and vessels."
+    },
+    {
+      "number": "17",
+      "freq_hz": 156850000,
+      "name": "On-board communications, low power"
+    },
+    {
+      "number": "18",
+      "freq_hz": 156900000,
+      "note": "Duplex: the coast station transmits on 161.500 MHz."
+    },
+    {
+      "number": "19",
+      "freq_hz": 156950000,
+      "note": "Duplex: the coast station transmits on 161.550 MHz."
+    },
+    {
+      "number": "20",
+      "freq_hz": 157000000,
+      "note": "Duplex: the coast station transmits on 161.600 MHz."
+    },
+    {
+      "number": "21",
+      "freq_hz": 157050000,
+      "note": "Duplex: the coast station transmits on 161.650 MHz."
+    },
+    {
+      "number": "22",
+      "freq_hz": 157100000,
+      "note": "Duplex: the coast station transmits on 161.700 MHz."
+    },
+    {
+      "number": "23",
+      "freq_hz": 157150000,
+      "note": "Duplex: the coast station transmits on 161.750 MHz."
+    },
+    {
+      "number": "24",
+      "freq_hz": 157200000,
+      "note": "Duplex: the coast station transmits on 161.800 MHz."
+    },
+    {
+      "number": "25",
+      "freq_hz": 157250000,
+      "note": "Duplex: the coast station transmits on 161.850 MHz."
+    },
+    {
+      "number": "26",
+      "freq_hz": 157300000,
+      "note": "Duplex: the coast station transmits on 161.900 MHz."
+    },
+    {
+      "number": "27",
+      "freq_hz": 157350000,
+      "note": "Duplex: the coast station transmits on 161.950 MHz."
+    },
+    {
+      "number": "28",
+      "freq_hz": 157400000,
+      "note": "Duplex: the coast station transmits on 162.000 MHz."
+    },
+    {
+      "number": "60",
+      "freq_hz": 156025000,
+      "note": "Duplex: the coast station transmits on 160.625 MHz."
+    },
+    {
+      "number": "61",
+      "freq_hz": 156075000,
+      "note": "Duplex: the coast station transmits on 160.675 MHz."
+    },
+    {
+      "number": "62",
+      "freq_hz": 156125000,
+      "note": "Duplex: the coast station transmits on 160.725 MHz."
+    },
+    {
+      "number": "63",
+      "freq_hz": 156175000,
+      "note": "Duplex: the coast station transmits on 160.775 MHz."
+    },
+    {
+      "number": "64",
+      "freq_hz": 156225000,
+      "note": "Duplex: the coast station transmits on 160.825 MHz."
+    },
+    {
+      "number": "65",
+      "freq_hz": 156275000,
+      "note": "Duplex: the coast station transmits on 160.875 MHz."
+    },
+    {
+      "number": "66",
+      "freq_hz": 156325000,
+      "note": "Duplex: the coast station transmits on 160.925 MHz."
+    },
+    {
+      "number": "67",
+      "freq_hz": 156375000
+    },
+    {
+      "number": "68",
+      "freq_hz": 156425000
+    },
+    {
+      "number": "69",
+      "freq_hz": 156475000
+    },
+    {
+      "number": "70",
+      "freq_hz": 156525000,
+      "name": "Digital selective calling (DSC), data only",
+      "note": "DSC bursts, not voice. Decoding needs a DSC decoder."
+    },
+    {
+      "number": "71",
+      "freq_hz": 156575000
+    },
+    {
+      "number": "72",
+      "freq_hz": 156625000
+    },
+    {
+      "number": "73",
+      "freq_hz": 156675000
+    },
+    {
+      "number": "74",
+      "freq_hz": 156725000
+    },
+    {
+      "number": "75",
+      "freq_hz": 156775000,
+      "name": "Guard band next to channel 16, limited power"
+    },
+    {
+      "number": "76",
+      "freq_hz": 156825000,
+      "name": "Guard band next to channel 16, limited power"
+    },
+    {
+      "number": "77",
+      "freq_hz": 156875000
+    },
+    {
+      "number": "78",
+      "freq_hz": 156925000,
+      "note": "Duplex: the coast station transmits on 161.525 MHz."
+    },
+    {
+      "number": "79",
+      "freq_hz": 156975000,
+      "note": "Duplex: the coast station transmits on 161.575 MHz."
+    },
+    {
+      "number": "80",
+      "freq_hz": 157025000,
+      "note": "Duplex: the coast station transmits on 161.625 MHz."
+    },
+    {
+      "number": "81",
+      "freq_hz": 157075000,
+      "note": "Duplex: the coast station transmits on 161.675 MHz."
+    },
+    {
+      "number": "82",
+      "freq_hz": 157125000,
+      "note": "Duplex: the coast station transmits on 161.725 MHz."
+    },
+    {
+      "number": "83",
+      "freq_hz": 157175000,
+      "note": "Duplex: the coast station transmits on 161.775 MHz."
+    },
+    {
+      "number": "84",
+      "freq_hz": 157225000,
+      "note": "Duplex: the coast station transmits on 161.825 MHz."
+    },
+    {
+      "number": "85",
+      "freq_hz": 157275000,
+      "note": "Duplex: the coast station transmits on 161.875 MHz."
+    },
+    {
+      "number": "86",
+      "freq_hz": 157325000,
+      "note": "Duplex: the coast station transmits on 161.925 MHz."
+    },
+    {
+      "number": "87",
+      "freq_hz": 157375000
+    },
+    {
+      "number": "88",
+      "freq_hz": 157425000
+    }
+  ]
+}

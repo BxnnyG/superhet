@@ -1,0 +1,293 @@
+{
+  "v": 1,
+  "id": "lpd433",
+  "name": "LPD433",
+  "service": "LPD433",
+  "chip": "LPD",
+  "aliases": ["lpd", "lpd433"],
+  "regions": ["CEPT"],
+  "licence": "licence-free",
+  "licence_note": "Short-range device band (10 mW ERP). The channel count and allowed use differ by country; 69 channels is the German allocation.",
+  "mode": "nfm",
+  "bandwidth_hz": 12500,
+  "step_hz": 25000,
+  "source": "CEPT ERC Recommendation 70-03 Annex 1 (433.05-434.79 MHz); BNetzA Allgemeinzuteilung LPD433",
+  "channels": [
+    {
+      "number": "1",
+      "freq_hz": 433075000
+    },
+    {
+      "number": "2",
+      "freq_hz": 433100000
+    },
+    {
+      "number": "3",
+      "freq_hz": 433125000
+    },
+    {
+      "number": "4",
+      "freq_hz": 433150000
+    },
+    {
+      "number": "5",
+      "freq_hz": 433175000
+    },
+    {
+      "number": "6",
+      "freq_hz": 433200000
+    },
+    {
+      "number": "7",
+      "freq_hz": 433225000
+    },
+    {
+      "number": "8",
+      "freq_hz": 433250000
+    },
+    {
+      "number": "9",
+      "freq_hz": 433275000
+    },
+    {
+      "number": "10",
+      "freq_hz": 433300000
+    },
+    {
+      "number": "11",
+      "freq_hz": 433325000
+    },
+    {
+      "number": "12",
+      "freq_hz": 433350000
+    },
+    {
+      "number": "13",
+      "freq_hz": 433375000
+    },
+    {
+      "number": "14",
+      "freq_hz": 433400000
+    },
+    {
+      "number": "15",
+      "freq_hz": 433425000
+    },
+    {
+      "number": "16",
+      "freq_hz": 433450000
+    },
+    {
+      "number": "17",
+      "freq_hz": 433475000
+    },
+    {
+      "number": "18",
+      "freq_hz": 433500000
+    },
+    {
+      "number": "19",
+      "freq_hz": 433525000
+    },
+    {
+      "number": "20",
+      "freq_hz": 433550000
+    },
+    {
+      "number": "21",
+      "freq_hz": 433575000
+    },
+    {
+      "number": "22",
+      "freq_hz": 433600000
+    },
+    {
+      "number": "23",
+      "freq_hz": 433625000
+    },
+    {
+      "number": "24",
+      "freq_hz": 433650000
+    },
+    {
+      "number": "25",
+      "freq_hz": 433675000
+    },
+    {
+      "number": "26",
+      "freq_hz": 433700000
+    },
+    {
+      "number": "27",
+      "freq_hz": 433725000
+    },
+    {
+      "number": "28",
+      "freq_hz": 433750000
+    },
+    {
+      "number": "29",
+      "freq_hz": 433775000
+    },
+    {
+      "number": "30",
+      "freq_hz": 433800000
+    },
+    {
+      "number": "31",
+      "freq_hz": 433825000
+    },
+    {
+      "number": "32",
+      "freq_hz": 433850000
+    },
+    {
+      "number": "33",
+      "freq_hz": 433875000
+    },
+    {
+      "number": "34",
+      "freq_hz": 433900000
+    },
+    {
+      "number": "35",
+      "freq_hz": 433925000
+    },
+    {
+      "number": "36",
+      "freq_hz": 433950000
+    },
+    {
+      "number": "37",
+      "freq_hz": 433975000
+    },
+    {
+      "number": "38",
+      "freq_hz": 434000000
+    },
+    {
+      "number": "39",
+      "freq_hz": 434025000
+    },
+    {
+      "number": "40",
+      "freq_hz": 434050000
+    },
+    {
+      "number": "41",
+      "freq_hz": 434075000
+    },
+    {
+      "number": "42",
+      "freq_hz": 434100000
+    },
+    {
+      "number": "43",
+      "freq_hz": 434125000
+    },
+    {
+      "number": "44",
+      "freq_hz": 434150000
+    },
+    {
+      "number": "45",
+      "freq_hz": 434175000
+    },
+    {
+      "number": "46",
+      "freq_hz": 434200000
+    },
+    {
+      "number": "47",
+      "freq_hz": 434225000
+    },
+    {
+      "number": "48",
+      "freq_hz": 434250000
+    },
+    {
+      "number": "49",
+      "freq_hz": 434275000
+    },
+    {
+      "number": "50",
+      "freq_hz": 434300000
+    },
+    {
+      "number": "51",
+      "freq_hz": 434325000
+    },
+    {
+      "number": "52",
+      "freq_hz": 434350000
+    },
+    {
+      "number": "53",
+      "freq_hz": 434375000
+    },
+    {
+      "number": "54",
+      "freq_hz": 434400000
+    },
+    {
+      "number": "55",
+      "freq_hz": 434425000
+    },
+    {
+      "number": "56",
+      "freq_hz": 434450000
+    },
+    {
+      "number": "57",
+      "freq_hz": 434475000
+    },
+    {
+      "number": "58",
+      "freq_hz": 434500000
+    },
+    {
+      "number": "59",
+      "freq_hz": 434525000
+    },
+    {
+      "number": "60",
+      "freq_hz": 434550000
+    },
+    {
+      "number": "61",
+      "freq_hz": 434575000
+    },
+    {
+      "number": "62",
+      "freq_hz": 434600000
+    },
+    {
+      "number": "63",
+      "freq_hz": 434625000
+    },
+    {
+      "number": "64",
+      "freq_hz": 434650000
+    },
+    {
+      "number": "65",
+      "freq_hz": 434675000
+    },
+    {
+      "number": "66",
+      "freq_hz": 434700000
+    },
+    {
+      "number": "67",
+      "freq_hz": 434725000
+    },
+    {
+      "number": "68",
+      "freq_hz": 434750000
+    },
+    {
+      "number": "69",
+      "freq_hz": 434775000
+    }
+  ]
+}

@@ -6,6 +6,7 @@ import {
   Badge,
   BookmarkIcon,
   Button,
+  Chip,
   FrequencyReadout,
   IconButton,
   PauseIcon,
@@ -22,6 +23,7 @@ import {
   vfoColor,
 } from "../vfo/model";
 import { BandwidthSelect, ModeSelect, SquelchControl } from "../vfo/controls";
+import { channelTitle, chipLabel } from "../channels/lookup";
 import { SMeter } from "../vfo/SMeter";
 import type { VfoPatch } from "../vfo/api";
 import { EDIT_FREQUENCY_EVENT } from "./appEvents";
@@ -88,8 +90,13 @@ function ActiveVfo({
   // Somebody else's receiver: the controls stay visible but are disabled (the server says 403).
   const readOnly = !canModifyVfo(perms, vfo);
   const stepHz = stepFor(r.step, vfo.mode);
-  const nudge = (dir: 1 | -1) =>
+  const nudge = (dir: 1 | -1) => {
+    // On a plan channel the arrows step channels (unless the user turned that off).
+    if (r.stepChannels(dir)) return;
     r.vfoCtl.update(vfo.id, { freqHz: snapFrequency(vfo.freqHz + dir * stepHz, stepHz) });
+  };
+  const match = r.channelMatch;
+  const byChannel = r.channelSnap.prefs.stepByChannel;
   const onUpdate = (id: number, patch: VfoPatch) => r.vfoCtl.update(id, patch);
   return (
     <>
@@ -130,6 +137,21 @@ function ActiveVfo({
         >
           <ArrowRightIcon />
         </IconButton>
+        {match !== null && (
+          <Chip
+            selected={byChannel}
+            className="max-w-28 truncate max-phone:h-11"
+            aria-label={`Channel ${chipLabel(match.plan, match.channel)}: step by channel`}
+            title={`${channelTitle(match.plan, match.channel)} (${match.plan.name}). ${
+              byChannel
+                ? "The arrows step channels; click to step by frequency."
+                : "Click to step by channel."
+            }`}
+            onClick={() => r.channels.setStepByChannel(!byChannel)}
+          >
+            {chipLabel(match.plan, match.channel)}
+          </Chip>
+        )}
         <Select
           aria-label="Tuning step"
           size="sm"

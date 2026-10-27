@@ -1,0 +1,41 @@
+{
+  "v": 1,
+  "id": "freenet-de",
+  "name": "Freenet",
+  "service": "Freenet",
+  "chip": "Freenet",
+  "aliases": ["freenet", "fn"],
+  "regions": ["DE"],
+  "licence": "licence-free",
+  "licence_note": "General allocation by the BNetzA: licence-free in Germany with approved equipment, 0.5 W ERP, no repeaters.",
+  "mode": "nfm",
+  "bandwidth_hz": 12500,
+  "step_hz": 12500,
+  "source": "BNetzA Allgemeinzuteilung fuer Freenet (149.0250-149.1125 MHz)",
+  "channels": [
+    {
+      "number": "1",
+      "freq_hz": 149025000
+    },
+    {
+      "number": "2",
+      "freq_hz": 149037500
+    },
+    {
+      "number": "3",
+      "freq_hz": 149050000
+    },
+    {
+      "number": "4",
+      "freq_hz": 149087500
+    },
+    {
+      "number": "5",
+      "freq_hz": 149100000
+    },
+    {
+      "number": "6",
+      "freq_hz": 149112500
+    }
+  ]
+}
