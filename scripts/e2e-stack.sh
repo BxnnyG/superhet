@@ -10,7 +10,7 @@
 # Needs: a FRESH PostgreSQL database and a NATS server (JetStream not required), given as
 # SUPERHET_DATABASE_URL / SUPERHET_NATS_URL (optionally SUPERHET_NATS_USER/PASSWORD; JetStream
 # enabled for the plugin events), the four debug binaries (cargo build -p superhet-api
-# -p superhet-sdrd -p superhet-worker -p superhet-pluginhost) and web/dist (pnpm -C web build).
+# -p superhet-sdrd -p superhet-worker -p superhet-pluginhost -p superhet-plugin-adapters) and web/dist (pnpm -C web build).
 # scripts/e2e.sh sets all of that up locally.
 #
 # Ports (loopback only): api E2E_PORT (default 18073), sdrd +1, pluginhost +2, worker +3.
@@ -25,9 +25,9 @@ if [ "$port" = 8073 ]; then
     echo "refusing to use port 8073 (a real instance)" >&2
     exit 1
 fi
-bins="${E2E_BIN_DIR:-target/debug}"
+bins="$(cd "${E2E_BIN_DIR:-target/debug}" && pwd)"
 web="${E2E_WEB_DIR:-web/dist}"
-for f in superhet-api superhet-sdrd superhet-worker superhet-pluginhost; do
+for f in superhet-api superhet-sdrd superhet-worker superhet-pluginhost superhet-plugin-adapter; do
     [ -x "$bins/$f" ] || { echo "missing $bins/$f (cargo build -p $f)" >&2; exit 1; }
 done
 [ -f "$web/index.html" ] || { echo "missing $web/index.html (pnpm -C web build)" >&2; exit 1; }
@@ -45,6 +45,11 @@ trap cleanup EXIT INT TERM
 # The bundled plugins as the image has them: copies of the first-party plugin directories.
 mkdir -p "$work/bundled" "$work/plugins"
 for name in pocsag aprs rtl433 dab; do cp -r "plugins/$name" "$work/bundled/$name"; done
+
+# The DAB plugin runs the real adapter against a stand-in welle-cli (python3): blocks 5C and 6A
+# carry the "DR Deutschland" ensemble, a tone plays as audio, the slide is a tiny PNG.
+mkdir -p "$work/bin"
+ln -s "$(pwd)/crates/superhet-plugin-adapters/tests/dab/fake-welle-cli" "$work/bin/welle-cli"
 
 # 1 s of random cu8 samples at 2.048 MS/s: valid IQ, plays in a loop.
 head -c 4096000 /dev/urandom >"$work/noise.cu8"
@@ -77,6 +82,7 @@ pids+=($!)
 SUPERHET_LISTEN="127.0.0.1:$((port + 2))" \
     SUPERHET_PLUGIN_DIR="$work/plugins" \
     SUPERHET_BUNDLED_PLUGIN_DIR="$work/bundled" \
+    PATH="$work/bin:$bins:$PATH" \
     "$bins/superhet-pluginhost" &
 pids+=($!)
 

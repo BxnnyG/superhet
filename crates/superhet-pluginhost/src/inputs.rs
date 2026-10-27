@@ -183,13 +183,16 @@ async fn keep_alive(
 ) {
     let mut tick = tokio::time::interval(LEASE_REFRESH);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Only a claim can be moved; for a plain tap the sender is dropped at once.
+    let mut movable = request.claim.is_some();
     loop {
         // A retune refreshes at once instead of waiting for the next lease tick.
         tokio::select! {
             _ = tick.tick() => {}
-            changed = centre.changed() => {
+            changed = centre.changed(), if movable => {
                 if changed.is_err() {
-                    return;
+                    movable = false;
+                    continue;
                 }
             }
         }

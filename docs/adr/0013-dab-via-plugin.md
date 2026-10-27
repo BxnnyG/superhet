@@ -1,6 +1,6 @@
 # ADR-0013: DAB/DAB+ via plugin
 
-**Status:** accepted (2026-10-26)
+**Status:** accepted (2026-10-26); implementation details in [ADR-0016](0016-dab-plugin-design.md)
 
 ## Context
 

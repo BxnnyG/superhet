@@ -18,7 +18,7 @@ cleanup() {
 trap cleanup EXIT
 
 if [ -z "${E2E_SKIP_BUILD:-}" ]; then
-    cargo build -q -p superhet-api -p superhet-sdrd -p superhet-worker -p superhet-pluginhost
+    cargo build -q -p superhet-api -p superhet-sdrd -p superhet-worker -p superhet-pluginhost -p superhet-plugin-adapters
     pnpm -C web install --frozen-lockfile --silent
     pnpm -C web build
 fi

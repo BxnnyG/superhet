@@ -15,7 +15,7 @@ Status: protocol version `1`. Plugin `plugin.protocol` must equal it; incompatib
 |---|---|
 | Manifest `plugin.toml`, validation, JSON Schema | done |
 | Simple transport (stdin samples, stdout JSON Lines events, stderr log) | done, supervised by the host |
-| Framed transport wire format (frame codec, hello, samples / voice-frame headers) | types and tests only; the host refuses to start framed plugins (`unsupported`) |
+| Framed transport (frame codec, hello, samples in; event, audio, log, status, media, tune out; control in) | done (ADR-0016); voice frames are accepted by the codec but dropped by the host |
 | Supervisor: spawn, health, restart with backoff, `error` after 5 crashes in 5 min | done |
 | Control API on the bus (list, install from local path, instances, start, stop, restart) | done |
 | Feeding VFO audio / IQ and the whole window from sdrd into `stdin` | done ("Feeding input") |
@@ -24,7 +24,7 @@ Status: protocol version `1`. Plugin `plugin.protocol` must equal it; incompatib
 | Events durable and in the decoder history | done (JetStream `EVENTS`, stored by the worker) |
 | Process-group kill on stop / crash | done |
 | Admin API in `superhet-api` (`docs/api-plugins.md`) | done |
-| First plugins: POCSAG/FLEX, APRS, rtl_433 (`docs/plugins-decoders.md`), bundled in the image and installed on first start | done |
+| First plugins: POCSAG/FLEX, APRS, rtl_433 (`docs/plugins-decoders.md`), DAB/DAB+ (`docs/plugins-dab.md`), bundled in the image and installed on first start | done |
 | Web UI (admin console, VFO picker, events) | done, `docs/plugins-ui.md` |
 | Container plugins, install from Git URL, resource limits | not yet (P3) |
 
@@ -197,9 +197,36 @@ ends the session.
 | 6 `voice_frame` | plugin to host | `u8 codec_len | codec | u64 call_id | u64 timestamp_ns` + codec bytes |
 | 7 `log` | plugin to host | UTF-8 text |
 | 8 `heartbeat` | both | empty |
+| 9 `status` | plugin to host | JSON object: the plugin's complete current state (replaces the previous one, at most 256 KiB) |
+| 10 `media` | plugin to host | `u8 key_len | key | u8 mime_len | mime | bytes`; key `[a-z0-9._-]` up to 64, at most 256 KiB, the host keeps the latest object per key (16 keys) |
+| 11 `tune` | plugin to host | JSON `{"freq_hz":N}`: an exclusive plugin with `center_hz_min/max` moves its claimed window |
 
-Implemented and tested as `framed::{encode, FrameDecoder, SamplesHeader, VoiceFrameHeader}`; the
-host does not run framed plugins yet.
+Implemented and tested as `framed::{encode, FrameDecoder, SamplesHeader, MediaHeader, VoiceFrameHeader}`
+and run by the host (`crates/superhet-pluginhost/src/framed_session.rs`, end-to-end test
+`tests/framed.rs` with a fake plugin).
+
+Session (ADR-0016):
+
+- The host creates a Unix socket in a private directory (`$TMPDIR/superhet-plugin-<instance>-<rand>/`, mode
+  0700), passes it in `SUPERHET_SOCKET`, accepts one connection (20 s) and sends its `hello`; the
+  plugin answers with its own within 10 s and must speak protocol 1. `stdin` stays open and idle: the
+  host closes it (and the socket) to ask the plugin to end, so the plugin should exit on either.
+- Input arrives in `samples` frames, never on `stdin`. `seq` counts frames from 0 and jumps over
+  chunks the host had to drop (`input_dropped`), so a plugin sees losses; `tuning_epoch` counts the
+  retunes the plugin requested (`tune`). Input starts after the hello, so nothing is dropped while
+  the plugin starts.
+- Every frame from the plugin counts as activity for the watchdog (`heartbeat_timeout_s`, default 15 s
+  for framed plugins); the host sends a `heartbeat` every 5 s. A closed socket, a malformed frame or
+  a host-only kind (`hello` twice, `samples`, `control`) ends the session and counts as a crash.
+- `event` frames carry the same JSON as stdout lines (validated against `events_schema`). `audio`
+  frames carry PCM s16le at `[output.audio]` (only 48000 Hz is supported by the host's Opus
+  publisher); the host publishes Opus on the audio subject of the pseudo VFO
+  `InstanceInfo.audio_vfo` (`docs/protocol-audio.md`).
+- `tune`: allowed only for exclusive plugins with a centre range, inside it; the host moves the claim
+  (`ctl.claim.acquire` with the new centre, which the daemon applies for the holder), updates
+  `InstanceInfo.freq_hz` and stores it, so a host restart brings the instance back on that frequency.
+  Anything else is logged and ignored.
+- `status` and `media` are cleared when the session ends.
 
 ## Lifecycle and supervision
 
@@ -241,12 +268,15 @@ Request/reply JSON on `sh.v1.plugin.ctl.<cmd>`. Requests carry `"v":1`; replies 
 | `start` | `{"v":1,"plugin_id":"...","device":"dev0","vfo":1,"freq_hz":144800000,"config":{...}}` | `{"instance":InstanceInfo}`; `invalid` for a binding that does not fit the plugin, `unsupported` for framed / container / ui plugins, `conflict` for a second exclusive claim on a device |
 | `stop` | `{"v":1,"id":"..."}` | `{"instance":InstanceInfo}` with state `stopped`; the instance is gone afterwards |
 | `restart` | `{"v":1,"id":"..."}` | `{"instance":InstanceInfo}`; only for state `error` (`conflict` otherwise) |
+| `control` | `{"v":1,"id":"...","message":{...}}` | `{}`; the object is sent to a framed plugin as a `control` frame (`conflict` while it has no session, `invalid` for a non-object or more than 64 KiB) |
+| `status` | `{"v":1,"id":"..."}` | `{"plugin_id","device","state","freq_hz","audio_vfo","status":{...}\|null,"updated_unix_ms","media":[{"key","mime","size","revision"}]}` |
+| `media` | `{"v":1,"id":"...","key":"slide.d210"}` | success: one line of JSON (`ok`, `key`, `mime`, `revision`), a newline, the object bytes; failure: the usual JSON error reply |
 
 Every state change of an instance is also published as `InstanceInfo` JSON on
 `sh.v1.plugin.state` (core NATS). `InstanceInfo`: `id`, `plugin_id`, `device`, `vfo`, `freq_hz`,
 `config`, `exclusive`, `state`, `pid`, `restarts`, `crashes_in_window`, `retry_in_ms`,
-`last_error`, `events_ok`, `events_invalid`, `input_dropped`, `input_error`, `updated_unix_ms`
-(`schema/instance-info.schema.json`).
+`last_error`, `events_ok`, `events_invalid`, `input_dropped`, `input_error`, `audio_vfo`
+(plugins with `[output.audio]`), `updated_unix_ms` (`schema/instance-info.schema.json`).
 
 The API edge (`docs/api-plugins.md`) is the only caller in production: install and remove are
 `admin`, listing plugins and start / stop / restart are `operator` or `admin` (ROADMAP P2
@@ -254,7 +284,7 @@ criterion 8), declared in `access::RULES`, every change audited.
 
 NATS permissions (`deploy/nats/nats.conf`): the `pluginhost` user subscribes to
 `sh.v1.plugin.ctl.>` and `sh.v1.dev.*.tap.>`, publishes `sh.v1.events.>`, `sh.v1.plugin.state`,
-`sh.v1.dev.*.ctl.tap.>` and `sh.v1.dev.*.ctl.claim.>` and uses JetStream (`$JS.API.>`). The `api`
+`sh.v1.dev.*.ctl.tap.>`, `sh.v1.dev.*.ctl.claim.>` and `sh.v1.dev.*.audio.>` (plugin audio) and uses JetStream (`$JS.API.>`). The `api`
 user publishes `sh.v1.plugin.ctl.>`; the `worker` user consumes the `EVENTS` stream. Existing
 copies of `nats.conf` need the changed `pluginhost` entry.
 

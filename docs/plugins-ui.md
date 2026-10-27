@@ -57,6 +57,10 @@ collapsed (remembered per browser). On phones the Decoders tab has its own butto
 A refused start (conflict, invalid config, unknown VFO, host down) stays in the dialog with the
 server's message.
 
+## DAB tab (`docs/plugins-dab.md`)
+
+The tab "DAB" (operators, admins; everybody who sees the decoder history, read-only) belongs to the bundled DAB plugin. Idle: block picker and **Start DAB...**, which opens a takeover confirmation (the plugin takes the whole device, other receivers are paused, nobody can retune until it is stopped). Running: state and signal badges (SNR), the ensemble on the block, a block picker with **Tune** and **Scan all blocks**, the ensembles found (live scan results plus the history of `dab.ensemble` events, click to tune), the service list with a play button per service (operators), "Now playing" with the station text (DLS) and the slideshow image, **Enable audio** (browsers need a click) and a Listen switch for the DAB stream. A scan shows its progress with **Stop scan**. Clicking a DAB block in the channel plan opens this tab with the confirmation (or tunes the running instance). The panel follows the instance named by the plugin's claim on the device, so listeners find it without listing instances.
+
 ## Events
 
 The log shows plugin events next to the built-in detectors (`source` = plugin id, `kind` = event

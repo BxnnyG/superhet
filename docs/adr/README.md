@@ -19,3 +19,4 @@ Format: one file per decision, `NNNN-short-title.md`, sections *Status*, *Contex
 | [0013](0013-dab-via-plugin.md) | DAB/DAB+ via plugin | accepted |
 | [0014](0014-plugin-contract-v1-and-host-supervision.md) | Plugin contract v1 and host supervision | accepted |
 | [0015](0015-plugin-wiring.md) | Plugin wiring: input taps, claims, persistence, durable events | accepted |
+| [0016](0016-dab-plugin-design.md) | DAB plugin design (addendum to 0013) | accepted |

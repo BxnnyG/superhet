@@ -22,10 +22,9 @@ Versioned JSON files in `web/src/channels/plans/`, validated at startup by `pars
 | `airband` | worldwide | A step mode, not a channel list: 118.000-136.975 MHz as 25 kHz raster and as 8.33 kHz raster (ICAO channel names 118.005, 118.010, ...), plus the 121.500 MHz guard channel | receive-only |
 
 DAB: which ensembles transmit on which block depends on the region and is not shipped. A scan
-(DAB plugin, P2) discovers them. Selecting a block sets the device centre to the block centre and
-raises the sample rate to the smallest one whose usable window (85 %) covers 1.536 MHz
-(2.048 MS/s on the list in the Source tab). It needs the operator role, opens no VFO and shows
-"DAB decoding needs the DAB plugin (coming in P2)".
+(DAB plugin, `docs/plugins-dab.md`) discovers them. Selecting a block needs the operator role and
+opens no VFO: it opens the DAB tab with the takeover confirmation and starts the DAB plugin on the
+block (the plugin claims the device at 2.048 MS/s), or, when DAB already runs, tunes it to that block.
 
 ### Sources and verification
 
