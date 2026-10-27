@@ -24,7 +24,9 @@ Errors are `{"v":1,"ok":false,"code":"...","error":"..."}`: `invalid` 400 (also 
 ## Plugins
 
 `GET /api/v1/plugins` – `{"v":1,"ok":true,"plugins":[{"manifest":{...}}]}`, the active (highest)
-version of every installed plugin with its full manifest (`schema/manifest.schema.json`).
+version of every installed plugin with its full manifest (`schema/manifest.schema.json`). The
+image brings POCSAG/FLEX, APRS and rtl_433 (`docs/plugins-decoders.md`); the host installs them on
+its first start, so they are listed without any install call.
 
 `POST /api/v1/plugins` `{"path":"/dir/with/plugin.toml"}` – install a plugin from a directory
 **on the host running the plugin host** (inside its container: a mounted volume). The host

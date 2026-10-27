@@ -1,0 +1,41 @@
+# Opt-in override: run superhet-api on the host network so it sees the real client addresses.
+#
+# Why: with a published port Docker may hand connections to superhet-api through its userland
+# proxy / NAT, and the API then sees the bridge gateway (for example 172.22.0.1) for everybody.
+# On the host network the TCP peer is the real client. Background and alternatives:
+# docs/client-addresses.md
+#
+# Use (next to compose.yaml and .env; keeps working across `install.sh --update`, which only
+# replaces compose.yaml):
+#   echo 'COMPOSE_FILE=compose.yaml:compose.hostnet.yaml' >> .env
+#   docker compose up -d
+# Undo: remove that line from .env and run `docker compose up -d` again.
+#
+# Trade-offs:
+#   - superhet-api binds the host port directly (SUPERHET_PORT, default 8073) on all interfaces;
+#     there is no Docker network between it and the LAN. Firewall it like any host service.
+#   - It reaches PostgreSQL and NATS through loopback-only host ports (127.0.0.1:15432 and
+#     127.0.0.1:14222). Both are password protected, but any local user of the host can try them.
+#   - Linux only (Docker Desktop on macOS/Windows has no real host networking).
+#   - Needs Docker Compose >= 2.24 (`!reset`).
+
+services:
+  # Published ports only work on a network with outside connectivity, hence `edge` as well.
+  postgres:
+    networks: [backend, edge]
+    ports:
+      - "127.0.0.1:${SUPERHET_HOSTNET_PG_PORT:-15432}:5432"
+  nats:
+    networks: [backend, edge]
+    ports:
+      - "127.0.0.1:${SUPERHET_HOSTNET_NATS_PORT:-14222}:4222"
+  superhet-api:
+    network_mode: host
+    networks: !reset null
+    ports: !reset []
+    environment:
+      SUPERHET_DATABASE_URL: postgres://superhet:${POSTGRES_PASSWORD}@127.0.0.1:${SUPERHET_HOSTNET_PG_PORT:-15432}/superhet
+      SUPERHET_NATS_URL: nats://127.0.0.1:${SUPERHET_HOSTNET_NATS_PORT:-14222}
+      SUPERHET_LISTEN: 0.0.0.0:${SUPERHET_PORT:-8073}
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/${SUPERHET_PORT:-8073} && printf 'GET /readyz HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]

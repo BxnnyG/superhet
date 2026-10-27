@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rtl_433 events",
+  "description": "Validated against the complete event object (envelope included). The fields of a reading are whatever rtl_433 decodes for that model (temperature_C, humidity, ...), so only model and summary are fixed.",
+  "oneOf": [
+    {
+      "properties": {
+        "type": { "const": "rtl433.reading" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "model": { "type": "string", "minLength": 1 },
+            "summary": { "type": "string" }
+          },
+          "required": ["model", "summary"]
+        }
+      },
+      "required": ["type", "data"]
+    }
+  ]
+}

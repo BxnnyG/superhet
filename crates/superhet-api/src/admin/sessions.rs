@@ -17,8 +17,10 @@ use super::{AdminState, bad, not_found};
 use crate::access::{Actor, Principal};
 use crate::audit::store_ip;
 use crate::auth::{Reply, db_failed, flatten, guard_origin, json_reply, token};
+use crate::clientinfo::Subject;
 use crate::devices::ctl_state;
 use crate::registry::ConnInfo;
+use crate::settings::IpMode;
 
 /// VFOs of every known device, grouped by owner string.
 async fn vfos_by_owner(state: &AdminState) -> HashMap<String, Vec<Value>> {
@@ -56,32 +58,63 @@ fn conns_json(conns: &[ConnInfo]) -> Value {
     )
 }
 
+/// Merge the enrichment of `subjects` into the matching `rows`.
+async fn enrich(state: &AdminState, rows: &mut [Value], subjects: &[Subject]) {
+    let info = state.auth.enricher().describe(subjects).await;
+    for (row, info) in rows.iter_mut().zip(info) {
+        if let Value::Object(map) = row {
+            map.extend(info);
+        }
+    }
+}
+
+/// The subject to enrich for an address already shown with `mode` applied.
+fn subject(ip: Option<&str>, peer: Option<&str>, agent: Option<&str>, mode: IpMode) -> Subject {
+    Subject {
+        ip: ip.and_then(|v| v.parse().ok()),
+        peer: peer.and_then(|v| v.parse().ok()),
+        user_agent: agent.map(str::to_owned),
+        precise: mode == IpMode::Full,
+    }
+}
+
 fn user_session_json(
     s: &SessionInfo,
     state: &AdminState,
-    ip_mode: crate::settings::IpMode,
+    ip_mode: IpMode,
     vfos: &HashMap<String, Vec<Value>>,
     current: Option<&str>,
-) -> Value {
+) -> (Value, Subject) {
     let key = token::hex(&s.id);
-    let ip =
-        s.ip.as_deref()
+    let shown = |text: &Option<String>| {
+        text.as_deref()
             .and_then(|ip| ip.parse().ok())
-            .and_then(|ip| store_ip(Some(ip), ip_mode));
-    json!({
+            .and_then(|ip| store_ip(Some(ip), ip_mode))
+    };
+    let ip = shown(&s.ip);
+    let peer = shown(&s.peer_ip);
+    let subject = subject(
+        ip.as_deref(),
+        peer.as_deref(),
+        s.user_agent.as_deref(),
+        ip_mode,
+    );
+    let row = json!({
         "sid": format!("u.{key}"),
         "kind": "user",
         "user_id": s.user_id,
         "username": s.username,
         "role": s.role.as_str(),
         "ip": ip,
+        "peer_addr": peer,
         "user_agent": s.user_agent,
         "created_at_ms": s.created_at_ms,
         "last_seen_ms": s.last_seen_ms,
         "current": current == Some(key.as_str()),
         "connections": conns_json(&state.auth.registry().connections_of(&key)),
         "vfos": vfos.get(&format!("u:{}", s.user_id)).cloned().unwrap_or_default(),
-    })
+    });
+    (row, subject)
 }
 
 pub(super) async fn list(State(state): State<AdminState>) -> Response {
@@ -95,16 +128,25 @@ async fn list_inner(state: &AdminState) -> Reply {
         .await
         .map_err(db_failed)?;
     let vfos = vfos_by_owner(state).await;
-    let mut rows: Vec<Value> = sessions
+    let (mut rows, mut subjects): (Vec<Value>, Vec<Subject>) = sessions
         .iter()
         .map(|s| user_session_json(s, state, settings.ip_mode_user, &vfos, None))
-        .collect();
+        .unzip();
     for (guest, idle_secs) in state.auth.registry().guests() {
+        let ip = store_ip(guest.ip, settings.ip_mode_guest);
+        let peer = store_ip(guest.peer, settings.ip_mode_guest);
+        subjects.push(subject(
+            ip.as_deref(),
+            peer.as_deref(),
+            guest.user_agent.as_deref(),
+            settings.ip_mode_guest,
+        ));
         rows.push(json!({
             "sid": format!("g.{}", guest.id),
             "kind": "guest",
             "role": "listener",
-            "ip": store_ip(guest.ip, settings.ip_mode_guest),
+            "ip": ip,
+            "peer_addr": peer,
             "user_agent": guest.user_agent,
             "created_at_ms": guest.created_ms,
             "idle_secs": idle_secs,
@@ -112,6 +154,7 @@ async fn list_inner(state: &AdminState) -> Reply {
             "vfos": vfos.get(&format!("g:{}", guest.id)).cloned().unwrap_or_default(),
         }));
     }
+    enrich(state, &mut rows, &subjects).await;
     Ok(json_reply(StatusCode::OK, &json!({"sessions": rows})))
 }
 
@@ -191,16 +234,11 @@ async fn mine_inner(state: &AdminState, me: &Principal) -> Reply {
         .await
         .map_err(db_failed)?;
     let none = HashMap::new();
-    let rows: Vec<Value> = sessions
+    let (mut rows, subjects): (Vec<Value>, Vec<Subject>) = sessions
         .iter()
         .map(|s| {
-            let mut row = user_session_json(
-                s,
-                state,
-                crate::settings::IpMode::Full,
-                &none,
-                Some(&me.session_key),
-            );
+            let (mut row, subject) =
+                user_session_json(s, state, IpMode::Full, &none, Some(&me.session_key));
             // Other people's connection details are not needed here; keep it to the basics.
             if let Some(obj) = row.as_object_mut() {
                 obj.remove("connections");
@@ -208,9 +246,10 @@ async fn mine_inner(state: &AdminState, me: &Principal) -> Reply {
                 obj.remove("user_id");
                 obj.remove("role");
             }
-            row
+            (row, subject)
         })
-        .collect();
+        .unzip();
+    enrich(state, &mut rows, &subjects).await;
     Ok(json_reply(StatusCode::OK, &json!({"sessions": rows})))
 }
 

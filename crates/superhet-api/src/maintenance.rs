@@ -22,6 +22,8 @@ fn guest_who(guest: &GuestSession) -> Who {
         name: Some("guest".to_owned()),
         role: Some(superhet_db::users::Role::Listener),
         ip: guest.ip,
+        peer: guest.peer,
+        via: Vec::new(),
         user_agent: guest.user_agent.clone(),
     }
 }

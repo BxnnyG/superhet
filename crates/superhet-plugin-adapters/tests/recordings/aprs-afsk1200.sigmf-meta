@@ -1,0 +1,18 @@
+{
+  "global": {
+    "core:datatype": "ri16_le",
+    "core:sample_rate": 22050,
+    "core:version": "1.2.0",
+    "core:description": "Synthetic APRS AX.25 UI frames, Bell 202 AFSK 1200 baud (NFM audio)",
+    "core:author": "BxnnyG",
+    "core:license": "CC0-1.0",
+    "core:recorder": "scripts/gen-plugin-recordings.py"
+  },
+  "captures": [
+    {
+      "core:sample_start": 0,
+      "core:frequency": 144800000
+    }
+  ],
+  "annotations": []
+}

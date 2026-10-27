@@ -14,6 +14,7 @@ fn ev(kind: &str, id: &str, name: &str, action: &str) -> NewEvent {
         actor_name: Some(name.into()),
         role: Some("listener".into()),
         ip: Some("203.0.113.0".into()),
+        peer_ip: Some("172.22.0.1".into()),
         user_agent: Some("ua".into()),
         action: action.into(),
         target: Some("dev0".into()),

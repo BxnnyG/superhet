@@ -1,7 +1,8 @@
 //! Superhet plugin host (supervises out-of-process plugins). Port 8075 by default (health only).
 //!
 //! Plugins live in `SUPERHET_PLUGIN_DIR` (default `/data/plugins`). The control API is served on
-//! the bus (`sh.v1.plugin.ctl.<cmd>`, `docs/plugin-contract.md`). With `SUPERHET_DATABASE_URL`
+//! the bus (`sh.v1.plugin.ctl.<cmd>`, `docs/plugin-contract.md`); plugins shipped with the image
+//! (`SUPERHET_BUNDLED_PLUGIN_DIR`) are installed once at start. With `SUPERHET_DATABASE_URL`
 //! started instances are stored and come back after a restart.
 
 use std::net::SocketAddr;
@@ -20,6 +21,8 @@ use tracing_subscriber::EnvFilter;
 const DEFAULT_LISTEN: &str = "0.0.0.0:8075";
 /// Default plugin directory; override with `SUPERHET_PLUGIN_DIR`.
 const DEFAULT_PLUGIN_DIR: &str = "/data/plugins";
+/// Plugins shipped with the image; override with `SUPERHET_BUNDLED_PLUGIN_DIR`.
+const DEFAULT_BUNDLED_DIR: &str = "/usr/share/superhet/plugins";
 /// Events buffered between the supervisor and the bus publisher.
 const EVENT_QUEUE: usize = 4096;
 
@@ -41,6 +44,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("SUPERHET_PLUGIN_DIR").unwrap_or_else(|_| DEFAULT_PLUGIN_DIR.to_owned()),
     );
     let registry = Arc::new(Registry::open(&plugin_dir)?);
+    let bundled = PathBuf::from(
+        std::env::var("SUPERHET_BUNDLED_PLUGIN_DIR")
+            .unwrap_or_else(|_| DEFAULT_BUNDLED_DIR.to_owned()),
+    );
+    if let Err(err) = registry.seed_bundled(&bundled) {
+        tracing::warn!(%err, dir = %bundled.display(), "could not install bundled plugins");
+    }
     tracing::info!(dir = %plugin_dir.display(), plugins = registry.list().len(), "plugin registry loaded");
 
     let db = superhet_db::connect_from_env().await?;

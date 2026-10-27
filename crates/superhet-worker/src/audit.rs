@@ -46,6 +46,7 @@ pub fn to_row(event: SystemEvent) -> NewEvent {
         actor_name: Some(event.source),
         role: None,
         ip: None,
+        peer_ip: None,
         user_agent: None,
         action: event.action,
         target: event.target,

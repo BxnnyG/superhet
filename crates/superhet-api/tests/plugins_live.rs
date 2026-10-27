@@ -67,6 +67,11 @@ fn spawn_pluginhost(nats: &str, db: &str, plugin_dir: &Path) -> Proc {
     )
 }
 
+/// Both tests start a plugin host on the same NATS server. The hosts answer the same
+/// unqueued control subjects, so a request could be answered by the other test's host;
+/// run the tests one at a time.
+static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Poll `f` until it returns `Some`.
 async fn eventually<T>(what: &str, secs: u64, mut f: impl FnMut() -> Option<T>) -> T {
     let deadline = Instant::now() + Duration::from_secs(secs);
@@ -96,6 +101,7 @@ fn events(port: u16, cookie: &str, query: &str) -> Vec<Value> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn example_echo_on_a_vfo_reaches_the_decoder_history() {
+    let _serial = SERIAL.lock().await;
     let (Ok(nats_url), true) = (std::env::var("SUPERHET_TEST_NATS_URL"), python_available()) else {
         eprintln!("SUPERHET_TEST_NATS_URL not set or python3 missing; skipping");
         return;
@@ -409,6 +415,7 @@ async fn device_state(client: &async_nats::Client, device: &str) -> Value {
 /// window and the previous tuning returns when the instance stops.
 #[tokio::test(flavor = "multi_thread")]
 async fn exclusive_plugin_claims_the_device_and_receives_the_window() {
+    let _serial = SERIAL.lock().await;
     let Ok(nats_url) = std::env::var("SUPERHET_TEST_NATS_URL") else {
         eprintln!("SUPERHET_TEST_NATS_URL not set; skipping");
         return;

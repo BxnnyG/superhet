@@ -32,4 +32,4 @@ Superhet is a single-user, self-hosted web SDR that is reachable over the networ
 - Losing the database loses the admin account; recovery is "wipe the volume, run setup again". A CLI `reset-password` can follow if needed.
 - A forgotten setup token is recoverable from the container log; operators who ship logs elsewhere should treat that log line as sensitive until setup is done.
 - There is no multi-user model, roles or API tokens. OIDC (P5) adds identities in a separate table that map to the local user; the local admin stays as fallback and can then be disabled. Per-device or per-feature authorisation is out of scope until there is more than one user.
-- Rate limiting by address is only as good as the address api sees; behind a proxy without `SUPERHET_TRUST_PROXY=true` all clients share the proxy's address.
+- Rate limiting by address is only as good as the address api sees (`SUPERHET_TRUSTED_PROXIES` now limits header trust to listed proxies and a peer address is kept next to the client address, `docs/client-addresses.md`); behind a proxy without `SUPERHET_TRUST_PROXY=true` all clients share the proxy's address.

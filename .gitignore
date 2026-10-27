@@ -5,6 +5,8 @@ web/test-results/
 web/playwright-report/
 .env
 *.sigmf-data
+# ... except the small synthetic reference recordings of the decoder plugin golden tests
+!/crates/superhet-plugin-adapters/tests/recordings/*.sigmf-data
 /data/
 /dist/
 

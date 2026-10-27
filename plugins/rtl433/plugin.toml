@@ -1,0 +1,31 @@
+# ISM-band sensors (433.92, 868 MHz, ...), decoded by rtl_433 (a separate GPL-2.0 process).
+# Bind it to a wide VFO (set the VFO bandwidth to about 250 kHz) on the sensor band; rtl_433 needs
+# the whole signal, so a narrow VFO misses wideband FSK sensors. Config (optional):
+#   protocols = [19, 20]   # rtl_433 protocol numbers (rtl_433 -R help); default: its standard set
+
+[plugin]
+id = "org.superhet.decoder.rtl433"
+name = "ISM sensors (rtl_433)"
+version = "0.1.0"
+protocol = 1
+license = "AGPL-3.0-only"
+type = "decoder"
+description = "Decodes weather stations, thermometers, TPMS, remotes and other ISM-band devices with rtl_433"
+homepage = "https://github.com/BxnnyG/superhet"
+
+[runtime]
+kind = "process"
+transport = "simple"
+command = ["superhet-plugin-adapter", "rtl433"]
+
+[input]
+kind = "iq"
+sample_rate = 250000
+format = "cu8"
+bandwidth_hz = 250000
+
+[output]
+events_schema = "schema/events.json"
+
+[install]
+acknowledge = { text = "Runs rtl_433 (GPL-2.0-or-later) as a separate process. Neighbours' weather stations, tyre-pressure sensors and similar devices send identifiers that can be linked to a person or vehicle; decoded readings are kept in the decoder history until the retention period ends.", url = "https://github.com/merbanan/rtl_433" }

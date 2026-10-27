@@ -1,0 +1,4 @@
+{"data":{"address":1234567,"baud":1200,"function":3,"kind":"alpha","message":"Superhet POCSAG test 1","protocol":"pocsag","summary":"1234567: Superhet POCSAG test 1"},"type":"pocsag.message"}
+{"data":{"address":2000001,"baud":512,"function":0,"kind":"numeric","message":"0123456789 -","protocol":"pocsag","summary":"2000001: 0123456789 -"},"type":"pocsag.message"}
+{"data":{"address":1000,"baud":2400,"function":3,"kind":"alpha","message":"Fire alarm, test only","protocol":"pocsag","summary":"1000: Fire alarm, test only"},"type":"pocsag.message"}
+{"data":{"address":1234567,"baud":1200,"function":0,"kind":"numeric","message":"112233","protocol":"pocsag","summary":"1234567: 112233"},"type":"pocsag.message"}

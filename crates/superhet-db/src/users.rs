@@ -325,8 +325,10 @@ pub struct SessionInfo {
     pub last_seen_ms: i64,
     /// Stored user agent.
     pub user_agent: Option<String>,
-    /// Stored client address (as the API saw it at login).
+    /// Stored client address (as the API resolved it at login).
     pub ip: Option<String>,
+    /// Stored TCP peer address at login.
+    pub peer_ip: Option<String>,
 }
 
 /// Sessions of one user, or of everybody (`None`), newest activity first.
@@ -338,7 +340,7 @@ pub async fn list_sessions(pool: &PgPool, user_id: Option<i64>) -> Result<Vec<Se
         "SELECT s.id, s.user_id, u.username, u.role, \
                 (extract(epoch FROM s.created_at) * 1000)::bigint AS created_ms, \
                 (extract(epoch FROM s.last_seen_at) * 1000)::bigint AS seen_ms, \
-                s.user_agent, s.ip \
+                s.user_agent, s.ip, s.peer_ip \
          FROM superhet.sessions s JOIN superhet.users u ON u.id = s.user_id \
          WHERE ($1::bigint IS NULL OR s.user_id = $1) \
          ORDER BY s.last_seen_at DESC",
@@ -357,6 +359,7 @@ pub async fn list_sessions(pool: &PgPool, user_id: Option<i64>) -> Result<Vec<Se
             last_seen_ms: r.get("seen_ms"),
             user_agent: r.get("user_agent"),
             ip: r.get("ip"),
+            peer_ip: r.get("peer_ip"),
         })
         .collect())
 }

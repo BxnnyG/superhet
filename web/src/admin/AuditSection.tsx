@@ -28,6 +28,7 @@ import {
   type FilterForm,
 } from "./auditFilter";
 import { BanDialog } from "./BanDialog";
+import { ClientRows, GatewayBanner } from "./ClientInfo";
 import { Card, LoadState, RoleBadge, SectionHeader } from "./common";
 import { useLoad } from "./useLoad";
 
@@ -94,6 +95,11 @@ export function AuditSection({ api }: { api: AdminApi }) {
           </>
         }
       />
+      {events.length > 0 && (
+        <div className="mb-4">
+          <GatewayBanner infos={events.map((e) => e.client.ipInfo)} />
+        </div>
+      )}
 
       <Card className="mb-4">
         <form
@@ -389,11 +395,10 @@ function EventRows({
             <dl className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-[auto_1fr]">
               <dt className="text-fg-muted">Event</dt>
               <dd className="font-mono">#{ev.id}</dd>
-              <dt className="text-fg-muted">Browser</dt>
-              <dd className="break-all">{ev.userAgent ?? "not stored"}</dd>
+              <ClientRows ip={ev.ip} info={ev.client} userAgent={ev.userAgent} />
               {ev.ip && (
                 <>
-                  <dt className="text-fg-muted">Address</dt>
+                  <dt className="text-fg-muted">Ban</dt>
                   <dd>
                     <Button size="sm" variant="danger" onClick={() => onBan(ev)}>
                       Ban {ev.ip}…

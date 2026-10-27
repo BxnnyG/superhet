@@ -146,13 +146,31 @@ pub async fn create_session(
     user_agent: Option<&str>,
     ip: Option<&str>,
 ) -> Result<(), Error> {
+    create_session_from(pool, id, user_id, user_agent, ip, None).await
+}
+
+/// Like [`create_session`], also recording the TCP peer address (`peer`), which differs from the
+/// client address `ip` behind a reverse proxy or Docker's port forwarding.
+///
+/// # Errors
+/// Fails if the insert fails.
+pub async fn create_session_from(
+    pool: &PgPool,
+    id: &[u8],
+    user_id: i64,
+    user_agent: Option<&str>,
+    ip: Option<&str>,
+    peer: Option<&str>,
+) -> Result<(), Error> {
     sqlx::query(
-        "INSERT INTO superhet.sessions (id, user_id, user_agent, ip) VALUES ($1, $2, $3, $4)",
+        "INSERT INTO superhet.sessions (id, user_id, user_agent, ip, peer_ip) \
+         VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(id)
     .bind(user_id)
     .bind(user_agent)
     .bind(ip)
+    .bind(peer)
     .execute(pool)
     .await?;
     Ok(())

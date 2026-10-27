@@ -15,6 +15,9 @@ and exported through the admin API. Not tamper-proof evidence: see "Append-only"
 | `actor_name` | login name, `guest`, or the component; survives user deletion (replaced by `deleted-user-<id>`) |
 | `role` | `admin`, `operator`, `listener` or null |
 | `ip` | client address after the IP mode (below), null if not stored |
+| `peer_addr` | TCP peer address after the IP mode (migration 0010; null on older rows) |
+| `ip_info`, `peer_info` | computed on read from the stored value: `{class, label, family[, rdns, country, country_name, city, asn, org]}` (`class`: `loopback`, `private`, `docker_gateway`, `cgnat`, `link_local`, `multicast`, `reserved`, `public`); truncated addresses get no `rdns` and no `city` |
+| `ua_info` | parsed `user_agent`: `{browser, browser_version, os, os_version, device}` (`device`: `desktop`, `mobile`, `tablet`, `bot`, `tool`, `unknown`) |
 | `user_agent` | browser string, cut to 256 characters |
 | `action` | dotted name, see the list |
 | `target` | what was acted on (user, device, `<dev>/<vfo id>`, invite, route ...) |
@@ -79,9 +82,12 @@ Guests' addresses and user agents are personal data; the defaults are conservati
   IPv4) or `none`. It is applied **before** the row is written, per actor class (`ip_mode_user`
   for accounts, `ip_mode_guest` for guests). The rate limiter keeps the full address in memory
   only. The admin session list shows addresses in the same mode.
-- The address is the peer address of the TCP connection, or with `SUPERHET_TRUST_PROXY=true` the
-  rightmost `X-Forwarded-For` entry (the one appended by your proxy). Without that variable the
-  header is ignored, because clients could forge it.
+- `ip` is the **client address**: the TCP peer, or the address a *trusted* proxy forwarded
+  (`SUPERHET_TRUST_PROXY=true` for every peer, or `SUPERHET_TRUSTED_PROXIES` for listed networks;
+  `X-Forwarded-For` / `Forwarded` / `X-Real-IP`, see `docs/client-addresses.md`). Headers from
+  untrusted peers are ignored, because clients could forge them. `peer_addr` is always the TCP
+  peer (behind Docker port forwarding often the bridge gateway), stored with the same IP mode. A
+  forwarded chain goes into `details.forwarded`.
 - The guest page shows `guest_policy.privacy_text` (admin-editable).
 
 ## Query: `GET /api/v1/admin/audit`
@@ -103,7 +109,7 @@ Newest first. Query parameters (all optional, unknown ones are `400`):
 
 Reply: `{"events":[Event],"next_before_id":<id>|null}` where `Event` has the columns above
 (`ts_ms`, `actor_kind`, `actor_id`, `actor_name`, `role`, `ip`, `user_agent`, `action`, `target`,
-`outcome`, `details`). Pass `next_before_id` as `before_id` for the next page; it is `null` on
+`outcome`, `details`, plus `peer_addr`, `ip_info`, `peer_info`, `ua_info`). Pass `next_before_id` as `before_id` for the next page; it is `null` on
 the last page. `400` for malformed filters (`outcome=maybe`, `ip=banana`, `limit=0`).
 
 ## Export: `GET /api/v1/admin/audit/export`
@@ -111,7 +117,8 @@ the last page. `400` for malformed filters (`outcome=maybe`, `ip=banana`, `limit
 Same filters (without `limit`/`before_id` paging), plus `format=csv` (default) or `json`. Rows are
 oldest first, at most 100 000 (a truncated export sets `X-Superhet-Truncated: true`, JSON also
 `"truncated":true`). CSV columns: `id,time,actor_kind,actor_id,actor_name,role,ip,user_agent,
-action,target,outcome,details` with `time` in ISO 8601 UTC, `details` as a JSON string, CRLF
+action,target,outcome,details,peer_addr,address_type,reverse_dns,country,city,asn,as_org,browser,
+os,device` (the enrichment columns last, empty when unknown) with `time` in ISO 8601 UTC, `details` as a JSON string, CRLF
 rows and a leading apostrophe on text that a spreadsheet would run as a formula. JSON:
 `{"events":[Event],"truncated":false}`. The download is an attachment and is itself audited
 (`audit.export`).
@@ -154,4 +161,6 @@ subject, permissions in `deploy/nats/nats.conf` and the worker side are in place
 |---|---|---|
 | retention and IP modes | `PUT /api/v1/admin/audit-settings` | 90 d / 7 d, `full` / `truncated` |
 | trusted proxy header | `SUPERHET_TRUST_PROXY` (api) | off |
+| trusted proxy networks | `SUPERHET_TRUSTED_PROXIES` (api) | none |
+| reverse DNS / GeoIP | `SUPERHET_REVERSE_DNS`, `SUPERHET_GEOIP_DB` (api) | on / off |
 | daemon VFO cap | `SUPERHET_MAX_VFOS` (sdrd) | 8 |

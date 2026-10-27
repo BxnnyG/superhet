@@ -64,6 +64,15 @@ impl Cidr {
     /// # Errors
     /// A message for the admin when the text is not an address or the prefix is out of range.
     pub fn parse(text: &str) -> Result<Self, String> {
+        Self::parse_min(text, MIN_PREFIX_V4, MIN_PREFIX_V6)
+    }
+
+    /// Like [`Cidr::parse`] with caller-chosen minimum prefix lengths (the trusted-proxy list is
+    /// operator configuration and may name `fc00::/7`; bans stay limited).
+    ///
+    /// # Errors
+    /// A message when the text is not an address or network or the prefix is out of range.
+    pub fn parse_min(text: &str, min_v4: u8, min_v6: u8) -> Result<Self, String> {
         let text = text.trim();
         let (addr_text, prefix_text) = match text.split_once('/') {
             Some((a, p)) => (a, Some(p)),
@@ -93,11 +102,7 @@ impl Cidr {
             }
             other => (other, prefix),
         };
-        let min = if addr.is_ipv4() {
-            MIN_PREFIX_V4
-        } else {
-            MIN_PREFIX_V6
-        };
+        let min = if addr.is_ipv4() { min_v4 } else { min_v6 };
         if prefix < min {
             return Err(format!(
                 "too broad: networks need a prefix of at least /{min} ({})",
@@ -258,6 +263,8 @@ pub(super) async fn gate(State(auth): State<AuthState>, request: Request, next: 
             name: None,
             role: None,
             ip: Some(ip),
+            peer: client.peer,
+            via: client.chain,
             user_agent: client.user_agent,
         },
         "access.banned",

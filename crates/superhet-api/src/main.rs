@@ -8,6 +8,7 @@ mod audit;
 mod auth;
 mod bookmarks;
 mod channel_plans;
+mod clientinfo;
 mod decoder_events;
 mod devices;
 mod hub;

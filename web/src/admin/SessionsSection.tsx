@@ -1,9 +1,11 @@
 import { useCallback, useState } from "react";
-import { describeUserAgent, formatDuration, formatMhz, formatRelative } from "../format";
+import { formatDuration, formatMhz, formatRelative } from "../format";
 import { describeHttpError } from "../http";
 import { Badge, Button, ConfirmDialog, EmptyState, RefreshIcon, Toggle, toasts } from "../ui";
 import type { AdminApi, LiveSession } from "./api";
 import { BanDialog } from "./BanDialog";
+import { AddressLine, GatewayBanner } from "./ClientInfo";
+import { describeUa } from "./clientInfo";
 import { Card, LoadState, RoleBadge, SectionHeader, useNow } from "./common";
 import { useLoad } from "./useLoad";
 
@@ -62,6 +64,7 @@ export function SessionsSection({ api }: { api: AdminApi }) {
           </>
         }
       />
+      {sessions.data && <GatewayBanner infos={list.map((s) => s.client.ipInfo)} />}
       <Card title="Sessions" description={sessions.data ? `${list.length} online` : undefined}>
         <LoadState loading={sessions.loading} error={sessions.error} onRetry={sessions.reload} />
         {sessions.data && list.length === 0 && (
@@ -84,10 +87,15 @@ export function SessionsSection({ api }: { api: AdminApi }) {
                       <RoleBadge role={s.role} guest={s.kind === "guest"} />
                     </div>
                     <p className="mt-0.5 text-xs text-fg-muted">
-                      <span className="font-mono">{s.ip ?? "address not stored"}</span>
+                      <AddressLine ip={s.ip} info={s.client} />
                       {" · "}
-                      {describeUserAgent(s.userAgent)}
+                      {describeUa(s.client.uaInfo, s.userAgent)}
                     </p>
+                    {s.client.peerAddr && s.client.peerAddr !== s.ip && (
+                      <p className="text-xs text-fg-subtle">
+                        via <span className="font-mono">{s.client.peerAddr}</span>
+                      </p>
+                    )}
                     <p className="text-xs text-fg-subtle">
                       Signed in {formatRelative(s.createdAtMs, now)}
                       {s.kind === "guest" && s.idleSecs !== null

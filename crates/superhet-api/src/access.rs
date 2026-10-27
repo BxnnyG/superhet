@@ -33,8 +33,12 @@ pub struct Principal {
     pub role: Role,
     /// Key of the session (hex token hash, or `g-<id>`), used for kicks and connection lists.
     pub session_key: String,
-    /// Client address as seen by the API.
+    /// Client address: the forwarded one behind a trusted proxy, else the TCP peer.
     pub ip: Option<IpAddr>,
+    /// TCP peer address (a proxy or the Docker bridge gateway).
+    pub peer: Option<IpAddr>,
+    /// Forwarded chain reported by a trusted proxy, client side first.
+    pub via: Vec<IpAddr>,
     /// Truncated user agent.
     pub user_agent: Option<String>,
     /// The account must change its password before anything else.
@@ -76,6 +80,8 @@ impl Principal {
             name: Some(self.name.clone()),
             role: Some(self.role),
             ip: self.ip,
+            peer: self.peer,
+            via: self.via.clone(),
             user_agent: self.user_agent.clone(),
         }
     }
@@ -90,6 +96,8 @@ impl Principal {
             role,
             session_key: "test-session".into(),
             ip: None,
+            peer: None,
+            via: Vec::new(),
             user_agent: None,
             must_change_password: false,
         }
@@ -309,6 +317,8 @@ mod tests {
             role: Role::Listener,
             session_key: "g-ab12".into(),
             ip: None,
+            peer: None,
+            via: Vec::new(),
             user_agent: None,
             must_change_password: false,
         }

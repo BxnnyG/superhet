@@ -1,0 +1,29 @@
+# APRS / AX.25 packet radio (Bell 202 AFSK, 1200 baud), decoded by direwolf (a separate GPL-2.0
+# process). Bind it to an NFM VFO on 144.800 MHz (Europe) or 144.390 MHz (North America).
+
+[plugin]
+id = "org.superhet.decoder.aprs"
+name = "APRS (1200 baud)"
+version = "0.1.0"
+protocol = 1
+license = "AGPL-3.0-only"
+type = "decoder"
+description = "Decodes APRS packets with direwolf: source, destination, digipeater path, positions (plain, compressed, Mic-E), objects, messages, status"
+homepage = "https://github.com/BxnnyG/superhet"
+
+[runtime]
+kind = "process"
+transport = "simple"
+command = ["superhet-plugin-adapter", "aprs"]
+
+[input]
+kind = "discriminator"
+sample_rate = 22050
+format = "s16le"
+bandwidth_hz = 12500
+
+[output]
+events_schema = "schema/events.json"
+
+[install]
+acknowledge = { text = "Runs direwolf (GPL-2.0-or-later) as a separate process, receive only: it does not transmit and opens no network ports. APRS positions and messages are public by design but can be personal data (callsigns, locations); decoded packets are kept in the decoder history until the retention period ends.", url = "https://github.com/wb2osz/direwolf" }
