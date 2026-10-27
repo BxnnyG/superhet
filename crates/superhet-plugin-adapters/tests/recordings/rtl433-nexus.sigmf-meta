@@ -1,0 +1,18 @@
+{
+  "global": {
+    "core:datatype": "cu8",
+    "core:sample_rate": 250000,
+    "core:version": "1.2.0",
+    "core:description": "Synthetic Nexus-style OOK temperature/humidity burst, carrier at DC",
+    "core:author": "BxnnyG",
+    "core:license": "CC0-1.0",
+    "core:recorder": "scripts/gen-plugin-recordings.py"
+  },
+  "captures": [
+    {
+      "core:sample_start": 0,
+      "core:frequency": 433920000
+    }
+  ],
+  "annotations": []
+}

@@ -45,6 +45,21 @@ pub fn run_simple(
     config: &Value,
     timeout: Duration,
 ) -> std::io::Result<Report> {
+    run_simple_with_env(package, input, config, timeout, &[])
+}
+
+/// [`run_simple`] with extra environment variables for the child, e.g. a `PATH` that finds the
+/// plugin's helper binaries (tests of plugins that call a program by name).
+///
+/// # Errors
+/// I/O errors while spawning or talking to the process.
+pub fn run_simple_with_env(
+    package: &Package,
+    input: &[u8],
+    config: &Value,
+    timeout: Duration,
+    extra_env: &[(&str, &str)],
+) -> std::io::Result<Report> {
     let (program, args) = package
         .command()
         .ok_or_else(|| std::io::Error::other("manifest has no runtime.command"))?;
@@ -62,6 +77,7 @@ pub fn run_simple(
         .args(args)
         .current_dir(&package.dir)
         .envs(env.vars())
+        .envs(extra_env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

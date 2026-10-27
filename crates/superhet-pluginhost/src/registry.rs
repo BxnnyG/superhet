@@ -143,6 +143,69 @@ impl Registry {
         Ok(versions)
     }
 
+    /// Install the plugins shipped with the image from `bundled` (`<bundled>/<name>/plugin.toml`).
+    ///
+    /// Every id and version is installed at most once: a marker file `.bundled` in the plugin
+    /// directory remembers what was seeded, so a plugin an admin removed stays removed until the
+    /// image ships a new version of it. Unusable entries are logged and skipped; a missing
+    /// `bundled` directory is not an error. Returns the `id version` pairs installed now.
+    ///
+    /// # Errors
+    /// Fails when the marker file cannot be written.
+    pub fn seed_bundled(&self, bundled: &Path) -> Result<Vec<String>, RegistryError> {
+        let Ok(entries) = std::fs::read_dir(bundled) else {
+            return Ok(Vec::new());
+        };
+        let marker = self.dir.join(".bundled");
+        let mut seeded: std::collections::BTreeSet<String> = std::fs::read_to_string(&marker)
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect();
+        let before = seeded.len();
+        let mut installed = Vec::new();
+        let mut sources: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.join(superhet_plugin_protocol::manifest::MANIFEST_FILE)
+                    .is_file()
+            })
+            .collect();
+        sources.sort();
+        for source in sources {
+            let package = match Package::load(&source) {
+                Ok(package) => package,
+                Err(err) => {
+                    tracing::warn!(path = %source.display(), %err, "skipping bundled plugin");
+                    continue;
+                }
+            };
+            let meta = &package.manifest.plugin;
+            let key = format!("{} {}", meta.id, meta.version);
+            if seeded.contains(&key) {
+                continue;
+            }
+            match self.install(&source) {
+                Ok(_) => {
+                    tracing::info!(plugin = %meta.id, version = %meta.version, "installed bundled plugin");
+                    installed.push(key.clone());
+                }
+                Err(RegistryError::Exists(_)) => {}
+                Err(err) => {
+                    tracing::warn!(plugin = %meta.id, %err, "bundled plugin not installed");
+                    continue;
+                }
+            }
+            seeded.insert(key);
+        }
+        if seeded.len() != before {
+            let text: String = seeded.iter().map(|line| format!("{line}\n")).collect();
+            std::fs::write(&marker, text)?;
+        }
+        Ok(installed)
+    }
+
     /// Install the plugin directory at `source` (validated first, copied to
     /// `<dir>/<id>/<version>`). Symbolic links are refused. Build commands are not run.
     ///
