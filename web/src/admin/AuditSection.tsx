@@ -27,6 +27,7 @@ import {
   toFilter,
   type FilterForm,
 } from "./auditFilter";
+import { BanDialog } from "./BanDialog";
 import { Card, LoadState, RoleBadge, SectionHeader } from "./common";
 import { useLoad } from "./useLoad";
 
@@ -46,6 +47,7 @@ export function AuditSection({ api }: { api: AdminApi }) {
   // Cursor stack: the first page has no cursor, every further page the `before_id` of the last.
   const [cursors, setCursors] = useState<(number | undefined)[]>([undefined]);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [banning, setBanning] = useState<AuditEvent | null>(null);
   // Wide screens show the filter fields; on a phone they fold away behind a "Filters" button.
   const wide = useMediaQuery(SHELL_QUERY);
   const [fieldsOpen, setFieldsOpen] = useState<boolean | null>(null);
@@ -261,6 +263,7 @@ export function AuditSection({ api }: { api: AdminApi }) {
                     ev={ev}
                     open={expanded === ev.id}
                     onToggle={() => setExpanded(expanded === ev.id ? null : ev.id)}
+                    onBan={setBanning}
                   />
                 ))}
               </tbody>
@@ -290,6 +293,18 @@ export function AuditSection({ api }: { api: AdminApi }) {
           </div>
         </div>
       </Card>
+      {banning?.ip && (
+        <BanDialog
+          api={api}
+          target={{
+            kind: "network",
+            network: banning.ip,
+            hint: "The address as stored in the log. With the truncated address mode this is the network address (/24 for IPv4, /48 for IPv6): append the prefix, e.g. /24, to ban the whole network.",
+          }}
+          onClose={() => setBanning(null)}
+          onDone={() => undefined}
+        />
+      )}
     </div>
   );
 }
@@ -317,10 +332,12 @@ function EventRows({
   ev,
   open,
   onToggle,
+  onBan,
 }: {
   ev: AuditEvent;
   open: boolean;
   onToggle: () => void;
+  onBan: (ev: AuditEvent) => void;
 }) {
   const who = ev.actorName ?? ev.actorId ?? "—";
   return (
@@ -374,6 +391,16 @@ function EventRows({
               <dd className="font-mono">#{ev.id}</dd>
               <dt className="text-fg-muted">Browser</dt>
               <dd className="break-all">{ev.userAgent ?? "not stored"}</dd>
+              {ev.ip && (
+                <>
+                  <dt className="text-fg-muted">Address</dt>
+                  <dd>
+                    <Button size="sm" variant="danger" onClick={() => onBan(ev)}>
+                      Ban {ev.ip}…
+                    </Button>
+                  </dd>
+                </>
+              )}
               <dt className="text-fg-muted">Details</dt>
               <dd>
                 <pre className="font-mono whitespace-pre-wrap break-all">

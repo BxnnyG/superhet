@@ -3,6 +3,7 @@ import { describeUserAgent, formatDuration, formatMhz, formatRelative } from "..
 import { describeHttpError } from "../http";
 import { Badge, Button, ConfirmDialog, EmptyState, RefreshIcon, Toggle, toasts } from "../ui";
 import type { AdminApi, LiveSession } from "./api";
+import { BanDialog } from "./BanDialog";
 import { Card, LoadState, RoleBadge, SectionHeader, useNow } from "./common";
 import { useLoad } from "./useLoad";
 
@@ -24,6 +25,7 @@ export function SessionsSection({ api }: { api: AdminApi }) {
   const load = useCallback((s: AbortSignal) => api.listSessions(s), [api]);
   const sessions = useLoad(load, auto ? REFRESH_MS : 0);
   const [kicking, setKicking] = useState<LiveSession | null>(null);
+  const [banning, setBanning] = useState<LiveSession | null>(null);
   const [busy, setBusy] = useState(false);
   const now = useNow(5000);
 
@@ -95,9 +97,14 @@ export function SessionsSection({ api }: { api: AdminApi }) {
                           : ""}
                     </p>
                   </div>
-                  <Button size="sm" variant="danger" onClick={() => setKicking(s)}>
-                    Kick
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="danger" onClick={() => setKicking(s)}>
+                      Kick
+                    </Button>
+                    <Button size="sm" variant="danger" onClick={() => setBanning(s)}>
+                      Kick and ban
+                    </Button>
+                  </div>
                 </div>
                 <div className="flex flex-wrap gap-1.5" aria-label="Open connections">
                   {s.connections.length === 0 && (
@@ -133,6 +140,14 @@ export function SessionsSection({ api }: { api: AdminApi }) {
           </ul>
         )}
       </Card>
+      {banning && (
+        <BanDialog
+          api={api}
+          target={{ kind: "session", sid: banning.sid, label: sessionLabel(banning) }}
+          onClose={() => setBanning(null)}
+          onDone={sessions.reload}
+        />
+      )}
       {kicking && (
         <ConfirmDialog
           title={`Sign out ${sessionLabel(kicking)}?`}
