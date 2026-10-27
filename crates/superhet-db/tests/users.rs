@@ -412,6 +412,7 @@ fn event(kind: &str, id: Option<String>, name: Option<&str>, action: &str) -> au
         actor_name: name.map(Into::into),
         role: None,
         ip: None,
+        peer_ip: None,
         user_agent: None,
         action: action.into(),
         target: None,

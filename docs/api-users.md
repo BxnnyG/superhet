@@ -117,7 +117,8 @@ guest.
 "last_seen_ms","connections":[{"kind":"spectrum|audio|state|events","device","since_ms"}],
 "vfos":[{"device","id","freq_hz","mode","status"}]}` for accounts and
 `{"sid":"g.<id>","kind":"guest","role":"listener","ip","user_agent","created_at_ms","idle_secs",
-"connections":[...],"vfos":[...]}` for guests. `ip` follows the audit IP mode of the actor class
+"connections":[...],"vfos":[...]}` for guests, each with `peer_addr`, `ip_info`, `peer_info` and `ua_info` (see
+`docs/api-audit.md`, `docs/client-addresses.md`). `ip` follows the audit IP mode of the actor class
 (`docs/api-audit.md`), so guests show up truncated by default. `vfos` are the channels the
 session's owner has on the devices the API has seen.
 
@@ -132,8 +133,9 @@ authentication, so a banned address cannot log in, enter as guest, preview an in
 setup or open a WebSocket, even with a valid session cookie. Such a request gets `403
 {"error":"banned","message","expires_at_ms"}` (the deadline, `null` for permanent; the reason is
 never shown). `/healthz`, `/readyz` and the static web UI are not gated, so a banned visitor sees
-the explanation instead of a blank page. The client address is the socket peer, or the rightmost
-`X-Forwarded-For` entry when `SUPERHET_TRUST_PROXY` is on (IPv4-mapped IPv6 is folded to IPv4).
+the explanation instead of a blank page. The client address is the one described in
+`docs/client-addresses.md`: the socket peer, or the address a trusted proxy forwarded
+(`SUPERHET_TRUST_PROXY`, `SUPERHET_TRUSTED_PROXIES`; IPv4-mapped IPv6 is folded to IPv4).
 The active bans are cached in memory and rebuilt from the database at start; an expiry applies
 to the next request.
 
@@ -163,7 +165,7 @@ address, so the console asks which network to ban).
 
 Role `listener` and up (not guests):
 
-- `GET /api/v1/me/sessions` -> `{"sessions":[{"sid","ip","user_agent","created_at_ms",
+- `GET /api/v1/me/sessions` -> `{"sessions":[{"sid","ip","peer_addr","ip_info","ua_info","user_agent","created_at_ms",
   "last_seen_ms","current"}]}`.
 - `DELETE /api/v1/me/sessions/{sid}` -> `204`, `404` (not yours). Revoking the current session logs
   out. Audited as `session.revoke`.

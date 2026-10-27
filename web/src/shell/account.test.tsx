@@ -98,3 +98,31 @@ it("my sessions lists the devices and revokes another one", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
   await waitFor(() => expect(api.revoke).toHaveBeenCalledWith("s-phone"));
 });
+
+function openAccountMenu(value: ReturnType<typeof authValue>) {
+  mount(value);
+  fireEvent.click(screen.getByTestId("account-button"));
+  return screen.getByRole("dialog", { name: "Account" });
+}
+
+it("shows a visible account button in the top bar with name and role", () => {
+  mount(authValue(accountStatus("admin", "root", 1)));
+  const button = screen.getByTestId("account-button");
+  expect(button).toHaveTextContent("root");
+  expect(button).toHaveTextContent("Admin");
+});
+
+it("the account menu offers the admin console to admins and closes on use", () => {
+  const menu = openAccountMenu(authValue(accountStatus("admin", "root", 1)));
+  expect(within(menu).getByTestId("account-menu-user")).toHaveTextContent("root");
+  expect(within(menu).getByRole("button", { name: "My sessions" })).toBeInTheDocument();
+  expect(within(menu).getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+  fireEvent.click(within(menu).getByRole("button", { name: "Admin console" }));
+  expect(screen.queryByRole("dialog", { name: "Account" })).toBeNull();
+});
+
+it("the account menu has no admin entry for operators", () => {
+  const menu = openAccountMenu(authValue(accountStatus("operator", "op", 2)));
+  expect(within(menu).queryByRole("button", { name: "Admin console" })).toBeNull();
+  expect(within(menu).getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+});

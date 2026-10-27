@@ -25,8 +25,10 @@ pub struct NewEvent {
     pub actor_name: Option<String>,
     /// Role at the time (`admin`, `operator`, `listener`).
     pub role: Option<String>,
-    /// Client address, already truncated per the IP mode.
+    /// Client address (resolved behind a trusted proxy), already truncated per the IP mode.
     pub ip: Option<String>,
+    /// TCP peer address, already truncated per the IP mode.
+    pub peer_ip: Option<String>,
     /// Truncated user agent.
     pub user_agent: Option<String>,
     /// Dotted action name.
@@ -63,6 +65,7 @@ impl Event {
             "actor_name": d.actor_name,
             "role": d.role,
             "ip": d.ip,
+            "peer_addr": d.peer_ip,
             "user_agent": d.user_agent,
             "action": d.action,
             "target": d.target,
@@ -79,10 +82,10 @@ impl Event {
 pub async fn insert(pool: &PgPool, event: &NewEvent) -> Result<i64, Error> {
     let row = sqlx::query(
         "INSERT INTO superhet.audit_events \
-            (ts, actor_kind, actor_id, actor_name, role, ip, user_agent, action, target, \
-             outcome, details) \
+            (ts, actor_kind, actor_id, actor_name, role, ip, peer_ip, user_agent, action, \
+             target, outcome, details) \
          VALUES (coalesce(to_timestamp($1::double precision / 1000.0), now()), $2, $3, $4, $5, \
-                 $6::text::inet, $7, $8, $9, $10, $11) \
+                 $6::text::inet, $7::text::inet, $8, $9, $10, $11, $12) \
          RETURNING id",
     )
     .bind(event.ts_ms)
@@ -91,6 +94,7 @@ pub async fn insert(pool: &PgPool, event: &NewEvent) -> Result<i64, Error> {
     .bind(&event.actor_name)
     .bind(&event.role)
     .bind(&event.ip)
+    .bind(&event.peer_ip)
     .bind(&event.user_agent)
     .bind(&event.action)
     .bind(&event.target)
@@ -201,6 +205,7 @@ fn event_of(row: &sqlx::postgres::PgRow) -> Event {
             actor_name: row.get("actor_name"),
             role: row.get("role"),
             ip: row.get("ip"),
+            peer_ip: row.get("peer_ip"),
             user_agent: row.get("user_agent"),
             action: row.get("action"),
             target: row.get("target"),
@@ -211,7 +216,7 @@ fn event_of(row: &sqlx::postgres::PgRow) -> Event {
 }
 
 const SELECT: &str = "SELECT id, (extract(epoch FROM ts) * 1000)::bigint AS ts_ms, actor_kind, \
-    actor_id, actor_name, role, host(ip) AS ip, user_agent, action, target, outcome, details \
+    actor_id, actor_name, role, host(ip) AS ip, host(peer_ip) AS peer_ip, user_agent, action, target, outcome, details \
     FROM superhet.audit_events WHERE true";
 
 /// Matching events, newest first. `limit` is clamped to 1..=[`MAX_PAGE`].

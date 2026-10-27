@@ -35,6 +35,8 @@ use tokio::sync::Semaphore;
 
 use crate::access::{self, Actor, Principal, Role};
 use crate::audit::Audit;
+use crate::clientinfo::Enricher;
+use crate::clientinfo::addr::{self, ProxyTrust};
 use crate::origin::OriginPolicy;
 use crate::registry::Registry;
 use crate::settings::SettingsStore;
@@ -47,6 +49,9 @@ pub const ENV_COOKIE_SECURE: &str = "SUPERHET_COOKIE_SECURE";
 /// Environment variable: trust `X-Forwarded-For` / `X-Forwarded-Proto` from a reverse proxy.
 pub const ENV_TRUST_PROXY: &str = "SUPERHET_TRUST_PROXY";
 /// Environment variable: fixed first-run setup token instead of a generated one.
+/// Environment variable: networks of trusted reverse proxies (comma or space separated).
+pub const ENV_TRUSTED_PROXIES: &str = "SUPERHET_TRUSTED_PROXIES";
+/// Environment variable: one-time setup token.
 pub const ENV_SETUP_TOKEN: &str = "SUPERHET_SETUP_TOKEN";
 
 /// Shortest accepted `SUPERHET_SETUP_TOKEN`.
@@ -101,8 +106,12 @@ impl CookieSecure {
 pub struct AuthConfig {
     /// Cookie `Secure` policy.
     pub cookie_secure: CookieSecure,
-    /// Honour `X-Forwarded-*` headers (only behind a proxy that sets them).
+    /// Honour `X-Forwarded-*` headers from every peer (only behind a proxy that sets them and
+    /// when the published port is reachable from that proxy alone).
     pub trust_proxy: bool,
+    /// Networks of reverse proxies whose forwarding headers are believed
+    /// (`SUPERHET_TRUSTED_PROXIES`); everybody else's are ignored.
+    pub trusted_proxies: Vec<bans::Cidr>,
     /// Operator-provided setup token; generated at startup when absent.
     pub setup_token: Option<String>,
     /// Failed-attempt limiter thresholds.
@@ -110,6 +119,15 @@ pub struct AuthConfig {
 }
 
 impl AuthConfig {
+    /// Which peers may speak for a client.
+    #[must_use]
+    pub fn proxy_trust(&self) -> ProxyTrust {
+        ProxyTrust {
+            all: self.trust_proxy,
+            nets: self.trusted_proxies.clone(),
+        }
+    }
+
     /// Read the `SUPERHET_COOKIE_SECURE`, `SUPERHET_TRUST_PROXY` and `SUPERHET_SETUP_TOKEN`
     /// variables.
     ///
@@ -126,6 +144,9 @@ impl AuthConfig {
                 .as_str(),
             "true" | "1" | "yes"
         );
+        let trusted_proxies =
+            ProxyTrust::parse_list(&std::env::var(ENV_TRUSTED_PROXIES).unwrap_or_default())
+                .map_err(|err| format!("{ENV_TRUSTED_PROXIES}: {err}"))?;
         let setup_token = match std::env::var(ENV_SETUP_TOKEN) {
             Ok(t) if !t.trim().is_empty() => {
                 let t = t.trim().to_owned();
@@ -141,6 +162,7 @@ impl AuthConfig {
         Ok(Self {
             cookie_secure,
             trust_proxy,
+            trusted_proxies,
             setup_token,
             limits: Limits::default(),
         })
@@ -162,6 +184,7 @@ struct Inner {
     audit: Audit,
     registry: Registry,
     bans: Arc<bans::Bans>,
+    enricher: Enricher,
 }
 
 /// Shared state of the auth layer (cheap to clone).
@@ -194,6 +217,19 @@ impl AuthState {
         origins: OriginPolicy,
         config: AuthConfig,
     ) -> Result<Self, String> {
+        Self::with_enricher(db, origins, config, Enricher::from_env())
+    }
+
+    /// Like [`AuthState::new`] with explicit enrichment sources.
+    ///
+    /// # Errors
+    /// Fails if Argon2 cannot be initialised.
+    pub fn with_enricher(
+        db: Option<PgPool>,
+        origins: OriginPolicy,
+        config: AuthConfig,
+        enricher: Enricher,
+    ) -> Result<Self, String> {
         let dummy_hash = password::hash(DUMMY_PASSWORD)?;
         let settings = Arc::new(SettingsStore::new(db.clone()));
         let audit = Audit::new(db.clone(), Arc::clone(&settings));
@@ -212,6 +248,7 @@ impl AuthState {
             audit,
             registry,
             bans: Arc::new(bans::Bans::default()),
+            enricher,
         })))
     }
 
@@ -219,7 +256,19 @@ impl AuthState {
     #[cfg(test)]
     #[must_use]
     pub fn for_tests() -> Self {
-        Self::new(None, OriginPolicy::default(), AuthConfig::default()).expect("auth state")
+        Self::with_enricher(
+            None,
+            OriginPolicy::default(),
+            AuthConfig::default(),
+            Enricher::disabled(),
+        )
+        .expect("auth state")
+    }
+
+    /// Address, user agent, reverse DNS and GeoIP enrichment for the admin views.
+    #[must_use]
+    pub fn enricher(&self) -> &Enricher {
+        &self.0.enricher
     }
 
     /// The audit writer.
@@ -345,6 +394,8 @@ impl AuthState {
                 role: session.role,
                 session_key: token::hex(&session.token_hash),
                 ip: client.ip,
+                peer: client.peer,
+                via: client.chain.clone(),
                 user_agent: client.user_agent.clone(),
                 must_change_password: session.must_change_password,
             }));
@@ -366,6 +417,8 @@ impl AuthState {
             name: "guest".to_owned(),
             role: Role::Listener,
             ip: client.ip,
+            peer: client.peer,
+            via: client.chain.clone(),
             user_agent: client.user_agent.clone(),
             must_change_password: false,
         }))
@@ -398,29 +451,21 @@ impl AuthState {
     }
 }
 
-/// Who is calling: address, user agent and whether the connection counts as https.
+/// Who is calling: addresses, user agent and whether the connection counts as https.
 #[derive(Debug, Clone)]
 pub struct ClientInfo {
+    /// The visitor's address: the forwarded one behind a trusted proxy, else the peer.
     ip: Option<IpAddr>,
+    /// The TCP peer (a proxy, or the Docker bridge gateway when no real address gets through).
+    peer: Option<IpAddr>,
+    /// Forwarded chain reported by a trusted proxy.
+    chain: Vec<IpAddr>,
     user_agent: Option<String>,
     secure: bool,
 }
 
 /// Longest stored user agent, in characters.
 const USER_AGENT_MAX: usize = 256;
-
-fn forwarded_ip(headers: &HeaderMap) -> Option<IpAddr> {
-    // The rightmost entry is the one appended by our (single, trusted) proxy.
-    headers
-        .get("x-forwarded-for")?
-        .to_str()
-        .ok()?
-        .rsplit(',')
-        .next()?
-        .trim()
-        .parse()
-        .ok()
-}
 
 fn forwarded_https(headers: &HeaderMap) -> bool {
     headers
@@ -430,12 +475,13 @@ fn forwarded_https(headers: &HeaderMap) -> bool {
         .is_some_and(|v| v.trim().eq_ignore_ascii_case("https"))
 }
 
-fn is_secure(config: &AuthConfig, headers: &HeaderMap, uri: &Uri) -> bool {
+fn is_secure(config: &AuthConfig, peer: Option<IpAddr>, headers: &HeaderMap, uri: &Uri) -> bool {
     match config.cookie_secure {
         CookieSecure::Always => true,
         CookieSecure::Never => false,
         CookieSecure::Auto => {
-            uri.scheme_str() == Some("https") || (config.trust_proxy && forwarded_https(headers))
+            uri.scheme_str() == Some("https")
+                || (config.proxy_trust().trusts(peer) && forwarded_https(headers))
         }
     }
 }
@@ -450,19 +496,17 @@ impl ClientInfo {
         let peer = extensions
             .get::<ConnectInfo<SocketAddr>>()
             .map(|c| c.0.ip());
-        let ip = if config.trust_proxy {
-            forwarded_ip(headers).or(peer)
-        } else {
-            peer
-        };
+        let resolved = addr::resolve(peer, headers, &config.proxy_trust());
         let user_agent = headers
             .get(header::USER_AGENT)
             .and_then(|v| v.to_str().ok())
             .map(|v| v.chars().take(USER_AGENT_MAX).collect());
         Self {
-            ip,
+            ip: resolved.client,
+            peer: resolved.peer,
+            chain: resolved.chain,
             user_agent,
-            secure: is_secure(config, headers, uri),
+            secure: is_secure(config, peer, headers, uri),
         }
     }
 }
@@ -619,26 +663,56 @@ mod tests {
         let https = headers(&[("x-forwarded-proto", "https")]);
         let mut cfg = AuthConfig::default();
         // auto without a trusted proxy ignores a spoofable header
-        assert!(!is_secure(&cfg, &https, &plain));
+        assert!(!is_secure(&cfg, None, &https, &plain));
         cfg.trust_proxy = true;
-        assert!(is_secure(&cfg, &https, &plain));
+        assert!(is_secure(&cfg, None, &https, &plain));
         assert!(!is_secure(
             &cfg,
+            None,
             &headers(&[("x-forwarded-proto", "http")]),
             &plain
         ));
         cfg.cookie_secure = CookieSecure::Always;
-        assert!(is_secure(&cfg, &HeaderMap::new(), &plain));
+        assert!(is_secure(&cfg, None, &HeaderMap::new(), &plain));
         cfg.cookie_secure = CookieSecure::Never;
-        assert!(!is_secure(&cfg, &https, &plain));
+        assert!(!is_secure(&cfg, None, &https, &plain));
         let abs: Uri = "https://sdr.example/x".parse().expect("uri");
-        assert!(is_secure(&AuthConfig::default(), &HeaderMap::new(), &abs));
+        assert!(is_secure(
+            &AuthConfig::default(),
+            None,
+            &HeaderMap::new(),
+            &abs
+        ));
     }
 
     #[test]
-    fn forwarded_for_uses_the_rightmost_entry() {
-        let h = headers(&[("x-forwarded-for", "6.6.6.6, 203.0.113.9")]);
-        assert_eq!(forwarded_ip(&h), "203.0.113.9".parse().ok());
-        assert_eq!(forwarded_ip(&headers(&[("x-forwarded-for", "junk")])), None);
+    fn client_info_resolves_peer_and_client() {
+        let mut ext = Extensions::new();
+        ext.insert(ConnectInfo(SocketAddr::from(([172, 22, 0, 1], 5555))));
+        let h = headers(&[("x-forwarded-for", "6.6.6.6, 8.8.4.4")]);
+        let uri: Uri = "/x".parse().expect("uri");
+        // no proxy trusted: the spoofable header is ignored, the peer is the client
+        let plain = ClientInfo::from_request(&AuthConfig::default(), &ext, &h, &uri);
+        assert_eq!(plain.ip, "172.22.0.1".parse().ok());
+        assert_eq!(plain.peer, "172.22.0.1".parse().ok());
+        assert!(plain.chain.is_empty());
+        // gateway listed as trusted proxy network
+        let cfg = AuthConfig {
+            trusted_proxies: ProxyTrust::parse_list("172.16.0.0/12").expect("nets"),
+            ..AuthConfig::default()
+        };
+        let via = ClientInfo::from_request(&cfg, &ext, &h, &uri);
+        assert_eq!(via.ip, "8.8.4.4".parse().ok());
+        assert_eq!(via.peer, "172.22.0.1".parse().ok());
+        assert_eq!(via.chain.len(), 2);
+        // a proxy network that does not contain the peer changes nothing
+        let other = AuthConfig {
+            trusted_proxies: ProxyTrust::parse_list("10.0.0.0/8").expect("nets"),
+            ..AuthConfig::default()
+        };
+        assert_eq!(
+            ClientInfo::from_request(&other, &ext, &h, &uri).ip,
+            "172.22.0.1".parse().ok()
+        );
     }
 }

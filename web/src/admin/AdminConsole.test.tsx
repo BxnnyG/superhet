@@ -13,6 +13,28 @@ import {
   type User,
 } from "./api";
 import AdminConsole from "./AdminConsole";
+import type { AddrInfo, ClientInfo } from "./clientInfo";
+
+const addr = (cls: AddrInfo["class"], label: string, over: Partial<AddrInfo> = {}): AddrInfo => ({
+  class: cls,
+  label,
+  family: "ipv4",
+  rdns: null,
+  country: null,
+  countryName: null,
+  city: null,
+  asn: null,
+  org: null,
+  ...over,
+});
+const client = (over: Partial<ClientInfo> = {}): ClientInfo => ({
+  peerAddr: null,
+  ipInfo: null,
+  peerInfo: null,
+  uaInfo: null,
+  ...over,
+});
+const GATEWAY = addr("docker_gateway", "Docker gateway");
 
 const NOW = Date.now();
 
@@ -55,6 +77,24 @@ const SESSIONS: LiveSession[] = [
     role: "operator",
     ip: "198.51.100.7",
     userAgent: "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0",
+    client: client({
+      peerAddr: "172.22.0.1",
+      peerInfo: GATEWAY,
+      ipInfo: addr("public", "Public", {
+        rdns: "host.example.net",
+        country: "DE",
+        city: "Berlin",
+        asn: 3320,
+        org: "Example Telecom",
+      }),
+      uaInfo: {
+        browser: "Firefox",
+        browserVersion: "130",
+        os: "Linux",
+        osVersion: null,
+        device: "desktop",
+      },
+    }),
     createdAtMs: NOW - 600_000,
     lastSeenMs: NOW - 5_000,
     idleSecs: null,
@@ -72,6 +112,7 @@ const SESSIONS: LiveSession[] = [
     role: "listener",
     ip: "203.0.113.0",
     userAgent: null,
+    client: client({ ipInfo: addr("public", "Public") }),
     createdAtMs: NOW - 120_000,
     lastSeenMs: null,
     idleSecs: 14,
@@ -89,6 +130,7 @@ const event = (id: number, over: Partial<AuditEvent> = {}): AuditEvent => ({
   role: "operator",
   ip: "198.51.100.7",
   userAgent: "UA",
+  client: client(),
   action: "device.tune",
   target: "dev0",
   outcome: "ok",
@@ -410,7 +452,12 @@ describe("live sessions", () => {
     const olivia = await screen.findByTestId("session-u.aa11");
     expect(within(olivia).getByText("Operator")).toBeInTheDocument();
     expect(within(olivia).getByText("198.51.100.7")).toBeInTheDocument();
-    expect(within(olivia).getByText(/Firefox on Linux/)).toBeInTheDocument();
+    expect(within(olivia).getByText(/Firefox 130 on Linux/)).toBeInTheDocument();
+    expect(within(olivia).getByText("Public")).toBeInTheDocument();
+    expect(within(olivia).getByText("host.example.net")).toBeInTheDocument();
+    expect(within(olivia).getByText(/Berlin, DE/)).toBeInTheDocument();
+    expect(within(olivia).getByText(/AS3320 Example Telecom/)).toBeInTheDocument();
+    expect(within(olivia).getByText("172.22.0.1")).toBeInTheDocument();
     expect(within(olivia).getByText("99.200 MHz")).toBeInTheDocument();
     expect(within(olivia).getByText(/WFM/)).toBeInTheDocument();
     expect(within(olivia).getByText("Audio")).toBeInTheDocument();
@@ -418,6 +465,27 @@ describe("live sessions", () => {
     expect(within(guest).getByText("Guest bb22cc")).toBeInTheDocument();
     expect(within(guest).getByText(/idle 14 s/)).toBeInTheDocument();
     expect(within(guest).getByText("No open connection")).toBeInTheDocument();
+  });
+
+  it("shows no gateway warning while a real address is among the sessions", async () => {
+    mount("sessions");
+    await screen.findByTestId("session-u.aa11");
+    expect(screen.queryByText(/Real client addresses are not reaching/)).toBeNull();
+  });
+
+  it("warns when every session comes from the Docker gateway and links the doc", async () => {
+    const gw = SESSIONS.map((s) => ({
+      ...s,
+      ip: "172.22.0.1",
+      client: client({ ipInfo: GATEWAY }),
+    }));
+    mount("sessions", fakeApi({ listSessions: vi.fn().mockResolvedValue(gw) }));
+    const warning = await screen.findByText(/Real client addresses are not reaching/);
+    const alert = warning.closest("[role=alert]") as HTMLElement;
+    expect(within(alert).getByRole("link", { name: "How to fix this" })).toHaveAttribute(
+      "href",
+      expect.stringContaining("client-addresses.md"),
+    );
   });
 
   it("kicks after a confirmation", async () => {

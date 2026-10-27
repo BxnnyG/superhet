@@ -126,8 +126,17 @@ use are disabled with the reason as tooltip or hidden; the server answers 403 re
 - The tuning lock names its holder ("Locked by alice"; "you" for the own account). Unlock releases
   only the own lock; an admin gets "Force unlock tuning" for other accounts' locks
   (`DELETE .../lock?force=true`).
-- Account menu: "My sessions" lists the account's browsers (`/me/sessions`) with sign out per
-  session; revoking the current one signs out.
+- Account menu: a pill at the far right of the top bar (avatar with initials, name, role badge;
+  only the avatar below 600 px) opens Admin console (admins), My sessions, Change password and Sign
+  out. The settings popover keeps the same entries at its bottom and the command palette has
+  "Open the admin console" and "Show my sessions". (Until alpha.12 the entries lived only at the
+  bottom of the settings popover, which nobody opened to look for an account.) "My sessions" lists
+  the account's browsers (`/me/sessions`) with sign out per session; revoking the current one signs
+  out.
+- Admin console, Live sessions and Audit log show the client address with an address-type badge
+  (Public, Private LAN, Docker gateway, CGNAT, IPv6 ...), reverse DNS, optional GeoIP location, the
+  connection peer when a proxy forwarded the address, and the parsed browser. A yellow banner links
+  to `docs/client-addresses.md` when every recent address is a Docker gateway.
 
 ### Admin console (`/admin`, admins only)
 

@@ -177,6 +177,8 @@ pub(crate) fn account_who(
         name: Some(name.chars().take(64).collect()),
         role,
         ip: client.ip,
+        peer: client.peer,
+        via: client.chain.clone(),
         user_agent: client.user_agent.clone(),
     }
 }
@@ -193,12 +195,14 @@ pub(super) async fn start_session(
         internal()
     })?;
     let ip = client.ip.map(|ip| ip.to_string());
-    superhet_db::auth::create_session(
+    let peer = client.peer.map(|ip| ip.to_string());
+    superhet_db::auth::create_session_from(
         db,
         &token::hash_token(&raw),
         user_id,
         client.user_agent.as_deref(),
         ip.as_deref(),
+        peer.as_deref(),
     )
     .await
     .map_err(db_failed)?;

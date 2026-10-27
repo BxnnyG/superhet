@@ -29,8 +29,10 @@ pub enum GuestRefusal {
 pub struct GuestSession {
     /// Public id (shown in audit rows and owner strings), 12 hex characters of the key hash.
     pub id: String,
-    /// Client address at start.
+    /// Client address at start (resolved behind a trusted proxy).
     pub ip: Option<IpAddr>,
+    /// TCP peer address at start.
+    pub peer: Option<IpAddr>,
     /// Truncated user agent.
     pub user_agent: Option<String>,
     /// Start, Unix milliseconds.
@@ -175,6 +177,7 @@ impl Registry {
         &self,
         key: [u8; 32],
         ip: Option<IpAddr>,
+        peer: Option<IpAddr>,
         user_agent: Option<String>,
         policy: &GuestPolicy,
     ) -> Result<GuestSession, GuestRefusal> {
@@ -205,6 +208,7 @@ impl Registry {
         let session = GuestSession {
             id: key[..6].iter().map(|b| format!("{b:02x}")).collect(),
             ip,
+            peer,
             user_agent,
             created_ms: now_ms(),
             last_active: Instant::now(),
@@ -480,6 +484,8 @@ mod tests {
             name: None,
             role: None,
             ip: None,
+            peer: None,
+            via: Vec::new(),
             user_agent: None,
         }
     }
@@ -490,26 +496,28 @@ mod tests {
         let a: Option<IpAddr> = "203.0.113.1".parse().ok();
         let b: Option<IpAddr> = "203.0.113.2".parse().ok();
         let p = policy(3, 2);
-        r.guest_start([1; 32], a, None, &p).expect("first");
-        r.guest_start([2; 32], a, None, &p).expect("second");
+        r.guest_start([1; 32], a, None, None, &p).expect("first");
+        r.guest_start([2; 32], a, None, None, &p).expect("second");
         assert_eq!(
-            r.guest_start([3; 32], a, None, &p).err(),
+            r.guest_start([3; 32], a, None, None, &p).err(),
             Some(GuestRefusal::TooManyFromAddress)
         );
-        r.guest_start([4; 32], b, None, &p).expect("other address");
+        r.guest_start([4; 32], b, None, None, &p)
+            .expect("other address");
         assert_eq!(
-            r.guest_start([5; 32], b, None, &p).err(),
+            r.guest_start([5; 32], b, None, None, &p).err(),
             Some(GuestRefusal::Full)
         );
         assert_eq!(r.guests().len(), 3);
         assert!(r.guest_remove(&[1; 32]).is_some());
-        r.guest_start([6; 32], b, None, &p).expect("room again");
+        r.guest_start([6; 32], b, None, None, &p)
+            .expect("room again");
     }
 
     #[test]
     fn idle_guests_expire() {
         let r = registry();
-        r.guest_start([1; 32], None, None, &policy(5, 5))
+        r.guest_start([1; 32], None, None, None, &policy(5, 5))
             .expect("start");
         assert!(r.guest_touch(&[1; 32], Duration::from_secs(60)).is_some());
         assert!(r.guest_touch(&[9; 32], Duration::from_secs(60)).is_none());
@@ -520,9 +528,9 @@ mod tests {
             "idle too long"
         );
         assert!(r.guests().is_empty());
-        r.guest_start([2; 32], None, None, &policy(5, 5))
+        r.guest_start([2; 32], None, None, None, &policy(5, 5))
             .expect("start");
-        r.guest_start([3; 32], None, None, &policy(5, 5))
+        r.guest_start([3; 32], None, None, None, &policy(5, 5))
             .expect("start");
         assert_eq!(r.guests_clear().len(), 2);
         let owners = r.take_cleanups();
@@ -539,7 +547,7 @@ mod tests {
     async fn a_guest_with_an_open_socket_is_not_idle() {
         let r = registry();
         let guest = r
-            .guest_start([1; 32], None, None, &policy(5, 5))
+            .guest_start([1; 32], None, None, None, &policy(5, 5))
             .expect("start");
         let key = guest_key(&guest.id);
         let conn = r.connect(&key, &who(), "audio", "dev0").await;
