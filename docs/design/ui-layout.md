@@ -29,10 +29,22 @@ notes and tokens: `docs/ui-design.md`.
     action; there is no implicit centre-tuning mode.
 - **VFO tab row** under the strip: one chip per VFO (colour, number, frequency, listen/mute, close)
   plus a "+" button. It replaces the sidebar VFO list and the dock chips.
+- **Bandwidth** is free: the select keeps the mode presets and "Mode default"; the pencil next to
+  it types any width (`12.5`, `12.5 kHz`, `8500 Hz`), validated against the mode range and the
+  widest channel the device sample rate can carry (`web/src/vfo/bandwidth.ts`; sdrd accepts any
+  whole Hz in 100..1 000 000 and the channelizer must be able to build it). On the spectrum the
+  selected VFO's passband edges carry grips (larger grab zone for touch); dragging them, or
+  Shift+wheel over the passband (wheel up = wider), changes the bandwidth live. Alt+wheel (and
+  Shift+wheel away from the passband) tunes.
 - **Spectrum and waterfall** fill the remaining height (`flex-1 min-h-0`). Overlays: band ranges as a
   thin ribbon above the scale, point bookmarks as clickable pins, VFO passbands.
 - **Right inspector** (w-80, collapsible, `]` toggles it, state persisted in `localStorage`) with the
   tabs Receiver, Bookmarks, Channels, Decoders, Display, Source. Every tab body scrolls on its own.
+  The tab strip never scrolls on desktop: tabs show icon + label while there is room, then only
+  the selected tab keeps its label (the others are icons with a tooltip), and the strip scrolls
+  with arrow buttons only if even that does not fit (`web/src/shell/TabStrip.tsx`, thresholds in
+  `tabLayout.ts`). Arrow keys, Home and End move between tabs (roving tabindex); icon-only tabs
+  keep their text as the accessible name. The phone tab bar shows an icon above a small label.
   - Receiver: the selected VFO in detail (stereo and de-emphasis, output volume, RDS or CTCSS/DTMF,
     remove).
   - Bookmarks: the bookmark panel.
@@ -165,6 +177,11 @@ refuses regardless). Header with "Back to receiver" and sign out; sidebar of six
 5. **Audit settings** (`audit-settings`): retention for accounts and guests (0 = forever, guest
    forever is flagged), IP mode (full, truncated, none) per class, stored entries and size.
 6. **Limits** (`limits`): receivers per listener and per operator (0 = daemon cap only).
+7. **Client device info** (`client-info`): whose browsers report device details (off, accounts,
+   accounts and guests) and the separate "Ask clients for their public IP" switch with the lookup
+   service URL (https only), with the privacy warning. The reports show up in Live sessions (a
+   collapsible "client-reported · unverified" block next to the server-seen address) and in the
+   audit detail of `session.client_report` events (`docs/client-addresses.md`).
 
 Settings forms keep an unsaved draft per section ("Unsaved changes", Discard). Tests: vitest for
 the gate, permissions, role gating of the shell, the admin API client and every section; there is

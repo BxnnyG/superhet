@@ -191,7 +191,11 @@ function ActiveVfo({
         >
           <ModeSelect vfo={vfo} onUpdate={onUpdate} />
           <DigitalModeControl vfo={vfo} device={r.device} plugins={r.plugins} onUpdate={onUpdate} />
-          <BandwidthSelect vfo={vfo} onUpdate={onUpdate} />
+          <BandwidthSelect
+            vfo={vfo}
+            onUpdate={onUpdate}
+            sampleRateHz={r.tuningSnap.state?.sampleRate}
+          />
           <div className="grid min-w-32 flex-1 grid-cols-[minmax(0,1fr)_auto] items-end gap-x-2 gap-y-1.5 shell:max-w-72">
             <SquelchControl
               vfo={vfo}

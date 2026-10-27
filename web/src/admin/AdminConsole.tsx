@@ -11,6 +11,7 @@ import {
   IconButton,
   ListIcon,
   Logo,
+  MonitorIcon,
   PlugIcon,
   LogOutIcon,
   ShieldIcon,
@@ -24,6 +25,7 @@ import { createAdminApi, type AdminApi } from "./api";
 import { AuditSection } from "./AuditSection";
 import { AuditSettingsSection } from "./AuditSettingsSection";
 import { BansSection } from "./BansSection";
+import { ClientReportSection } from "./ClientReportSection";
 import { GuestSection } from "./GuestSection";
 import { LimitsSection } from "./LimitsSection";
 import { PluginsSection } from "./PluginsSection";
@@ -43,6 +45,7 @@ export const ADMIN_SECTIONS: readonly NavItem[] = [
   { id: "bans", label: "Address bans", Icon: BanIcon },
   { id: "plugins", label: "Plugins", Icon: PlugIcon },
   { id: "guests", label: "Guest access", Icon: GlobeIcon },
+  { id: "client-info", label: "Client device info", Icon: MonitorIcon },
   { id: "audit-settings", label: "Audit settings", Icon: ShieldIcon },
   { id: "limits", label: "Limits", Icon: SlidersIcon },
 ];
@@ -205,6 +208,8 @@ function SectionBody({
       return <PluginsSection api={pluginApi} />;
     case "guests":
       return <GuestSection api={api} />;
+    case "client-info":
+      return <ClientReportSection api={api} />;
     case "audit-settings":
       return <AuditSettingsSection api={api} />;
     case "limits":

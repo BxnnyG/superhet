@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useState } from "react";
 import { AudioControls } from "../audio/AudioControls";
 import { usePermissions } from "../auth/context";
 import { BandPlanPanel } from "../bandplan/BandPlanPanel";
@@ -7,10 +7,12 @@ import { ChannelsPanel } from "../channels/ChannelsPanel";
 import { DecodersTab } from "../decoders/DecodersTab";
 import { ProfilesPanel } from "../profiles/ProfilesPanel";
 import { DisplayControls } from "../spectrum/DisplayControls";
-import { CloseIcon, IconButton, PlainButton, Section, cn } from "../ui";
+import { CloseIcon, IconButton, Section, cn } from "../ui";
 import { ReceiverPanel } from "../vfo/ReceiverPanel";
 import { INSPECTOR_LABEL, visibleTabs, type InspectorState, type InspectorTab } from "./inspector";
 import { SourceSettings } from "./SourceSettings";
+import { tabIcon } from "./tabIcons";
+import { TabStrip } from "./TabStrip";
 import { PHONE_QUERY, useMediaQuery } from "./useMediaQuery";
 import type { Receiver } from "./useReceiver";
 
@@ -35,23 +37,6 @@ export function Inspector({ r, inspector }: Props) {
   // A tab the role cannot see (guests: bookmarks) falls back to the receiver.
   const tab: InspectorTab = tabs.includes(inspector.tab) ? inspector.tab : "receiver";
   const phoneUp = useMediaQuery(PHONE_QUERY);
-  const tabRefs = useRef<Partial<Record<InspectorTab, HTMLButtonElement | null>>>({});
-
-  const onTabKey = (e: KeyboardEvent, index: number) => {
-    const delta = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-    const next =
-      e.key === "Home"
-        ? 0
-        : e.key === "End"
-          ? tabs.length - 1
-          : (index + delta + tabs.length) % tabs.length;
-    if (delta === 0 && e.key !== "Home" && e.key !== "End") return;
-    e.preventDefault();
-    const target = tabs[next];
-    if (!target) return;
-    setTab(target);
-    tabRefs.current[target]?.focus();
-  };
 
   // Docked and hidden: nothing is mounted, the spectrum takes the width.
   if (docked && !open) return null;
@@ -84,36 +69,14 @@ export function Inspector({ r, inspector }: Props) {
       >
         <div className="flex h-10 shrink-0 items-center border-b border-border pr-1 pl-1">
           {phoneUp ? (
-            <div
-              role="tablist"
-              aria-label="Inspector"
-              className="flex min-w-0 flex-1 items-stretch self-stretch overflow-x-auto px-1"
-            >
-              {tabs.map((t, i) => (
-                <PlainButton
-                  key={t}
-                  ref={(el) => {
-                    tabRefs.current[t] = el;
-                  }}
-                  role="tab"
-                  id={tabId(t)}
-                  aria-selected={tab === t}
-                  aria-controls={PANEL_ID}
-                  tabIndex={tab === t ? 0 : -1}
-                  onClick={() => setTab(t)}
-                  onKeyDown={(e) => onTabKey(e, i)}
-                  className={cn(
-                    "relative shrink-0 rounded-md px-1.5 text-xs font-medium transition-colors duration-150",
-                    tab === t ? "text-fg" : "text-fg-subtle hover:text-fg",
-                    // Underline of the selected tab.
-                    tab === t &&
-                      "after:absolute after:inset-x-1.5 after:bottom-0 after:h-0.5 after:rounded-full after:bg-accent",
-                  )}
-                >
-                  {INSPECTOR_LABEL[t]}
-                </PlainButton>
-              ))}
-            </div>
+            <TabStrip
+              label="Inspector"
+              tabs={tabs.map((t) => ({ id: t, label: INSPECTOR_LABEL[t], icon: tabIcon(t) }))}
+              selected={tab}
+              onSelect={setTab}
+              tabId={tabId}
+              panelId={PANEL_ID}
+            />
           ) : (
             <h2 className="flex-1 truncate pl-3 text-sm font-semibold">{INSPECTOR_LABEL[tab]}</h2>
           )}
@@ -160,6 +123,7 @@ function TabBody({ r, tab, phoneUp }: { r: Receiver; tab: InspectorTab; phoneUp:
           autoSquelch={r.autoSquelch}
           locked={r.locks.length > 0}
           showDemodulator={!phoneUp}
+          sampleRateHz={r.tuningSnap.state?.sampleRate}
           onUpdate={(id, patch) => r.vfoCtl.update(id, patch)}
           onRemove={(id) => r.vfoCtl.remove(id)}
         />

@@ -13,7 +13,7 @@ use superhet_bus::audit::Outcome;
 use super::{AdminState, bad};
 use crate::access::Principal;
 use crate::auth::{Reply, db_failed, error, flatten, guard_origin, json_reply, parse_json};
-use crate::settings::{AuditSettings, GuestPolicy, Limits, SettingsError};
+use crate::settings::{AuditSettings, ClientReportPolicy, GuestPolicy, Limits, SettingsError};
 
 fn store_failed(err: SettingsError) -> Response {
     match err {
@@ -197,6 +197,56 @@ async fn put_limits_inner(
     Ok(json_reply(
         StatusCode::OK,
         &json!({"limits": to_value(&new)}),
+    ))
+}
+
+pub(super) async fn get_client_report_policy(State(state): State<AdminState>) -> Response {
+    json_reply(
+        StatusCode::OK,
+        &json!({"client_report": to_value(&state.auth.settings().client_report().await)}),
+    )
+}
+
+pub(super) async fn put_client_report_policy(
+    State(state): State<AdminState>,
+    Extension(me): Extension<Principal>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    flatten(put_client_report_policy_inner(&state, &me, &headers, &body).await)
+}
+
+async fn put_client_report_policy_inner(
+    state: &AdminState,
+    me: &Principal,
+    headers: &HeaderMap,
+    body: &Bytes,
+) -> Reply {
+    guard_origin(&state.auth, headers)?;
+    let mut new: ClientReportPolicy = parse_json(headers, body)?;
+    new.public_ip_service = new.public_ip_service.trim().to_owned();
+    new.validate().map_err(|m| bad(&m))?;
+    let old = state.auth.settings().client_report().await;
+    state
+        .auth
+        .settings()
+        .put_client_report(&new, &me.name)
+        .await
+        .map_err(store_failed)?;
+    state
+        .auth
+        .audit()
+        .log(
+            &me.who(),
+            "settings.change",
+            Some("client_report"),
+            Outcome::Ok,
+            json!({"changed": changed_keys(&to_value(&old), &to_value(&new))}),
+        )
+        .await;
+    Ok(json_reply(
+        StatusCode::OK,
+        &json!({"client_report": to_value(&new)}),
     ))
 }
 

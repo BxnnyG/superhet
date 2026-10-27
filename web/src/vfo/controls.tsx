@@ -11,6 +11,7 @@ import {
   Slider,
   SpeakerIcon,
   SpeakerMutedIcon,
+  cn,
 } from "../ui";
 import { VFO_MODES, type Vfo, type VfoMode, type VfoPatch } from "./api";
 import type { AutoSquelch } from "./autoSquelch";
@@ -22,6 +23,7 @@ import {
   clampCwPitch,
   saveCwPitch,
 } from "./cwPitch";
+import { CustomBandwidth } from "./CustomBandwidth";
 import { LiveMarker } from "./LiveMarker";
 import {
   BANDWIDTH_PRESETS,
@@ -82,10 +84,13 @@ export function CwPitchControl({ vfo, onUpdate }: { vfo: Vfo; onUpdate: Update }
 export function BandwidthSelect({
   vfo,
   onUpdate,
+  sampleRateHz,
   className = "w-28 shrink-0",
 }: {
   vfo: Vfo;
   onUpdate: Update;
+  /** Device sample rate; bounds the custom values (omitted: only the mode limits apply). */
+  sampleRateHz?: number | null;
   className?: string;
 }) {
   const presets = BANDWIDTH_PRESETS[vfo.mode];
@@ -93,17 +98,30 @@ export function BandwidthSelect({
     ? presets
     : [...presets, vfo.bandwidthHz].sort((a, b) => a - b);
   return (
-    <Select
-      aria-label="Bandwidth"
-      size="sm"
-      className={className}
-      value={String(vfo.bandwidthHz)}
-      onChange={(v) => onUpdate(vfo.id, { bandwidthHz: v === DEFAULT_BW ? null : Number(v) })}
-      options={[
-        ...bandwidths.map((b) => ({ value: String(b), label: formatBandwidth(b) })),
-        { value: DEFAULT_BW, label: "Mode default" },
-      ]}
-    />
+    <div
+      className={cn(
+        "flex items-center gap-1",
+        className.includes("w-full") ? "w-full" : "shrink-0",
+      )}
+    >
+      <Select
+        aria-label="Bandwidth"
+        size="sm"
+        className={className}
+        value={String(vfo.bandwidthHz)}
+        onChange={(v) => onUpdate(vfo.id, { bandwidthHz: v === DEFAULT_BW ? null : Number(v) })}
+        options={[
+          ...bandwidths.map((b) => ({ value: String(b), label: formatBandwidth(b) })),
+          { value: DEFAULT_BW, label: "Mode default" },
+        ]}
+      />
+      <CustomBandwidth
+        mode={vfo.mode}
+        value={vfo.bandwidthHz}
+        sampleRateHz={sampleRateHz}
+        onApply={(hz) => onUpdate(vfo.id, { bandwidthHz: hz })}
+      />
+    </div>
   );
 }
 

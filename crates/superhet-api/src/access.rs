@@ -224,6 +224,8 @@ pub const RULES: &[Rule] = &[
     rule("POST", "/api/v1/channel-plans", Operator),
     rule("PUT", "/api/v1/channel-plans/{id}", Operator),
     rule("DELETE", "/api/v1/channel-plans/{id}", Operator),
+    // What the browser reports about itself (accounts and guests; the policy decides).
+    rule("POST", "/api/v1/auth/client-report", Guest),
     // Own sessions.
     rule("GET", "/api/v1/me/sessions", Listener),
     rule("DELETE", "/api/v1/me/sessions/{sid}", Listener),
@@ -250,6 +252,8 @@ pub const RULES: &[Rule] = &[
     rule("PUT", "/api/v1/admin/audit-settings", Admin),
     rule("GET", "/api/v1/admin/limits", Admin),
     rule("PUT", "/api/v1/admin/limits", Admin),
+    rule("GET", "/api/v1/admin/client-report-policy", Admin),
+    rule("PUT", "/api/v1/admin/client-report-policy", Admin),
 ];
 
 /// The rule for a matched route and method (HEAD counts as GET).
