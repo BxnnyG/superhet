@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from "react";
 import { usePermissions } from "../auth/context";
 import {
   NOT_YOUR_VFO,
@@ -6,8 +7,11 @@ import {
   knownVfoLimit,
   ownVfoCount,
 } from "../auth/permissions";
+import { VfoDecoderMark } from "../plugins/parts";
+import { instancesOnVfo, pluginName } from "../plugins/store";
 import { formatFrequency } from "../spectrum/freq";
 import { CloseIcon, IconButton, PauseIcon, PlainButton, PlusIcon, cn } from "../ui";
+import type { PluginInstance } from "../plugins/api";
 import type { Vfo } from "../vfo/api";
 import { ListenToggle } from "../vfo/controls";
 import { MODE_LABEL, VFO_PAUSED_FREE_HINT, VFO_PAUSED_HINT, vfoColor } from "../vfo/model";
@@ -36,6 +40,7 @@ export function VfoTabs({ r }: { r: Receiver }) {
   const full = limit !== null && ownVfoCount(vfos) >= limit;
   const locked = r.locks.length > 0;
   const centerHz = r.tuningSnap.display?.centerHz ?? null;
+  const plugins = useSyncExternalStore(r.plugins.subscribe, r.plugins.getSnapshot);
   return (
     <div
       role="group"
@@ -52,6 +57,10 @@ export function VfoTabs({ r }: { r: Receiver }) {
               canClose={canModifyVfo(perms, v)}
               listening={r.audioSnap.levels[v.id]?.listening ?? true}
               pausedHint={locked ? VFO_PAUSED_HINT : VFO_PAUSED_FREE_HINT}
+              decoders={instancesOnVfo(plugins.instances, r.device, v.id)}
+              decoderNames={instancesOnVfo(plugins.instances, r.device, v.id).map((i) =>
+                pluginName(plugins.plugins, i.pluginId),
+              )}
               onSelect={() => r.vfoCtl.select(v.id)}
               onListen={(id, on) => r.audio.setListening(id, on)}
               onClose={() => r.vfoCtl.remove(v.id)}
@@ -85,6 +94,8 @@ function VfoTab({
   canClose,
   listening,
   pausedHint,
+  decoders,
+  decoderNames,
   onSelect,
   onListen,
   onClose,
@@ -97,6 +108,9 @@ function VfoTab({
   canClose: boolean;
   listening: boolean;
   pausedHint: string;
+  /** Decoder plugin instances fed by this receiver. */
+  decoders: readonly PluginInstance[];
+  decoderNames: readonly string[];
   onSelect: () => void;
   onListen: (id: number, on: boolean) => void;
   onClose: () => void;
@@ -130,6 +144,7 @@ function VfoTab({
         <span className="font-mono num">{formatFrequency(vfo.freqHz).slice(0, -4)}</span>
         {paused && <PauseIcon size={10} />}
       </PlainButton>
+      <VfoDecoderMark instances={decoders} names={decoderNames} className="mr-1" />
       {canListen && (
         <ListenToggle
           id={vfo.id}

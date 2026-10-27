@@ -2,6 +2,8 @@
 
 import { vi } from "vitest";
 import type { AudioController } from "../audio/controller";
+import type { PluginApi } from "../plugins/api";
+import { PluginStore } from "../plugins/store";
 import type { DeviceState, LockHolder } from "../spectrum/api";
 import type { Vfo } from "../vfo/api";
 import { AutoSquelch } from "../vfo/autoSquelch";
@@ -70,6 +72,8 @@ export function fake(vfos: Vfo[], selectedId: number | null, locks: LockHolder[]
     channelSnap: { prefs: { region: null, stepByChannel: true, rasters: {} } },
     channelMatch: null,
     channels: { setStepByChannel: vi.fn() },
+    // Never started: the snapshot stays empty.
+    plugins: new PluginStore({} as PluginApi),
     stepChannels: () => false,
   } as unknown as Receiver;
   return { r, fns };

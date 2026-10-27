@@ -3,11 +3,12 @@ import { PlainButton, cn } from "../ui";
 import { INSPECTOR_LABEL, visibleTabs, type InspectorState, type InspectorTab } from "./inspector";
 import { PHONE_QUERY, useMediaQuery } from "./useMediaQuery";
 
-/** Tabs of the phone tab bar; Decoders live inside the Receiver tab there. */
+/** Tabs of the phone tab bar. Decoders (plugin picker, event log) are a tab of their own. */
 const BAR_TABS: readonly InspectorTab[] = [
   "receiver",
   "bookmarks",
   "channels",
+  "decoders",
   "display",
   "source",
 ];

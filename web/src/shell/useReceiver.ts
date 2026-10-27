@@ -23,6 +23,7 @@ import { channelTarget, matchChannel, stepChannelBy } from "../channels/lookup";
 import { modeOf, type Plan, type PlanChannel } from "../channels/schema";
 import { ChannelStore } from "../channels/store";
 import { DecoderEventStore } from "../decoders/store";
+import { PluginStore } from "../plugins/store";
 import { createProfileApi } from "../profiles/api";
 import type { StateDoc } from "../state/doc";
 import { bindState, StateStore } from "../state/store";
@@ -113,6 +114,7 @@ export function useReceiver(device: string) {
 
   const [overlay] = useState(() => new OverlayStore());
   const decoderEvents = useMemo(() => new DecoderEventStore({ device }), [device]);
+  const plugins = useMemo(() => new PluginStore(), []);
   const bookmarks = useMemo(() => new BookmarkStore(), []);
   const bookmarkSnap = useSyncExternalStore(bookmarks.subscribe, bookmarks.getSnapshot);
 
@@ -124,6 +126,7 @@ export function useReceiver(device: string) {
   const [spectrumError, setSpectrumError] = useState<string | null>(null);
   const [step, setStep] = useState<StepChoice>("auto");
   const canSeeDecoders = perms.canSeeDecoders;
+  const canUsePlugins = perms.canUsePlugins;
 
   const stepRef = useRef(step);
   useEffect(() => {
@@ -246,14 +249,16 @@ export function useReceiver(device: string) {
     audio.start();
     // Guests only get the decoder history while the policy shows it.
     if (canSeeDecoders) decoderEvents.start();
+    if (canUsePlugins) plugins.start();
     return () => {
+      plugins.stop();
       unbind();
       store.stop();
       vfoCtl.stop();
       audio.stop();
       decoderEvents.stop();
     };
-  }, [store, tuning, vfoCtl, audio, decoderEvents, canSeeDecoders]);
+  }, [store, tuning, vfoCtl, audio, decoderEvents, canSeeDecoders, plugins, canUsePlugins]);
 
   // Bookmarks live on the server: read them at start and again once the state feed is up.
   const feedUp = feed.status === "connected";
@@ -394,6 +399,7 @@ export function useReceiver(device: string) {
     tuneChannel,
     stepChannels,
     decoderEvents,
+    plugins,
     tuneTo,
     tuneNew,
     startBookmark,

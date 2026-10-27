@@ -117,10 +117,10 @@ describe("DecoderEventStore", () => {
     const store = make(api);
     store.start();
     await flush();
-    store.setFilter({ kinds: ["rds_ps"], q: "abc" });
+    store.setFilter({ kinds: ["rds_ps"], source: null, q: "abc" });
     await flush();
     expect(api.list).toHaveBeenCalledTimes(2);
-    expect(api.list.mock.calls[1]?.[1]).toEqual({ kinds: ["rds_ps"], q: "abc" });
+    expect(api.list.mock.calls[1]?.[1]).toEqual({ kinds: ["rds_ps"], source: null, q: "abc" });
     expect(store.getSnapshot().events).toEqual([]);
     expect(store.getSnapshot().loaded).toBe(true);
     store.stop();

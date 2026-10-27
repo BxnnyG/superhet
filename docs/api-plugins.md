@@ -75,4 +75,5 @@ route (like the other routes). Plugin crashes are the host's to report (`sh.v1.a
 
 What instances emit lands in the decoder history (`docs/api-decoder-events.md`): `source` is the
 plugin id, `kind` the event type; filter with `source=` and `kind=`. The live feed
-`/api/v1/ws/events?dev=` carries them too.
+`/api/v1/ws/events?dev=` carries them too. The web UI for all of this is described in
+`docs/plugins-ui.md`.

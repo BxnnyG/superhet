@@ -25,7 +25,7 @@ Status: protocol version `1`. Plugin `plugin.protocol` must equal it; incompatib
 | Process-group kill on stop / crash | done |
 | Admin API in `superhet-api` (`docs/api-plugins.md`) | done |
 | First plugins: POCSAG/FLEX, APRS, rtl_433 (`docs/plugins-decoders.md`), bundled in the image and installed on first start | done |
-| UI | not yet |
+| Web UI (admin console, VFO picker, events) | done, `docs/plugins-ui.md` |
 | Container plugins, install from Git URL, resource limits | not yet (P3) |
 
 ## Manifest

@@ -22,6 +22,10 @@ export interface Permissions {
   canEditBookmarks: boolean;
   /** Clear the decoder history. */
   canClearHistory: boolean;
+  /** List plugins and start / stop decoder instances (operators and admins). */
+  canUsePlugins: boolean;
+  /** Install and remove plugins (`/admin` console). */
+  canInstallPlugins: boolean;
   /** Show the decoder tab (guests only while the policy shows decoder events). */
   canSeeDecoders: boolean;
   /** Operators and admins edit and hear every VFO. */
@@ -62,6 +66,8 @@ function build(
     canReadBookmarks: !guest,
     canEditBookmarks: operator,
     canClearHistory: operator,
+    canUsePlugins: operator,
+    canInstallPlugins: admin,
     canSeeDecoders: !guest || guestLimits?.showDecoderEvents === true,
     seesAllVfos: operator,
     canManageSessions: !guest,

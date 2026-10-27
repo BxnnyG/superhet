@@ -169,7 +169,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: e2e
-      - run: cargo build -p superhet-api -p superhet-sdrd -p superhet-worker
+      - run: cargo build -p superhet-api -p superhet-sdrd -p superhet-worker -p superhet-pluginhost
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: web/package.json

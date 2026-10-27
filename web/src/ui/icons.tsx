@@ -278,3 +278,18 @@ export const GlobeIcon = (p: IconProps) => (
     <path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" />
   </Icon>
 );
+export const PlugIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0V8ZM12 17v4" />
+  </Icon>
+);
+export const PlayIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M7 5l12 7-12 7V5Z" />
+  </Icon>
+);
+export const StopIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="6" y="6" width="12" height="12" rx="1.5" />
+  </Icon>
+);

@@ -22,6 +22,7 @@ const ev = (id: number, over: Partial<DecoderEvent> = {}): DecoderEvent => ({
   freqHz: 433_500_000,
   mode: "nfm",
   kind: "dtmf",
+  source: "core",
   value: `v${id}`,
   meta: {},
   ...over,
@@ -51,6 +52,7 @@ describe("parseEvent", () => {
       freqHz: 99_200_000,
       mode: "wfm",
       kind: "rds_ps",
+      source: "core",
       value: "RADIO X",
       meta: { pi: "D220" },
     });
@@ -63,11 +65,33 @@ describe("parseEvent", () => {
     expect(e?.meta).toEqual({});
   });
 
+  it("keeps plugin events: unknown kinds, a source and no VFO", () => {
+    const e = parseEvent({
+      ...raw,
+      vfo: null,
+      kind: "pocsag.message",
+      source: "org.superhet.decoder.pocsag",
+      meta: { instance: "i-1", data: { address: 1 } },
+    });
+    expect(e).toMatchObject({
+      vfo: null,
+      kind: "pocsag.message",
+      source: "org.superhet.decoder.pocsag",
+      meta: { instance: "i-1", data: { address: 1 } },
+    });
+    // A server that predates the `source` column still works.
+    expect(parseEvent({ ...raw, source: undefined })?.source).toBe("core");
+    expect(parseEvent({ ...raw, vfo: undefined, kind: "x.y" })?.vfo).toBeNull();
+  });
+
   it.each([
     null,
     "x",
     { ...raw, id: "5" },
-    { ...raw, kind: "other" },
+    { ...raw, kind: "" },
+    { ...raw, kind: 7 },
+    { ...raw, vfo: "2" },
+    { ...raw, vfo: 1.5 },
     { ...raw, value: 3 },
     { ...raw, vfo: -1 },
     { ...raw, ts_ms: NaN },
@@ -95,11 +119,27 @@ describe("mergeEvents", () => {
 describe("matches", () => {
   it("filters by kind and by case-insensitive value", () => {
     const e = ev(1, { kind: "rds_rt", value: "Now Playing: Song" });
-    expect(matches({ kinds: [], q: "" }, e)).toBe(true);
-    expect(matches({ kinds: ["rds_rt"], q: "" }, e)).toBe(true);
-    expect(matches({ kinds: ["dtmf"], q: "" }, e)).toBe(false);
-    expect(matches({ kinds: [], q: " playing " }, e)).toBe(true);
-    expect(matches({ kinds: [], q: "absent" }, e)).toBe(false);
+    expect(matches({ kinds: [], source: null, q: "" }, e)).toBe(true);
+    expect(matches({ kinds: ["rds_rt"], source: null, q: "" }, e)).toBe(true);
+    expect(matches({ kinds: ["dtmf"], source: null, q: "" }, e)).toBe(false);
+    expect(matches({ kinds: [], source: null, q: " playing " }, e)).toBe(true);
+    expect(matches({ kinds: [], source: null, q: "absent" }, e)).toBe(false);
+  });
+
+  it("filters by source", () => {
+    const core = ev(1);
+    const plugin = ev(2, {
+      kind: "pocsag.message",
+      source: "org.superhet.decoder.pocsag",
+      vfo: null,
+    });
+    const none = { kinds: [], q: "" };
+    expect(matches({ ...none, source: "core" }, core)).toBe(true);
+    expect(matches({ ...none, source: "core" }, plugin)).toBe(false);
+    expect(matches({ ...none, source: "org.superhet.decoder.pocsag" }, plugin)).toBe(true);
+    expect(
+      matches({ kinds: ["flex.message"], source: "org.superhet.decoder.pocsag", q: "" }, plugin),
+    ).toBe(false);
   });
 });
 
@@ -135,7 +175,7 @@ describe("logReducer", () => {
   it("drops replies of an older query", () => {
     let s = logReducer(INITIAL_LOG, { type: "query" });
     const stale = s.gen;
-    s = logReducer(s, { type: "query", filter: { kinds: ["dtmf"], q: "" } });
+    s = logReducer(s, { type: "query", filter: { kinds: ["dtmf"], source: null, q: "" } });
     s = logReducer(s, { type: "page", gen: stale, events: [ev(1)], next: null });
     expect(s.events).toEqual([]);
     expect(s.loading).toBe(true);
@@ -145,7 +185,7 @@ describe("logReducer", () => {
 
   it("a new filter resets the list and applies to live events", () => {
     let s = loaded([ev(2), ev(1)]);
-    s = logReducer(s, { type: "query", filter: { kinds: ["rds_ps"], q: "" } });
+    s = logReducer(s, { type: "query", filter: { kinds: ["rds_ps"], source: null, q: "" } });
     expect(s).toMatchObject({ events: [], loaded: false, loading: true, next: null });
     s = logReducer(s, { type: "live", event: ev(3) });
     expect(s.events).toEqual([]);

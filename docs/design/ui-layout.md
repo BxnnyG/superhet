@@ -51,7 +51,7 @@ notes and tokens: `docs/ui-design.md`.
 - 600 to 900 px: the inspector is a right overlay sheet (backdrop, Esc closes); the strip wraps into
   two rows (frequency, then mode, bandwidth and squelch).
 - Below 600 px: top bar with logo, palette trigger, audio and settings; the strip shows only the
-  frequency; the spectrum; a bottom tab bar (Receiver, Bookmarks, Display, Source) opens bottom
+  frequency; the spectrum; a bottom tab bar (Receiver, Bookmarks, Channels, Decoders, Display, Source) opens bottom
   sheets. Mode, bandwidth and squelch move into the Receiver sheet. Touch targets are at least 44 px.
 
 ## Bookmarks v2 (separate change)

@@ -1,7 +1,7 @@
 // Typed wrappers for the decoder event routes (docs/api-decoder-events.md).
-//   GET    /api/v1/decoder-events?kind=&dev=&q=&limit=&cursor=  -> { v, events, next_cursor }
+//   GET    /api/v1/decoder-events?kind=&source=&dev=&q=&limit=&cursor=  -> { v, events, next_cursor }
 //   DELETE /api/v1/decoder-events                                -> { v, deleted }
-//   GET    /api/v1/decoder-events/export.csv?kind=&dev=&q=       -> text/csv
+//   GET    /api/v1/decoder-events/export.csv?kind=&source=&dev=&q=       -> text/csv
 
 import { apiFetch } from "../auth/session";
 import { ApiError, httpError, isRec, readJson } from "../spectrum/api";
@@ -28,6 +28,7 @@ const BASE = "/api/v1/decoder-events";
 function filterParams(device: string, filter: LogFilter): URLSearchParams {
   const p = new URLSearchParams();
   if (filter.kinds.length > 0) p.set("kind", filter.kinds.join(","));
+  if (filter.source !== null) p.set("source", filter.source);
   p.set("dev", device);
   const q = filter.q.trim();
   if (q !== "") p.set("q", q);

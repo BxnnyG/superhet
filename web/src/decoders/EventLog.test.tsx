@@ -85,7 +85,7 @@ it("a kind chip filters on the server", async () => {
   await flush();
   fireEvent.click(screen.getByRole("button", { name: "CTCSS/DCS" }));
   await flush();
-  expect(api.list.mock.calls[1]?.[1]).toEqual({ kinds: ["ctcss", "dcs"], q: "" });
+  expect(api.list.mock.calls[1]?.[1]).toEqual({ kinds: ["ctcss", "dcs"], source: null, q: "" });
   expect(screen.getByRole("button", { name: "CTCSS/DCS" })).toHaveAttribute("aria-pressed", "true");
   store.stop();
 });
@@ -99,7 +99,7 @@ it("searches after the typing pauses", async () => {
   expect(api.list).toHaveBeenCalledTimes(1);
   await act(() => vi.advanceTimersByTimeAsync(300));
   expect(api.list).toHaveBeenCalledTimes(2);
-  expect(api.list.mock.calls[1]?.[1]).toEqual({ kinds: [], q: "12" });
+  expect(api.list.mock.calls[1]?.[1]).toEqual({ kinds: [], source: null, q: "12" });
   store.stop();
 });
 
