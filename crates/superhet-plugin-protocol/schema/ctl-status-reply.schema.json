@@ -1,5 +1,35 @@
 {
   "$defs": {
+    "InstanceState": {
+      "description": "Lifecycle state of an instance.",
+      "oneOf": [
+        {
+          "const": "starting",
+          "description": "Process is being spawned.",
+          "type": "string"
+        },
+        {
+          "const": "running",
+          "description": "Process is up.",
+          "type": "string"
+        },
+        {
+          "const": "backoff",
+          "description": "Crashed; waiting before the next start.",
+          "type": "string"
+        },
+        {
+          "const": "error",
+          "description": "Too many crashes (5 in 5 minutes) or not startable; needs `restart`.",
+          "type": "string"
+        },
+        {
+          "const": "stopped",
+          "description": "Stopped on request.",
+          "type": "string"
+        }
+      ]
+    },
     "MediaInfo": {
       "description": "One stored media object.",
       "properties": {
@@ -36,6 +66,34 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Reply to `status`.",
   "properties": {
+    "audio_vfo": {
+      "default": null,
+      "description": "Pseudo VFO id of the instance's audio (see [`InstanceInfo::audio_vfo`]).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "device": {
+      "default": null,
+      "description": "Device the instance is bound to.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "freq_hz": {
+      "default": null,
+      "description": "Centre frequency (Hz) the instance is on now.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "media": {
       "default": [],
       "description": "Receiver time of the object per key, so a client can tell whether a slide changed.",
@@ -47,6 +105,14 @@
     "ok": {
       "description": "Always true.",
       "type": "boolean"
+    },
+    "plugin_id": {
+      "description": "Plugin the instance runs.",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/InstanceState",
+      "description": "Lifecycle state."
     },
     "status": {
       "description": "The latest document the plugin sent, `null` before the first one."
@@ -67,6 +133,8 @@
   "required": [
     "v",
     "ok",
+    "plugin_id",
+    "state",
     "status",
     "updated_unix_ms"
   ],

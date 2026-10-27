@@ -195,6 +195,15 @@ pub const RULES: &[Rule] = &[
     rule("GET", "/api/v1/plugin-instances/{id}", Operator),
     rule("POST", "/api/v1/plugin-instances/{id}/stop", Operator),
     rule("POST", "/api/v1/plugin-instances/{id}/restart", Operator),
+    // What a running plugin reports (DAB services, now playing) is decoder output: same
+    // visibility as the decoder history. Steering it is an operator's job.
+    rule("GET", "/api/v1/plugin-instances/{id}/status", GuestDecoder),
+    rule(
+        "GET",
+        "/api/v1/plugin-instances/{id}/media/{key}",
+        GuestDecoder,
+    ),
+    rule("POST", "/api/v1/plugin-instances/{id}/control", Operator),
     // Profiles.
     rule("GET", "/api/v1/profiles", Operator),
     rule("POST", "/api/v1/profiles", Operator),

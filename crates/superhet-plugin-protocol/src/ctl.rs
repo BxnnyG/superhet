@@ -236,6 +236,19 @@ pub struct StatusReply {
     pub v: u32,
     /// Always true.
     pub ok: bool,
+    /// Plugin the instance runs.
+    pub plugin_id: String,
+    /// Device the instance is bound to.
+    #[serde(default)]
+    pub device: Option<String>,
+    /// Lifecycle state.
+    pub state: InstanceState,
+    /// Centre frequency (Hz) the instance is on now.
+    #[serde(default)]
+    pub freq_hz: Option<u64>,
+    /// Pseudo VFO id of the instance's audio (see [`InstanceInfo::audio_vfo`]).
+    #[serde(default)]
+    pub audio_vfo: Option<u32>,
     /// The latest document the plugin sent, `null` before the first one.
     pub status: Value,
     /// Unix milliseconds at which the host received it (0 before the first one).

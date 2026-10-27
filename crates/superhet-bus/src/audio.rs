@@ -35,6 +35,16 @@ pub const FLAG_SQUELCH_OPEN: u8 = 0x01;
 /// Flag bit 1: the VFO is a stereo broadcast with a locked pilot, i.e. the two channels of the
 /// frame differ (only ever set on `channels = 2` frames).
 pub const FLAG_STEREO: u8 = 0x02;
+/// First `vfo_id` of the pseudo VFOs plugin audio is published under (real VFO ids are far
+/// below). Same value as `superhet_plugin_protocol::ctl::AUDIO_VFO_BASE`.
+pub const PLUGIN_VFO_BASE: u32 = 1 << 30;
+
+/// Whether `vfo_id` names the audio of a plugin instance rather than a VFO.
+#[must_use]
+pub const fn is_plugin_vfo(vfo_id: u32) -> bool {
+    vfo_id >= PLUGIN_VFO_BASE
+}
+
 /// Samples per channel per frame at 48 kHz (20 ms).
 pub const FRAME_SAMPLES: usize = 960;
 

@@ -259,6 +259,10 @@ async fn handle_inner(host: &Host, command: &str, payload: &[u8]) -> Result<Valu
         }
         cmd::STATUS => {
             let req: InstanceRef = parse(payload)?;
+            let info = host
+                .supervisor
+                .get(&req.id)
+                .ok_or_else(|| start_error(&StartError::NotFound))?;
             let snapshot = host
                 .supervisor
                 .status(&req.id)
@@ -266,6 +270,11 @@ async fn handle_inner(host: &Host, command: &str, payload: &[u8]) -> Result<Valu
             Ok(ok_json(&StatusReply {
                 v: PROTOCOL_VERSION,
                 ok: true,
+                plugin_id: info.plugin_id,
+                device: info.device,
+                state: info.state,
+                freq_hz: info.freq_hz,
+                audio_vfo: info.audio_vfo,
                 status: snapshot.status,
                 updated_unix_ms: snapshot.updated_unix_ms,
                 media: snapshot.media,

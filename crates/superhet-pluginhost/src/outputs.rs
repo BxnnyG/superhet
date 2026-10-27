@@ -194,6 +194,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn plugin_vfo_range_matches_the_bus_constant() {
+        assert_eq!(
+            superhet_bus::audio::PLUGIN_VFO_BASE,
+            superhet_plugin_protocol::ctl::AUDIO_VFO_BASE
+        );
+    }
+
+    #[test]
     fn power_of_silence_and_a_full_scale_square() {
         assert!(power_dbfs(&[0.0; 960]) <= -190.0);
         assert!(power_dbfs(&[1.0; 960]).abs() < 0.01);
