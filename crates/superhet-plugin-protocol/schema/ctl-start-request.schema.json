@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`start`: create an instance.",
+  "properties": {
+    "config": {
+      "default": null,
+      "description": "Plugin specific configuration."
+    },
+    "device": {
+      "default": null,
+      "description": "Device to bind to.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "freq_hz": {
+      "default": null,
+      "description": "Frequency (Hz) to bind to.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "plugin_id": {
+      "description": "Plugin to run.",
+      "type": "string"
+    },
+    "v": {
+      "description": "Contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "plugin_id"
+  ],
+  "title": "StartRequest",
+  "type": "object"
+}

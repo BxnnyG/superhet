@@ -1,0 +1,170 @@
+{
+  "$defs": {
+    "InstanceInfo": {
+      "description": "Snapshot of an instance.",
+      "properties": {
+        "config": {
+          "description": "Operator configuration passed to the plugin."
+        },
+        "crashes_in_window": {
+          "description": "Crashes inside the current 5 minute window.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "device": {
+          "description": "Device the instance is bound to.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "events_invalid": {
+          "description": "Rejected event lines (counted and dropped).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "events_ok": {
+          "description": "Valid events received.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "exclusive": {
+          "description": "Whether the plugin claims the device exclusively.",
+          "type": "boolean"
+        },
+        "freq_hz": {
+          "description": "Frequency (Hz) the instance is bound to.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Instance id.",
+          "type": "string"
+        },
+        "last_error": {
+          "description": "Description of the last exit or failure.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pid": {
+          "description": "Process id while running.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "plugin_id": {
+          "description": "Plugin id.",
+          "type": "string"
+        },
+        "restarts": {
+          "description": "How often the process was started again after a crash.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retry_in_ms": {
+          "description": "Milliseconds until the next start while in `backoff`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/InstanceState",
+          "description": "Lifecycle state."
+        },
+        "updated_unix_ms": {
+          "description": "Unix milliseconds of the last state change.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "plugin_id",
+        "config",
+        "exclusive",
+        "state",
+        "restarts",
+        "crashes_in_window",
+        "events_ok",
+        "events_invalid",
+        "updated_unix_ms"
+      ],
+      "type": "object"
+    },
+    "InstanceState": {
+      "description": "Lifecycle state of an instance.",
+      "oneOf": [
+        {
+          "const": "starting",
+          "description": "Process is being spawned.",
+          "type": "string"
+        },
+        {
+          "const": "running",
+          "description": "Process is up.",
+          "type": "string"
+        },
+        {
+          "const": "backoff",
+          "description": "Crashed; waiting before the next start.",
+          "type": "string"
+        },
+        {
+          "const": "error",
+          "description": "Too many crashes (5 in 5 minutes) or not startable; needs `restart`.",
+          "type": "string"
+        },
+        {
+          "const": "stopped",
+          "description": "Stopped on request.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Reply to `instances`.",
+  "properties": {
+    "instances": {
+      "description": "All instances.",
+      "items": {
+        "$ref": "#/$defs/InstanceInfo"
+      },
+      "type": "array"
+    },
+    "ok": {
+      "description": "Always true.",
+      "type": "boolean"
+    },
+    "v": {
+      "description": "Contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "ok",
+    "instances"
+  ],
+  "title": "InstancesReply",
+  "type": "object"
+}

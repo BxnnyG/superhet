@@ -1,0 +1,620 @@
+{
+  "$defs": {
+    "Acknowledge": {
+      "additionalProperties": false,
+      "description": "Notice the admin has to confirm before the plugin is installed.",
+      "properties": {
+        "text": {
+          "description": "Text shown to the admin (licence, patents, ...).",
+          "type": "string"
+        },
+        "url": {
+          "default": null,
+          "description": "Where to read more.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "CodecSection": {
+      "additionalProperties": false,
+      "description": "Codec plugin section (`[codec]`).",
+      "properties": {
+        "frames": {
+          "description": "Codec ids the plugin decodes.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pcm": {
+          "$ref": "#/$defs/PcmSpec",
+          "description": "PCM it returns."
+        }
+      },
+      "required": [
+        "frames",
+        "pcm"
+      ],
+      "type": "object"
+    },
+    "Device": {
+      "additionalProperties": false,
+      "description": "Device claim (`[device]`).\n\nAn exclusive plugin takes the whole device: the host asks the daemon to retune to the claimed\ncentre and rate, pauses everything that does not fit and restores the previous state on\nrelease (ARCHITECTURE 3.4). Enforcement arrives with the claim command of the daemon; the\nmanifest already declares it so installs show it.",
+      "properties": {
+        "center_hz": {
+          "default": null,
+          "description": "Fixed centre frequency (Hz), e.g. 1 090 000 000 for ADS-B.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "center_hz_max": {
+          "default": null,
+          "description": "Highest centre the instance may choose.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "center_hz_min": {
+          "default": null,
+          "description": "Lowest centre the instance may choose (e.g. a DAB block); with `center_hz_max`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "exclusive": {
+          "default": false,
+          "description": "Claims the device exclusively and receives the full window as IQ.",
+          "type": "boolean"
+        },
+        "sample_rate": {
+          "default": null,
+          "description": "Required device sample rate (Hz).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Input": {
+      "additionalProperties": false,
+      "description": "Input stream (`[input]`, decoders and codecs).",
+      "properties": {
+        "bandwidth_hz": {
+          "default": null,
+          "description": "Channel bandwidth (Hz) the host cuts out around the instance frequency.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "format": {
+          "$ref": "#/$defs/SampleFormat",
+          "description": "Sample encoding."
+        },
+        "kind": {
+          "$ref": "#/$defs/InputKind",
+          "description": "What is fed."
+        },
+        "sample_rate": {
+          "description": "Sample rate (Hz) of the stream the host delivers.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "sample_rate",
+        "format"
+      ],
+      "type": "object"
+    },
+    "InputKind": {
+      "description": "What the host feeds into a decoder.",
+      "oneOf": [
+        {
+          "const": "iq",
+          "description": "Complex baseband around the instance frequency.",
+          "type": "string"
+        },
+        {
+          "const": "discriminator",
+          "description": "FM discriminator output.",
+          "type": "string"
+        },
+        {
+          "const": "audio",
+          "description": "Demodulated audio.",
+          "type": "string"
+        },
+        {
+          "const": "voice_frames",
+          "description": "Voice frames of another decoder (codec plugins).",
+          "type": "string"
+        }
+      ]
+    },
+    "Install": {
+      "additionalProperties": false,
+      "description": "Install information (`[install]`).",
+      "properties": {
+        "acknowledge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Acknowledge"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Notice to confirm."
+        },
+        "build": {
+          "default": [],
+          "description": "Build commands (programs relative to the plugin directory), shown before install.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "LookupSection": {
+      "additionalProperties": false,
+      "description": "Lookup plugin section (`[lookup]`).",
+      "properties": {
+        "cache_ttl_s": {
+          "description": "How long the host may cache an answer (seconds).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "keys": {
+          "description": "Keys it resolves (`dmr_id`, `callsign`, `icao24`, ...).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rate_limit_per_min": {
+          "default": null,
+          "description": "Remote calls per minute the host must not exceed.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "keys",
+        "cache_ttl_s"
+      ],
+      "type": "object"
+    },
+    "Manifest": {
+      "additionalProperties": false,
+      "description": "A parsed `plugin.toml`.",
+      "properties": {
+        "codec": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodecSection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Codec section."
+        },
+        "device": {
+          "$ref": "#/$defs/Device",
+          "default": {
+            "center_hz": null,
+            "center_hz_max": null,
+            "center_hz_min": null,
+            "exclusive": false,
+            "sample_rate": null
+          },
+          "description": "Device claim."
+        },
+        "input": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Input"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Input stream."
+        },
+        "install": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Install"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Install information."
+        },
+        "lookup": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LookupSection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lookup section."
+        },
+        "output": {
+          "$ref": "#/$defs/Output",
+          "default": {
+            "audio": null,
+            "events_schema": null,
+            "voice_frames": []
+          },
+          "description": "Outputs."
+        },
+        "plugin": {
+          "$ref": "#/$defs/PluginMeta",
+          "description": "Identity."
+        },
+        "runtime": {
+          "$ref": "#/$defs/Runtime",
+          "default": {
+            "command": [],
+            "heartbeat_timeout_s": null,
+            "image": null,
+            "kind": "process",
+            "transport": "simple"
+          },
+          "description": "Execution."
+        },
+        "ui": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UiSection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "UI section."
+        }
+      },
+      "required": [
+        "plugin"
+      ],
+      "type": "object"
+    },
+    "Output": {
+      "additionalProperties": false,
+      "description": "Outputs (`[output]`).",
+      "properties": {
+        "audio": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PcmSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "PCM audio the plugin produces (framed transport)."
+        },
+        "events_schema": {
+          "default": null,
+          "description": "JSON Schema (draft 2020-12) file, relative to the plugin directory, that every event\nline must satisfy. Without one only the envelope is checked.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "voice_frames": {
+          "default": [],
+          "description": "Codec ids of the voice frames the plugin emits (framed transport).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "PcmSpec": {
+      "additionalProperties": false,
+      "description": "Audio output (`[output.audio]`).",
+      "properties": {
+        "channels": {
+          "description": "Channel count (1 or 2).",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sample_rate": {
+          "description": "Sample rate (Hz).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sample_rate",
+        "channels"
+      ],
+      "type": "object"
+    },
+    "PluginInfo": {
+      "description": "An installed plugin.",
+      "properties": {
+        "manifest": {
+          "$ref": "#/$defs/Manifest",
+          "description": "The validated manifest."
+        }
+      },
+      "required": [
+        "manifest"
+      ],
+      "type": "object"
+    },
+    "PluginMeta": {
+      "additionalProperties": false,
+      "description": "Identity and licensing (`[plugin]`).",
+      "properties": {
+        "description": {
+          "default": "",
+          "description": "One-line description.",
+          "type": "string"
+        },
+        "homepage": {
+          "default": null,
+          "description": "Project page.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Reverse-DNS id, at least three lowercase segments (`org.superhet.decoder.pocsag`).",
+          "type": "string"
+        },
+        "license": {
+          "description": "SPDX licence expression of the plugin and the tools it wraps.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Display name.",
+          "type": "string"
+        },
+        "protocol": {
+          "description": "Contract version this plugin was written for; must equal the host's.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "type": {
+          "$ref": "#/$defs/PluginType",
+          "description": "Plugin type."
+        },
+        "version": {
+          "description": "Semantic version of the plugin.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "version",
+        "protocol",
+        "license",
+        "type"
+      ],
+      "type": "object"
+    },
+    "PluginType": {
+      "description": "What a plugin is.",
+      "oneOf": [
+        {
+          "const": "decoder",
+          "description": "Turns samples or audio into events (and optionally audio / voice frames).",
+          "type": "string"
+        },
+        {
+          "const": "codec",
+          "description": "Turns voice frames into PCM.",
+          "type": "string"
+        },
+        {
+          "const": "lookup",
+          "description": "Resolves identifiers (callsign, ICAO address, ...).",
+          "type": "string"
+        },
+        {
+          "const": "ui",
+          "description": "Frontend module; has no process.",
+          "type": "string"
+        }
+      ]
+    },
+    "Runtime": {
+      "additionalProperties": false,
+      "description": "Execution (`[runtime]`).",
+      "properties": {
+        "command": {
+          "default": [],
+          "description": "Program and arguments. A first element containing `/` is relative to the plugin directory;\na bare name is looked up in `PATH`. Required for processes, not allowed for UI plugins.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "heartbeat_timeout_s": {
+          "default": null,
+          "description": "Kill and restart the instance when it was silent this long (seconds). Any stdout line\n(simple) or any frame (framed) counts as activity. Default: no watchdog (simple), 15 s\n(framed).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "image": {
+          "default": null,
+          "description": "Image reference (container plugins).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/RuntimeKind",
+          "default": "process",
+          "description": "Process or container."
+        },
+        "transport": {
+          "$ref": "#/$defs/Transport",
+          "default": "simple",
+          "description": "Simple or framed."
+        }
+      },
+      "type": "object"
+    },
+    "RuntimeKind": {
+      "description": "How the plugin is executed.",
+      "oneOf": [
+        {
+          "const": "process",
+          "description": "Child process of the plugin host.",
+          "type": "string"
+        },
+        {
+          "const": "container",
+          "description": "Separate container (declared in `compose.plugins.yaml`; not started by the host yet).",
+          "type": "string"
+        }
+      ]
+    },
+    "SampleFormat": {
+      "description": "Sample encoding on the input stream.",
+      "oneOf": [
+        {
+          "const": "cf32",
+          "description": "Interleaved 32-bit float I/Q.",
+          "type": "string"
+        },
+        {
+          "const": "cs16",
+          "description": "Interleaved signed 16-bit I/Q.",
+          "type": "string"
+        },
+        {
+          "const": "cu8",
+          "description": "Interleaved unsigned 8-bit I/Q.",
+          "type": "string"
+        },
+        {
+          "const": "s16le",
+          "description": "Signed 16-bit little-endian real samples.",
+          "type": "string"
+        },
+        {
+          "const": "f32le",
+          "description": "32-bit float little-endian real samples.",
+          "type": "string"
+        }
+      ]
+    },
+    "Transport": {
+      "description": "How the host talks to the plugin.",
+      "oneOf": [
+        {
+          "const": "simple",
+          "description": "stdin = samples, stdout = JSON Lines events, stderr = log.",
+          "type": "string"
+        },
+        {
+          "const": "framed",
+          "description": "Length-prefixed frames on a Unix domain socket (`SUPERHET_SOCKET`).",
+          "type": "string"
+        }
+      ]
+    },
+    "UiSection": {
+      "additionalProperties": false,
+      "description": "UI plugin section (`[ui]`).",
+      "properties": {
+        "widget": {
+          "description": "ES module relative to the plugin directory.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "widget"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Reply to `install`.",
+  "properties": {
+    "ok": {
+      "description": "Always true.",
+      "type": "boolean"
+    },
+    "plugin": {
+      "$ref": "#/$defs/PluginInfo",
+      "description": "The installed plugin."
+    },
+    "v": {
+      "description": "Contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "ok",
+    "plugin"
+  ],
+  "title": "PluginReply",
+  "type": "object"
+}

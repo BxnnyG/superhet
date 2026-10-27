@@ -17,3 +17,4 @@ Format: one file per decision, `NNNN-short-title.md`, sections *Status*, *Contex
 | [0011](0011-users-roles-and-guest-access.md) | Users, roles and guest access (amends 0008) | accepted |
 | [0012](0012-audit-log-and-admin-console.md) | Audit log and admin console | accepted |
 | [0013](0013-dab-via-plugin.md) | DAB/DAB+ via plugin | accepted |
+| [0014](0014-plugin-contract-v1-and-host-supervision.md) | Plugin contract v1 and host supervision | accepted |

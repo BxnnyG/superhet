@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`get`, `stop`, `restart`: address one instance.",
+  "properties": {
+    "id": {
+      "description": "Instance id.",
+      "type": "string"
+    },
+    "v": {
+      "description": "Contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "id"
+  ],
+  "title": "InstanceRef",
+  "type": "object"
+}

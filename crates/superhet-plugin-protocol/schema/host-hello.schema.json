@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Host handshake (`hello` host to plugin).",
+  "properties": {
+    "config": {
+      "default": null,
+      "description": "Instance configuration chosen by the operator (free-form object or null)."
+    },
+    "device": {
+      "default": null,
+      "description": "Device the instance is bound to.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "freq_hz": {
+      "default": null,
+      "description": "Centre frequency (Hz) of the instance.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "instance_id": {
+      "description": "Instance id.",
+      "type": "string"
+    },
+    "plugin_id": {
+      "description": "Plugin id.",
+      "type": "string"
+    },
+    "protocol": {
+      "description": "Contract version of the host.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "protocol",
+    "plugin_id",
+    "instance_id"
+  ],
+  "title": "HostHello",
+  "type": "object"
+}

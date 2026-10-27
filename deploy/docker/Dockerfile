@@ -26,8 +26,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends librtlsdr0 libopus0 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home --home-dir /home/superhet superhet \
-    && mkdir /data \
-    && chown superhet:superhet /data
+    && mkdir -p /data/plugins \
+    && chown -R superhet:superhet /data
 
 # One image for every service; compose selects the binary via `command`.
 COPY --from=rust /src/target/release/superhet-api /src/target/release/superhet-sdrd \

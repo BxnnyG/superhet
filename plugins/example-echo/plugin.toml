@@ -1,0 +1,26 @@
+# Reference plugin for contract v1 (docs/plugin-contract.md). It counts the bytes the host feeds
+# it and reports them as events; the optional instance config selects deliberate misbehaviour so
+# the host's supervision and validation can be tested.
+
+[plugin]
+id = "org.superhet.example.echo"
+name = "Example echo"
+version = "1.0.0"
+protocol = 1
+license = "AGPL-3.0-only"
+type = "decoder"
+description = "Reference decoder: counts input bytes and emits echo.block / echo.summary events"
+homepage = "https://github.com/BxnnyG/superhet"
+
+[runtime]
+kind = "process"
+transport = "simple"
+command = ["bin/example-echo"]
+
+[input]
+kind = "audio"
+sample_rate = 48000
+format = "s16le"
+
+[output]
+events_schema = "schema/events.json"

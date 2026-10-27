@@ -27,8 +27,10 @@ pub const ALL_DECODER_EVENTS: &str = "sh.v1.events.core.decoder.>";
 pub const ALL_AUDIT: &str = "sh.v1.audit.>";
 /// Wildcard matching every lookup request.
 pub const ALL_LOOKUP: &str = "sh.v1.lookup.>";
-/// Wildcard matching the control subject of every plugin.
-pub const ALL_PLUGIN_CTL: &str = "sh.v1.plugin.*.ctl";
+/// Wildcard matching every control command of the plugin host.
+pub const ALL_PLUGIN_CTL: &str = "sh.v1.plugin.ctl.>";
+/// State changes of plugin instances (JSON `InstanceInfo`, core NATS).
+pub const PLUGIN_STATE: &str = "sh.v1.plugin.state";
 
 /// A subject token is invalid if it is empty or contains NATS metacharacters.
 fn is_valid_token(token: &str) -> bool {
@@ -220,6 +222,21 @@ pub fn event(plugin: &str, event_type: &str) -> Result<String, InvalidToken> {
     Ok(format!("{PREFIX}.events.{plugin}.{event_type}"))
 }
 
+/// Event subject of a plugin instance: `sh.v1.events.<plugin>.<type...>`.
+///
+/// Plugin ids are reverse-DNS and event types dotted; the id becomes one token (dots mapped to
+/// `_`, which ids never contain, so the mapping is unambiguous) and the type contributes one
+/// token per segment, so `sh.v1.events.org_superhet_example_echo.>` selects one plugin.
+///
+/// # Errors
+/// Fails if the id or a type segment is not a valid token.
+pub fn plugin_event(plugin_id: &str, event_type: &str) -> Result<String, InvalidToken> {
+    let plugin = plugin_id.replace('.', "_");
+    check(&plugin)?;
+    event_type.split('.').try_for_each(check)?;
+    Ok(format!("{PREFIX}.events.{plugin}.{event_type}"))
+}
+
 /// System audit event subject: `sh.v1.audit.<source>` (see [`crate::audit`]).
 ///
 /// # Errors
@@ -238,13 +255,15 @@ pub fn lookup(key: &str) -> Result<String, InvalidToken> {
     Ok(format!("{PREFIX}.lookup.{key}"))
 }
 
-/// Plugin control subject: `sh.v1.plugin.<id>.ctl`.
+/// Plugin host control subject: `sh.v1.plugin.ctl.<cmd>` (request/reply, `list`, `install`,
+/// `instances`, `get`, `start`, `stop`, `restart`). Plugin ids contain dots and cannot be a
+/// subject token, so commands name the plugin or instance in the body.
 ///
 /// # Errors
-/// Fails if `id` is not a single valid token.
-pub fn plugin_ctl(id: &str) -> Result<String, InvalidToken> {
-    check(id)?;
-    Ok(format!("{PREFIX}.plugin.{id}.ctl"))
+/// Fails if `cmd` is not a single valid token.
+pub fn plugin_ctl(cmd: &str) -> Result<String, InvalidToken> {
+    check(cmd)?;
+    Ok(format!("{PREFIX}.plugin.ctl.{cmd}"))
 }
 
 #[cfg(test)]
@@ -306,7 +325,13 @@ mod tests {
             Ok("sh.v1.events.adsb.position")
         );
         assert_eq!(lookup("icao").as_deref(), Ok("sh.v1.lookup.icao"));
-        assert_eq!(plugin_ctl("adsb").as_deref(), Ok("sh.v1.plugin.adsb.ctl"));
+        assert_eq!(plugin_ctl("start").as_deref(), Ok("sh.v1.plugin.ctl.start"));
+        assert_eq!(
+            plugin_event("org.superhet.example.echo", "echo.block").as_deref(),
+            Ok("sh.v1.events.org_superhet_example_echo.echo.block")
+        );
+        assert!(plugin_event("org.x.y", "a..b").is_err());
+        assert!(plugin_event("org.x.y", "a.*").is_err());
     }
 
     #[test]

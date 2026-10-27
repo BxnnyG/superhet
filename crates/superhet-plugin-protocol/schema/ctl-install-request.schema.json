@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`install`: copy a plugin directory from a path on the host.",
+  "properties": {
+    "path": {
+      "description": "Directory containing `plugin.toml`, on the host running the plugin host.",
+      "type": "string"
+    },
+    "v": {
+      "description": "Contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "path"
+  ],
+  "title": "InstallRequest",
+  "type": "object"
+}

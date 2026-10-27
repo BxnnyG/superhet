@@ -88,10 +88,11 @@ Concurrency inside sdrd: tokio for I/O; DSP runs on dedicated OS threads (device
 | `sh.v1.dev.<dev>.ctl.spectrum.zoom` | publish | api → sdrd (lease a zoom slice or release it; repeated every 3 s) |
 | `sh.v1.dev.<dev>.audio.<stream>` | pub/sub (core NATS, lossy) | sdrd / pluginhost → api, recorder (binary `AudioFrame` v1 with one Opus packet each, mono or stereo, see `docs/protocol-audio.md`; `<stream>` is the VFO id for device VFOs) |
 | `sh.v1.dev.<dev>.rds.<vfo>` | pub/sub (core NATS, lossy) | sdrd → api (JSON RDS state of a WFM VFO, repeated every second; api forwards it as a text frame on the audio WebSocket; `docs/protocol-audio.md`) |
-| `sh.v1.events.<plugin>.<type>` | JetStream `EVENTS` | pluginhost → worker (persist), api (live) |
+| `sh.v1.events.<plugin>.<type...>` | core NATS today, JetStream `EVENTS` planned | pluginhost → worker (persist), api (live); `<plugin>` = plugin id with `.` as `_`, one token per type segment (ADR-0014) |
 | `sh.v1.lookup.<key>` | request/reply | api/worker → worker lookup service |
 | `sh.v1.audit.<source>` | core NATS | sdrd/pluginhost → worker (persist as `audit_events`, `docs/api-audit.md`) |
-| `sh.v1.plugin.<id>.ctl` | request/reply | api → pluginhost |
+| `sh.v1.plugin.ctl.<cmd>` | request/reply | api → pluginhost (`list`, `install`, `instances`, `get`, `start`, `stop`, `restart`; `docs/plugin-contract.md`) |
+| `sh.v1.plugin.state` | pub/sub (core NATS) | pluginhost → api (JSON `InstanceInfo` on every instance state change) |
 
 ## 2. Data flow: stick → browser
 
@@ -173,7 +174,9 @@ PostgreSQL (ADR-0006) via `sqlx`, schema `superhet`, migrations embedded in `sup
 
 DB roles: `superhet_api` (read most, write settings/profiles/bookmarks/sessions), `superhet_worker` (write events, lookups, partitions), `superhet_pluginhost` (plugin registry). Large binaries (recordings, IQ, ring buffer on disk) live on the `/data` volume, referenced by path; an S3-compatible storage backend is an option for later.
 
-## 6. Plugin contract (draft, protocol version 0)
+## 6. Plugin contract (protocol version 1)
+
+The authoritative description is `docs/plugin-contract.md` (ADR-0014) with JSON Schemas in `crates/superhet-plugin-protocol/schema/`. The text below is the design background; where it differs (version 1 instead of 0, `[device]` claim keys `center_hz_min`/`center_hz_max`, `SUPERHET_*` environment, control subjects), the contract document wins.
 
 ### 6.1 Manifest `plugin.toml`
 
@@ -182,7 +185,7 @@ DB roles: `superhet_api` (read most, write settings/profiles/bookmarks/sessions)
 id = "org.superhet.decoder.pocsag"   # reverse-DNS, unique
 name = "POCSAG / FLEX"
 version = "0.1.0"                     # semver of the plugin
-protocol = 0                          # host contract version
+protocol = 1                          # host contract version
 license = "GPL-2.0-only"              # SPDX
 type = "decoder"                      # decoder | codec | lookup | ui
 description = "POCSAG 512/1200/2400 and FLEX via multimon-ng"
@@ -228,7 +231,7 @@ acknowledge = { text = "…license/patent notice…", url = "https://…" }
 One JSON object per line:
 
 ```json
-{"v":0,"type":"pocsag.message","ts":"2026-10-20T18:00:00.123Z","data":{"address":123456,"function":0,"text":"…"}}
+{"v":1,"type":"pocsag.message","ts":"2026-10-20T18:00:00.123Z","data":{"address":123456,"function":0,"text":"…"}}
 ```
 
 The host validates against `events_schema` (invalid lines are counted and dropped), adds `plugin_id`, `instance_id`, `freq_hz`, a host timestamp, and persists/dispatches it. Well-known `type` prefixes get first-class UI (e.g. `call.start`/`call.end` with `call_id`, `src`, `dst`, `encrypted` for voice decoders).
