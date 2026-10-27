@@ -118,13 +118,16 @@ test("an operator starts a decoder on the VFO and sees its state and events", as
   await source.selectOption({ label: "All sources" });
   await expect(events.getByRole("listitem").first()).toContainText("echo.block");
 
-  // Details of an event.
+  // Details of an event. The reference plugin emits many events per second; freeze the list so the
+  // row does not move under the pointer.
+  await panel.getByRole("button", { name: "Pause", exact: true }).click();
   await panel.getByRole("button", { name: "Event details" }).first().click();
   const details = page.getByRole("dialog");
   await expect(details).toContainText("Raw data");
   await expect(details).toContainText(ECHO_ID);
   await details.getByRole("button", { name: "Close", exact: true }).first().click();
   await expect(details).toBeHidden();
+  await panel.getByRole("button", { name: /^Resume/ }).click();
 
   // CSV export carries the source column.
   await panel.getByRole("button", { name: "More log actions" }).click();
