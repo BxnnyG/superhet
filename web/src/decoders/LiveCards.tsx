@@ -24,9 +24,20 @@ interface Props {
   onUpdate: Update;
 }
 
+/** FM broadcast band: where RDS is transmitted. */
+export const RDS_BAND_HZ = { min: 87_500_000, max: 108_000_000 } as const;
+/** RDS sits at 57 kHz on the baseband; a narrower channel filter cuts it off. */
+export const RDS_MIN_BANDWIDTH_HZ = 120_000;
+
+/** Whether an RDS card makes sense: WFM, on the FM broadcast band, wide enough for the subcarrier. */
+export const hasRds = (v: Vfo): boolean =>
+  v.mode === "wfm" &&
+  v.freqHz >= RDS_BAND_HZ.min &&
+  v.freqHz <= RDS_BAND_HZ.max &&
+  v.bandwidthHz >= RDS_MIN_BANDWIDTH_HZ;
+
 /** True for the modes that have a decoder card. */
-export const hasDecoder = (v: Vfo): boolean =>
-  v.mode === "wfm" || v.mode === "nfm" || v.mode === "am";
+export const hasDecoder = (v: Vfo): boolean => hasRds(v) || v.mode === "nfm" || v.mode === "am";
 
 /**
  * Live state of the decoders, one card per VFO that has any: RDS for WFM, CTCSS and DTMF for
@@ -42,8 +53,9 @@ export function LiveCards({ vfos, selectedId, audio, audioSnap, onUpdate }: Prop
         <EmptyState
           title={vfos.length === 0 ? "No receiver selected" : "No decoders for this mode"}
         >
-          RDS needs a WFM receiver; CTCSS and DTMF need NFM or AM. The log below keeps what was
-          heard.
+          RDS needs a WFM receiver on the FM broadcast band (87.5 to 108 MHz, bandwidth 120 kHz or
+          more); CTCSS and DTMF need NFM or AM. Pagers, APRS and sensors have their own output panel
+          below the spectrum (mode bar: Digital). The log below keeps what was heard.
         </EmptyState>
       </div>
     );
@@ -51,7 +63,7 @@ export function LiveCards({ vfos, selectedId, audio, audioSnap, onUpdate }: Prop
   return (
     <div className="flex flex-col gap-2 px-3 py-3" aria-label="Live decoders" role="group">
       {cards.map((v) =>
-        v.mode === "wfm" ? (
+        hasRds(v) ? (
           <RdsCard key={v.id} vfo={v} rds={audioSnap.rds[v.id]} selected={v.id === selectedId} />
         ) : (
           <TonesCard

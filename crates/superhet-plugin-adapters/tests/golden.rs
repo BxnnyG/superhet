@@ -43,6 +43,21 @@ fn sigmf_datatype(format: SampleFormat) -> &'static str {
 
 /// Run `recording` through `plugin` and compare with the expected events.
 fn golden(plugin: &str, tool: &str, recording: &str, config: &Value) {
+    golden_with(plugin, tool, recording, config, false);
+}
+
+/// The 16-bit samples negated: audio with the opposite polarity.
+fn negate_s16(samples: &[u8]) -> Vec<u8> {
+    samples
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .flat_map(|b| i16::from_le_bytes(*b).saturating_neg().to_le_bytes())
+        .collect()
+}
+
+/// [`golden`], optionally with the recording's audio inverted (expecting the same events).
+fn golden_with(plugin: &str, tool: &str, recording: &str, config: &Value, invert: bool) {
     if !tool_available(tool) {
         assert!(
             std::env::var_os("SUPERHET_REQUIRE_PLUGIN_TOOLS").is_none(),
@@ -69,8 +84,11 @@ fn golden(plugin: &str, tool: &str, recording: &str, config: &Value) {
         meta["global"]["core:sample_rate"], input.sample_rate,
         "{recording}: sample rate does not match the manifest"
     );
-    let samples =
+    let mut samples =
         std::fs::read(recordings().join(format!("{recording}.sigmf-data"))).expect("sigmf-data");
+    if invert {
+        samples = negate_s16(&samples);
+    }
 
     // The manifests call `superhet-plugin-adapter` by name: put the freshly built binary first.
     let adapter = Path::new(env!("CARGO_BIN_EXE_superhet-plugin-adapter"))
@@ -97,7 +115,7 @@ fn golden(plugin: &str, tool: &str, recording: &str, config: &Value) {
         .map(|e| json!({ "type": e.event_type, "data": e.data }))
         .collect();
     let expected_path = recordings().join(format!("{recording}.expected.jsonl"));
-    if std::env::var_os("UPDATE_GOLDEN").is_some() {
+    if std::env::var_os("UPDATE_GOLDEN").is_some() && !invert {
         let text: String = actual.iter().map(|e| format!("{e}\n")).collect();
         std::fs::write(&expected_path, text).expect("write expected");
         return;
@@ -118,6 +136,19 @@ fn golden(plugin: &str, tool: &str, recording: &str, config: &Value) {
 #[test]
 fn pocsag_mixed_baud_rates() {
     golden("pocsag", "multimon-ng", "pocsag-mixed", &Value::Null);
+}
+
+/// multimon-ng does not detect the polarity of POCSAG itself; the default `invert: "auto"` of the
+/// adapter runs a second, inverted decoder, so audio with the opposite polarity gives the same pages.
+#[test]
+fn pocsag_inverted_audio_is_decoded_too() {
+    golden_with("pocsag", "multimon-ng", "pocsag-mixed", &Value::Null, true);
+}
+
+/// FLEX is decoded in either polarity by one decoder; the pages must not appear twice.
+#[test]
+fn flex_inverted_audio_is_decoded_once() {
+    golden_with("pocsag", "multimon-ng", "flex-1600", &Value::Null, true);
 }
 
 #[test]

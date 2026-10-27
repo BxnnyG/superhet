@@ -157,3 +157,66 @@ test("the admin console lists the instance and stops it", async () => {
     .click();
   await expect(page.getByTestId(`plugin-${ECHO_ID}`)).toHaveCount(0);
 });
+
+/** Plugin instances of the POCSAG plugin as the API reports them. */
+async function pocsagInstances() {
+  return page.evaluate(async () => {
+    const res = await fetch("/api/v1/plugin-instances");
+    const body = (await res.json()) as {
+      instances: { id: string; plugin_id: string; config: unknown; reconfigures: number }[];
+    };
+    return body.instances.filter((i) => i.plugin_id === "org.superhet.decoder.pocsag");
+  });
+}
+
+// scripts/e2e-stack.sh puts a stand-in for multimon-ng on the PATH (a page per second; the
+// inverted decoder prints other text), so the real adapter, host and event path are exercised.
+test("the Digital mode starts POCSAG, shows its output, applies settings live and stops on analog", async () => {
+  await page.goto("/");
+  await expect(page.getByRole("region", { name: "Tuning" })).toBeVisible();
+  const mode = page.getByRole("radiogroup", { name: "Mode" });
+  await mode.getByRole("radio", { name: "AM" }).click();
+  await expect(mode.getByRole("radio", { name: "AM" })).toBeChecked();
+
+  // One click on the mode bar: the preset, the plugin and the output panel.
+  await page.getByRole("combobox", { name: "Digital mode" }).selectOption({ label: "POCSAG" });
+  const notice = page.getByRole("dialog", { name: "Start POCSAG" });
+  await notice.getByRole("switch").click();
+  await notice.getByRole("button", { name: "Start POCSAG" }).click();
+  await expect(notice).toBeHidden();
+  await expect(mode.getByRole("radio", { name: "NFM" })).toBeChecked();
+
+  const dock = page.getByTestId("digital-dock");
+  await expect(dock).toContainText("Running", { timeout: 30_000 });
+  const rows = dock.getByRole("row");
+  await expect(rows.filter({ hasText: "e2e normal page" }).first()).toBeVisible({
+    timeout: 45_000,
+  });
+  await expect(rows.filter({ hasText: "RIC 1234567" }).first()).toBeVisible();
+  // Liveness: samples arrive and pages are counted.
+  await expect(dock.getByTestId("facts-input")).not.toHaveText("none yet");
+  await expect(dock.getByTestId("facts-decoded")).toContainText("pages");
+
+  const before = await pocsagInstances();
+  expect(before).toHaveLength(1);
+  const id = before[0]?.id;
+
+  // Settings apply live: no stop and start, the instance keeps its id and its history.
+  await dock.getByRole("button", { name: "Settings" }).click();
+  await dock.getByRole("combobox", { name: "Signal polarity" }).selectOption({ label: "Inverted" });
+  await expect(dock.getByRole("status")).toContainText("Applied", { timeout: 20_000 });
+  const after = await pocsagInstances();
+  expect(after).toHaveLength(1);
+  expect(after[0]?.id).toBe(id);
+  expect(after[0]?.config).toEqual({ invert: true });
+  expect(after[0]?.reconfigures).toBe(1);
+  await expect(rows.filter({ hasText: "e2e inverted page" }).first()).toBeVisible({
+    timeout: 45_000,
+  });
+  await expect(rows.filter({ hasText: "e2e normal page" }).first()).toBeVisible();
+
+  // Back to an analog mode: the decoder stops and the panel goes away.
+  await mode.getByRole("radio", { name: "WFM" }).click();
+  await expect(dock).toBeHidden({ timeout: 20_000 });
+  await expect.poll(async () => (await pocsagInstances()).length).toBe(0);
+});

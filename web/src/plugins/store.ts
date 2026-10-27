@@ -4,6 +4,7 @@
 // the tab is visible; start/stop/restart refresh at once.
 
 import { describeHttpError } from "../http";
+import type { Rec } from "../spectrum/api";
 import {
   createPluginApi,
   type PluginApi,
@@ -79,7 +80,8 @@ export class PluginStore {
     }
   }
 
-  private async refreshInstances(): Promise<void> {
+  /** Reload the instances now (the live panels do this every second or two). */
+  async refreshInstances(): Promise<void> {
     const signal = this.abort?.signal;
     try {
       const instances = await this.api.listInstances(signal);
@@ -102,6 +104,12 @@ export class PluginStore {
 
   async stopInstance(id: string): Promise<void> {
     await this.api.stop(id);
+    await this.refreshInstances();
+  }
+
+  /** Replace an instance's configuration; it restarts with it. */
+  async reconfigureInstance(id: string, config: Rec): Promise<void> {
+    await this.api.reconfigure(id, config);
     await this.refreshInstances();
   }
 

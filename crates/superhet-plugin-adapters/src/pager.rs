@@ -23,6 +23,19 @@ const POCSAG_BAUDS: [u32; 3] = [512, 1200, 2400];
 /// Character sets of `multimon-ng -C`.
 const CHARSETS: [&str; 6] = ["US", "FR", "DE", "DK", "SE", "SI"];
 
+/// Polarity of the input audio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Polarity {
+    /// Try both: one decoder per polarity (the wrong one never finds a sync word, so nothing
+    /// is reported twice).
+    #[default]
+    Auto,
+    /// As delivered.
+    Normal,
+    /// Inverted (`multimon-ng -i`).
+    Inverted,
+}
+
 /// Instance configuration of the pager plugin (`SUPERHET_CONFIG`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PagerConfig {
@@ -30,8 +43,8 @@ pub struct PagerConfig {
     pub baud: Vec<u32>,
     /// Decode FLEX as well.
     pub flex: bool,
-    /// Invert the input polarity (some receivers deliver inverted audio).
-    pub invert: bool,
+    /// Input polarity (some receivers deliver inverted audio); `Auto` decodes both.
+    pub invert: Polarity,
     /// Character set for alphanumeric POCSAG pages.
     pub charset: Option<String>,
 }
@@ -41,7 +54,7 @@ impl Default for PagerConfig {
         Self {
             baud: POCSAG_BAUDS.to_vec(),
             flex: true,
-            invert: false,
+            invert: Polarity::Auto,
             charset: None,
         }
     }
@@ -77,7 +90,14 @@ impl PagerConfig {
                         .collect::<Result<_, _>>()?;
                 }
                 "flex" => config.flex = value.as_bool().ok_or("flex must be a boolean")?,
-                "invert" => config.invert = value.as_bool().ok_or("invert must be a boolean")?,
+                "invert" => {
+                    config.invert = match value {
+                        Value::Bool(true) => Polarity::Inverted,
+                        Value::Bool(false) => Polarity::Normal,
+                        Value::String(s) if s == "auto" => Polarity::Auto,
+                        _ => return Err("invert must be true, false or \"auto\"".into()),
+                    };
+                }
                 "charset" => {
                     let set = value.as_str().ok_or("charset must be a string")?;
                     if !CHARSETS.contains(&set) {
@@ -94,17 +114,36 @@ impl PagerConfig {
         Ok(config)
     }
 
-    /// Arguments for multimon-ng (input on stdin).
+    /// Argument lists of the multimon-ng processes to run on the same input: one, or two (normal
+    /// and inverted) for [`Polarity::Auto`]. The inverted one only does POCSAG: multimon-ng's
+    /// FLEX decoder finds its sync word in either polarity, so a second FLEX decoder would report
+    /// every page twice.
+    #[must_use]
+    pub fn arg_sets(&self) -> Vec<Vec<String>> {
+        match self.invert {
+            Polarity::Auto if !self.baud.is_empty() => {
+                vec![self.args_for(false, self.flex), self.args_for(true, false)]
+            }
+            Polarity::Auto | Polarity::Normal => vec![self.args_for(false, self.flex)],
+            Polarity::Inverted => vec![self.args_for(true, self.flex)],
+        }
+    }
+
+    /// Arguments of the first process (input on stdin).
     #[must_use]
     pub fn args(&self) -> Vec<String> {
+        self.args_for(self.invert == Polarity::Inverted, self.flex)
+    }
+
+    fn args_for(&self, invert: bool, flex: bool) -> Vec<String> {
         let mut args: Vec<String> = ["-q", "-t", "raw"].map(String::from).into();
         for baud in &self.baud {
             args.extend(["-a".to_owned(), format!("POCSAG{baud}")]);
         }
-        if self.flex {
+        if flex {
             args.extend(["-a".to_owned(), "FLEX_NEXT".to_owned()]);
         }
-        if self.invert {
+        if invert {
             args.push("-i".into());
         }
         if let Some(set) = &self.charset {
@@ -347,6 +386,26 @@ mod tests {
             config.args().join(" "),
             "-q -t raw -a POCSAG1200 -i -C DE -"
         );
+        assert_eq!(config.arg_sets().len(), 1);
+    }
+
+    #[test]
+    fn polarity_auto_runs_both() {
+        let config = PagerConfig::from_json(&Value::Null).expect("default");
+        let sets = config.arg_sets();
+        assert_eq!(sets.len(), 2);
+        assert!(!sets[0].contains(&"-i".to_owned()));
+        assert!(sets[0].contains(&"FLEX_NEXT".to_owned()));
+        assert!(sets[1].contains(&"-i".to_owned()));
+        // FLEX is polarity independent: only the normal decoder runs it.
+        assert!(!sets[1].contains(&"FLEX_NEXT".to_owned()));
+        let flex_only = PagerConfig::from_json(&json!({"baud": []})).expect("flex only");
+        assert_eq!(flex_only.arg_sets().len(), 1);
+        let explicit = PagerConfig::from_json(&json!({"invert": "auto"})).expect("auto");
+        assert_eq!(explicit, config);
+        let off = PagerConfig::from_json(&json!({"invert": false})).expect("off");
+        assert_eq!(off.arg_sets().len(), 1);
+        assert!(PagerConfig::from_json(&json!({"invert": "maybe"})).is_err());
     }
 
     #[test]

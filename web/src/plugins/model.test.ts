@@ -3,6 +3,7 @@ import { vfo } from "../shell/fixtures";
 import {
   CONFIG_FIELDS,
   buildConfig,
+  configToDraft,
   defaultDraft,
   describeBinding,
   describeClaim,
@@ -30,13 +31,36 @@ describe("config forms", () => {
       ...defaultDraft(f),
       baud: [1200, 512],
       flex: false,
-      invert: true,
+      invert: "inverted",
       charset: "DE",
     };
     expect(buildConfig(f, draft)).toEqual({
       ok: true,
       config: { baud: [512, 1200], flex: false, invert: true, charset: "DE" },
     });
+  });
+
+  it("maps the polarity choice to the config and back", () => {
+    const f = fields(POCSAG_ID);
+    expect(buildConfig(f, { ...defaultDraft(f), invert: "normal" })).toEqual({
+      ok: true,
+      config: { invert: false },
+    });
+    expect(configToDraft(f, { invert: false }).invert).toBe("normal");
+    expect(configToDraft(f, { invert: true }).invert).toBe("inverted");
+    expect(configToDraft(f, {}).invert).toBe("");
+  });
+
+  it("turns a stored config back into form state", () => {
+    const f = fields(POCSAG_ID);
+    const config = { baud: [512, 1200], flex: false, charset: "DE" };
+    const draft = configToDraft(f, config);
+    expect(draft).toMatchObject({ baud: [512, 1200], flex: false, charset: "DE", invert: "" });
+    expect(buildConfig(f, draft)).toEqual({ ok: true, config });
+    const r = fields(RTL433_ID);
+    expect(configToDraft(r, { protocols: [19, 20] })).toEqual({ protocols: "19, 20" });
+    expect(configToDraft(f, null)).toEqual(defaultDraft(f));
+    expect(configToDraft(f, [1])).toEqual(defaultDraft(f));
   });
 
   it("treats all baud rates like none", () => {

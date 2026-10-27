@@ -24,6 +24,7 @@ import {
 } from "../vfo/model";
 import { BandwidthSelect, ModeSelect, SquelchControl } from "../vfo/controls";
 import { channelTitle, chipLabel } from "../channels/lookup";
+import { DigitalModeControl } from "../digital/DigitalModeControl";
 import { SMeter } from "../vfo/SMeter";
 import type { VfoPatch } from "../vfo/api";
 import { EDIT_FREQUENCY_EVENT } from "./appEvents";
@@ -189,6 +190,7 @@ function ActiveVfo({
           className="m-0 flex min-w-0 border-0 p-0 flex-wrap items-center gap-x-3 gap-y-2 max-shell:order-3 max-shell:basis-full shell:basis-[31rem] shell:flex-1 shell:flex-nowrap"
         >
           <ModeSelect vfo={vfo} onUpdate={onUpdate} />
+          <DigitalModeControl vfo={vfo} device={r.device} plugins={r.plugins} onUpdate={onUpdate} />
           <BandwidthSelect vfo={vfo} onUpdate={onUpdate} />
           <div className="grid min-w-32 flex-1 grid-cols-[minmax(0,1fr)_auto] items-end gap-x-2 gap-y-1.5 shell:max-w-72">
             <SquelchControl
