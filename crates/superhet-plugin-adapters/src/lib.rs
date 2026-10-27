@@ -9,6 +9,7 @@
 //! `tests/golden.rs` run the whole chain on committed SigMF recordings.
 
 pub mod aprs;
+pub mod dab;
 pub mod event;
 pub mod pager;
 pub mod rtl433;
