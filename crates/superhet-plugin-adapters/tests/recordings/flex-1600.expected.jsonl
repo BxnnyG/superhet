@@ -1,0 +1,2 @@
+{"data":{"baud":1600,"capcode":1234567,"cycle":0,"frame":0,"kind":"alpha","levels":2,"message":"Superhet FLEX test message","phase":"A","protocol":"flex","summary":"1234567: Superhet FLEX test message"},"type":"flex.message"}
+{"data":{"baud":1600,"capcode":1500042,"cycle":0,"frame":0,"kind":"alpha","levels":2,"message":"Second page, 1600 baud 2-FSK","phase":"A","protocol":"flex","summary":"1500042: Second page, 1600 baud 2-FSK"},"type":"flex.message"}

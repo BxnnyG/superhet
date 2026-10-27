@@ -1,0 +1,24 @@
+[package]
+name = "superhet-plugin-adapters"
+description = "Adapters that run external decoders (multimon-ng, direwolf, rtl_433) as Superhet plugins."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "superhet-plugin-adapter"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+
+[dev-dependencies]
+superhet-plugin-protocol.workspace = true
+
+[lints]
+workspace = true

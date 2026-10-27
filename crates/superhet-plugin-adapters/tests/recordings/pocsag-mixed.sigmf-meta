@@ -1,0 +1,17 @@
+{
+  "global": {
+    "core:datatype": "ri16_le",
+    "core:sample_rate": 22050,
+    "core:version": "1.2.0",
+    "core:description": "Synthetic POCSAG 1200/512/2400 baud, alpha and numeric (NFM audio)",
+    "core:author": "BxnnyG",
+    "core:license": "CC0-1.0",
+    "core:recorder": "scripts/gen-plugin-recordings.py"
+  },
+  "captures": [
+    {
+      "core:sample_start": 0
+    }
+  ],
+  "annotations": []
+}

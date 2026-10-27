@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "APRS events",
+  "description": "Validated against the complete event object (envelope included).",
+  "oneOf": [
+    {
+      "properties": {
+        "type": { "const": "aprs.packet" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "source": { "type": "string" },
+            "dest": { "type": "string" },
+            "path": { "type": "array", "items": { "type": "string" } },
+            "info": { "type": "string" },
+            "type": {
+              "enum": ["position", "mic-e", "message", "status", "object", "item", "weather", "telemetry", "nmea", "other"]
+            },
+            "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+            "lon": { "type": "number", "minimum": -180, "maximum": 180 },
+            "symbol": { "type": "string", "minLength": 2, "maxLength": 2 },
+            "course": { "type": "integer", "minimum": 0, "maximum": 360 },
+            "speed_kn": { "type": "number", "minimum": 0 },
+            "altitude_m": { "type": "number" },
+            "comment": { "type": "string" },
+            "name": { "type": "string" },
+            "live": { "type": "boolean" },
+            "addressee": { "type": "string" },
+            "message": { "type": "string" },
+            "message_id": { "type": "string" },
+            "status": { "type": "string" },
+            "summary": { "type": "string" }
+          },
+          "required": ["source", "dest", "path", "info", "summary"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["type", "data"]
+    }
+  ]
+}
