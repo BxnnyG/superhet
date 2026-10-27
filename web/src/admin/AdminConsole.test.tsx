@@ -5,6 +5,7 @@ import { AuthContext } from "../auth/context";
 import { accountStatus, authValue } from "../auth/testing";
 import { toasts } from "../ui";
 import {
+  DEFAULT_CLIENT_REPORT_POLICY,
   DEFAULT_GUEST_POLICY,
   type AdminApi,
   type AuditEvent,
@@ -14,6 +15,7 @@ import {
 } from "./api";
 import AdminConsole from "./AdminConsole";
 import type { AddrInfo, ClientInfo } from "./clientInfo";
+import type { ReportedClient } from "./clientReport";
 
 const addr = (cls: AddrInfo["class"], label: string, over: Partial<AddrInfo> = {}): AddrInfo => ({
   class: cls,
@@ -68,6 +70,27 @@ const invite = (id: number, over: Partial<Invite> = {}): Invite => ({
   ...over,
 });
 
+const REPORTED: ReportedClient = {
+  platform: "Linux",
+  platformVersion: "6.12.0",
+  model: null,
+  architecture: "x86",
+  bitness: "64",
+  mobile: false,
+  brands: [{ brand: "Chromium", version: "131.0.6778.86" }],
+  screen: { width: 2560, height: 1440, dpr: 1.25 },
+  languages: ["de-DE", "en"],
+  timezone: "Europe/Berlin",
+  touchPoints: 0,
+  cpuCores: 8,
+  memoryGb: 8,
+  connection: { kind: "wifi", effectiveType: "4g", downlinkMbps: 10, saveData: null },
+  publicIp: "203.0.113.50",
+  publicIpInfo: addr("public", "Public"),
+  publicIpStatus: "ok",
+  reportedAtMs: NOW - 590_000,
+};
+
 const SESSIONS: LiveSession[] = [
   {
     sid: "u.aa11",
@@ -95,6 +118,7 @@ const SESSIONS: LiveSession[] = [
         device: "desktop",
       },
     }),
+    reported: REPORTED,
     createdAtMs: NOW - 600_000,
     lastSeenMs: NOW - 5_000,
     idleSecs: null,
@@ -113,6 +137,7 @@ const SESSIONS: LiveSession[] = [
     ip: "203.0.113.0",
     userAgent: null,
     client: client({ ipInfo: addr("public", "Public") }),
+    reported: null,
     createdAtMs: NOW - 120_000,
     lastSeenMs: null,
     idleSecs: 14,
@@ -131,6 +156,7 @@ const event = (id: number, over: Partial<AuditEvent> = {}): AuditEvent => ({
   ip: "198.51.100.7",
   userAgent: "UA",
   client: client(),
+  reported: null,
   action: "device.tune",
   target: "dev0",
   outcome: "ok",
@@ -211,6 +237,8 @@ function fakeApi(over: Partial<AdminApi> = {}): AdminApi {
     putAuditSettings: vi.fn().mockImplementation((s) => Promise.resolve(s)),
     getLimits: vi.fn().mockResolvedValue({ listenerMaxVfos: 4, operatorMaxVfos: 0 }),
     putLimits: vi.fn().mockImplementation((l) => Promise.resolve(l)),
+    getClientReportPolicy: vi.fn().mockResolvedValue(DEFAULT_CLIENT_REPORT_POLICY),
+    putClientReportPolicy: vi.fn().mockImplementation((p) => Promise.resolve(p)),
     ...over,
   };
 }
@@ -454,7 +482,7 @@ describe("live sessions", () => {
     expect(within(olivia).getByText("Operator")).toBeInTheDocument();
     expect(within(olivia).getByText("198.51.100.7")).toBeInTheDocument();
     expect(within(olivia).getByText(/Firefox 130 on Linux/)).toBeInTheDocument();
-    expect(within(olivia).getByText("Public")).toBeInTheDocument();
+    expect(within(olivia).getAllByText("Public").length).toBeGreaterThan(0);
     expect(within(olivia).getByText("host.example.net")).toBeInTheDocument();
     expect(within(olivia).getByText(/Berlin, DE/)).toBeInTheDocument();
     expect(within(olivia).getByText(/AS3320 Example Telecom/)).toBeInTheDocument();
@@ -466,6 +494,29 @@ describe("live sessions", () => {
     expect(within(guest).getByText("Guest bb22cc")).toBeInTheDocument();
     expect(within(guest).getByText(/idle 14 s/)).toBeInTheDocument();
     expect(within(guest).getByText("No open connection")).toBeInTheDocument();
+  });
+
+  it("shows what the browser reported, marked unverified, next to the address the server sees", async () => {
+    mount("sessions");
+    const olivia = await screen.findByTestId("session-u.aa11");
+    // Collapsed: a one-line summary and the claimed public address.
+    expect(
+      within(olivia).getByText(/Linux 6\.12\.0 · x86 64-bit · 2560×1440 @1\.25×/),
+    ).toBeInTheDocument();
+    expect(within(olivia).getAllByText("203.0.113.50").length).toBeGreaterThan(0);
+    expect(within(olivia).getAllByText("client-reported · unverified").length).toBeGreaterThan(0);
+    // Expanded: every field, with the claimed address compared to the server-seen one.
+    expect(within(olivia).getByText("Public IP (client-reported)")).toBeInTheDocument();
+    expect(
+      within(olivia).getByText(/differs from the address the server sees/),
+    ).toBeInTheDocument();
+    expect(within(olivia).getByText("Chromium 131.0.6778.86")).toBeInTheDocument();
+    expect(within(olivia).getByText("de-DE, en")).toBeInTheDocument();
+    expect(within(olivia).getByText("Europe/Berlin")).toBeInTheDocument();
+    expect(within(olivia).getByText(/Never used for bans, limits or access/)).toBeInTheDocument();
+    // A session that reported nothing shows no device block.
+    const guest = screen.getByTestId("session-g.bb22cc");
+    expect(within(guest).queryByText("client-reported · unverified")).toBeNull();
   });
 
   it("shows no gateway warning while a real address is among the sessions", async () => {
@@ -603,6 +654,29 @@ describe("audit log", () => {
     expect(screen.getByText(/"merged": 3/)).toBeInTheDocument();
   });
 
+  it("shows the client report of a session.client_report event in its details", async () => {
+    const api = fakeApi({
+      audit: vi.fn().mockResolvedValue({
+        events: [
+          event(7, {
+            action: "session.client_report",
+            ip: "172.22.0.5",
+            reported: { ...REPORTED, publicIp: "172.22.0.5" },
+            details: { client: { platform: "Linux" } },
+          }),
+        ],
+        nextBeforeId: null,
+      }),
+    });
+    mount("audit", api);
+    await screen.findByRole("table", { name: "Audit events" });
+    fireEvent.click(screen.getByRole("button", { name: "Show details of event 7" }));
+    expect(screen.getByText("client-reported · unverified")).toBeInTheDocument();
+    expect(screen.getByText("Public IP (client-reported)")).toBeInTheDocument();
+    expect(screen.getByText(/same as the address the server sees/)).toBeInTheDocument();
+    expect(screen.getByText("Europe/Berlin")).toBeInTheDocument();
+  });
+
   it("says so when nothing matches", async () => {
     mount(
       "audit",
@@ -705,6 +779,48 @@ describe("guest access policy", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Allow guest access" }));
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     expect(await screen.findByText("max_guests out of range")).toBeInTheDocument();
+  });
+});
+
+describe("client device info policy", () => {
+  it("is off by default and the public IP toggle waits for a scope", async () => {
+    mount("client-info");
+    const toggle = await screen.findByRole("switch", { name: "Ask clients for their public IP" });
+    expect(screen.getByLabelText("Ask the browsers of")).toHaveValue("off");
+    expect(toggle).toBeDisabled();
+    expect(screen.queryByLabelText("Lookup service")).toBeNull();
+  });
+
+  it("saves the scope, the public IP request and the service, with the privacy warning", async () => {
+    const api = mount("client-info");
+    await screen.findByRole("switch", { name: "Ask clients for their public IP" });
+    fireEvent.change(screen.getByLabelText("Ask the browsers of"), { target: { value: "all" } });
+    fireEvent.click(screen.getByRole("switch", { name: "Ask clients for their public IP" }));
+    expect(screen.getByText(/the third party sees their IP address/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Lookup service"), {
+      target: { value: "https://ip.example.net/plain" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(api.putClientReportPolicy).toHaveBeenCalled());
+    expect(vi.mocked(api.putClientReportPolicy).mock.calls[0]?.[0]).toEqual({
+      collect: "all",
+      askPublicIp: true,
+      publicIpService: "https://ip.example.net/plain",
+    });
+    expect(await screen.findByText("All changes saved")).toBeInTheDocument();
+  });
+
+  it("refuses a service that is not https before sending", async () => {
+    const api = mount("client-info");
+    await screen.findByRole("switch", { name: "Ask clients for their public IP" });
+    fireEvent.change(screen.getByLabelText("Ask the browsers of"), { target: { value: "users" } });
+    fireEvent.click(screen.getByRole("switch", { name: "Ask clients for their public IP" }));
+    fireEvent.change(screen.getByLabelText("Lookup service"), {
+      target: { value: "http://api.ipify.org" },
+    });
+    expect(screen.getByText("The lookup service must be an https:// URL.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(api.putClientReportPolicy).not.toHaveBeenCalled();
   });
 });
 

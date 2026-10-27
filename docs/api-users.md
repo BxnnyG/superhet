@@ -122,6 +122,10 @@ guest.
 (`docs/api-audit.md`), so guests show up truncated by default. `vfos` are the channels the
 session's owner has on the devices the API has seen.
 
+Both kinds also carry `client_report` (`null` when the browser reported nothing): the device
+details the browser claims, see "Client report" below. They are **unverified**; the public address
+inside is shown in the audit IP mode of the actor class (`ip_mode_user` / `ip_mode_guest`).
+
 `DELETE /api/v1/admin/sessions/{sid}` kicks: the session is revoked (account) or ended (guest) and
 all its WebSockets close (within 2 s in the integration test; they are signalled at once). A kicked
 guest's VFOs are deleted. `204`, `404` unknown, `400` malformed `sid`. Audited as `session.kick`.
@@ -187,6 +191,48 @@ Role `listener` and up (not guests):
 | `only_without_lock` | `false` | guests cannot create VFOs while any tuning lock is held |
 | `show_decoder_events` | `false` | decoder history and its WebSocket for guests |
 | `privacy_text` | built-in notice | up to 4000 characters, shown on the guest page |
+
+### Client report
+
+Optional, off by default, controlled by the admin. A browser can tell the server what it is; the
+server stores it with the session and shows it in Live sessions and in the audit log, always as
+**client-reported and unverified**. It never feeds bans, rate limits or access decisions.
+
+`GET|PUT /api/v1/admin/client-report-policy` (admin) -> `{"client_report":{...}}`. `PUT` replaces
+the document (omitted fields take the defaults, unknown fields are `400`), audited as
+`settings.change` with `target:"client_report"`:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `collect` | `"off"` | `off`, `users` (accounts only) or `all` (accounts and guests): whose browsers are asked |
+| `ask_public_ip` | `false` | also make the browser look up its public address; only for the browsers `collect` covers |
+| `public_ip_service` | `https://api.ipify.org?format=json` | `https://` URL answering `{"ip":"..."}` or the bare address; no credentials, at most 200 characters |
+
+`GET /api/v1/auth/status` tells the browser what is asked: `client_report` is `null` or
+`{"public_ip_service": <url|null>}` for a signed-in caller, and `guest.client_report` (same shape)
+tells the guest page up front while guest mode is on.
+
+`POST /api/v1/auth/client-report` (any signed-in caller, guests included; same-origin check; body
+up to 8 KiB, `Content-Type: application/json`) stores the report for the caller's own session and
+answers `204`. Every field is optional, unknown fields are `400`:
+
+`platform`, `platform_version`, `model`, `architecture`, `bitness` (strings, at most 64
+characters, no control characters), `mobile` (bool), `brands` (up to 12 `{brand,version}` from
+`fullVersionList`), `screen` `{width,height,dpr}`, `languages` (up to 12), `timezone`,
+`touch_points`, `cpu_cores`, `memory_gb`, `connection` `{kind,effective_type,downlink_mbps,save_data}`,
+`public_ip` (a literal address; dropped unless `ask_public_ip` and the caller's group is asked) and
+`public_ip_status` (`ok`, `blocked`, `failed`). `409 disabled` when the policy does not ask this
+caller, `400 invalid` for a malformed report. Stored on the session (`sessions.client_report`,
+migration 0012) for accounts; guests keep it in memory until the guest session ends. Each accepted
+report is also audited as `session.client_report` with the report in `details.client` (the public
+address in the audit IP mode of the actor class), so it stays readable for as long as audit
+retention allows. In the admin API the stored object comes back as `client_report` with
+`reported_at_ms`, and `public_ip` plus `public_ip_info` (`class`, `label`, `family`; no reverse
+DNS or GeoIP is ever done for a claimed address).
+
+The page's content security policy allows exactly one extra `connect-src` origin, the host of
+`public_ip_service`, while `ask_public_ip` is on and somebody is asked; an open tab needs a reload
+after the admin turns it on. Privacy: `docs/client-addresses.md`, "Client-reported information".
 
 ### VFO limits
 

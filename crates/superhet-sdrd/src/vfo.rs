@@ -1259,6 +1259,56 @@ mod tests {
         assert_eq!(reg.revision(), 0);
     }
 
+    /// Widest bandwidth the web UI offers at a device rate (`web/src/vfo/bandwidth.ts`
+    /// `maxBandwidthForRate`): rate / 1.2 rounded down to 100 Hz; SSB halves it and loses 300 Hz.
+    fn ui_max(mode: VfoMode, rate: u32) -> u32 {
+        let raw = match mode {
+            VfoMode::Usb | VfoMode::Lsb => f64::from(rate) / 2.4 - 300.0,
+            _ => f64::from(rate) / 1.2,
+        };
+        (raw / 100.0).floor() as u32 * 100
+    }
+
+    #[test]
+    fn free_bandwidths_are_accepted_up_to_what_the_ui_offers() {
+        // Odd values that no preset contains, at the narrow and wide end of every mode and at the
+        // device rates the UI offers: the UI limit must never exceed what the channelizer builds.
+        let modes = [
+            (VfoMode::Wfm, 10_000, 1_000_000),
+            (VfoMode::Nfm, 1_000, 1_000_000),
+            (VfoMode::Am, 1_000, 500_000),
+            (VfoMode::Usb, 300, 12_000),
+            (VfoMode::Lsb, 300, 12_000),
+            (VfoMode::Cw, 100, 4_000),
+        ];
+        for rate in [250_000_u32, 1_024_000, 2_048_000, 2_400_000, 3_200_000] {
+            for (mode, min, max) in modes {
+                let widest = max.min(ui_max(mode, rate)).max(min);
+                for bw in [min, 13_337.clamp(min, widest), widest - 1, widest] {
+                    let mut reg = VfoRegistry::default();
+                    let mut request = simple(CENTER);
+                    request.mode = mode;
+                    request.bandwidth_hz = Some(bw);
+                    reg.create(request, rate).unwrap_or_else(|e| {
+                        panic!("{mode:?} {bw} Hz at {rate} S/s must be accepted: {e:?}")
+                    });
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bandwidths_beyond_the_device_rate_are_rejected_not_clamped() {
+        let mut reg = VfoRegistry::default();
+        let mut request = simple(CENTER);
+        request.bandwidth_hz = Some(300_000);
+        let err = reg
+            .create(request, 250_000)
+            .expect_err("too wide for 250 kS/s");
+        assert_eq!(err.code, ErrorCode::Invalid);
+        assert!(reg.list().is_empty());
+    }
+
     #[test]
     fn paused_when_any_part_of_the_channel_leaves_the_passband() {
         let at = |offset: i64, mode: VfoMode, bw: Option<u32>| Vfo {

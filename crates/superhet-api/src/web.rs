@@ -5,7 +5,7 @@
 
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError, RwLock};
 
 use axum::{
     body::Body,
@@ -26,6 +26,39 @@ pub const DEFAULT_WEB_DIR: &str = "/usr/share/superhet/web";
 const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
 img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; \
 base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
+
+/// The one extra origin the page may fetch from: the public-address lookup service, while the
+/// admin asks clients for their public address (`ClientReportPolicy`). Process-wide because the
+/// static file layer has no access to the settings.
+static LOOKUP_ORIGIN: RwLock<Option<String>> = RwLock::new(None);
+
+/// Allow (or stop allowing) the page to connect to `origin` (`https://host[:port]`).
+pub fn set_lookup_origin(origin: Option<String>) {
+    *LOOKUP_ORIGIN
+        .write()
+        .unwrap_or_else(PoisonError::into_inner) = origin;
+}
+
+/// The CSP with the lookup origin added to `connect-src`, when there is one.
+fn csp_header() -> HeaderValue {
+    let origin = LOOKUP_ORIGIN
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    origin
+        .and_then(|o| {
+            // The origin comes from a validated https URL; refuse anything that could end the
+            // directive or smuggle another one.
+            if o.contains([';', ',', '\'', '"', ' ']) {
+                return None;
+            }
+            HeaderValue::from_str(
+                &CSP.replace("connect-src 'self';", &format!("connect-src 'self' {o};")),
+            )
+            .ok()
+        })
+        .unwrap_or_else(|| HeaderValue::from_static(CSP))
+}
 
 #[derive(Clone)]
 pub enum Web {
@@ -148,14 +181,35 @@ fn decorate(response: &mut Response, assets: bool) {
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.starts_with("text/html"));
     if is_html {
-        headers.insert(
-            header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static(CSP),
-        );
+        headers.insert(header::CONTENT_SECURITY_POLICY, csp_header());
         headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
         headers.insert(
             header::REFERRER_POLICY,
             HeaderValue::from_static("same-origin"),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_csp_gains_the_lookup_origin_only_while_one_is_set() {
+        // One test owns the process-wide value so parallel tests cannot interleave.
+        set_lookup_origin(None);
+        assert_eq!(csp_header().to_str().unwrap_or_default(), CSP);
+        set_lookup_origin(Some("https://api.ipify.org".into()));
+        let csp = csp_header();
+        let csp = csp.to_str().unwrap_or_default();
+        assert!(
+            csp.contains("connect-src 'self' https://api.ipify.org;"),
+            "{csp}"
+        );
+        assert!(csp.contains("default-src 'self'"), "{csp}");
+        // A value that could end the directive is refused rather than injected.
+        set_lookup_origin(Some("https://x.example; script-src *".into()));
+        assert_eq!(csp_header().to_str().unwrap_or_default(), CSP);
+        set_lookup_origin(None);
     }
 }

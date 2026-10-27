@@ -5,6 +5,7 @@ import type { Role } from "../auth/api";
 import { isRole } from "../auth/api";
 import { request, isJson, HttpError, type FetchLike, type Json } from "../http";
 import { parseClientInfo, type ClientInfo } from "./clientInfo";
+import { parseReportedClient, type ReportedClient } from "./clientReport";
 
 // ---------- models ----------
 
@@ -67,6 +68,8 @@ export interface LiveSession {
   userAgent: string | null;
   /** Peer address, address type, reverse DNS, GeoIP and parsed browser. */
   client: ClientInfo;
+  /** What the browser reported about itself (unverified); null when nothing was reported. */
+  reported: ReportedClient | null;
   createdAtMs: number;
   lastSeenMs: number | null;
   /** Guests only: seconds without a request. */
@@ -124,6 +127,8 @@ export interface AuditEvent {
   ip: string | null;
   userAgent: string | null;
   client: ClientInfo;
+  /** `session.client_report` events: what the browser reported (unverified). */
+  reported: ReportedClient | null;
   action: string;
   target: string | null;
   outcome: Outcome;
@@ -244,6 +249,7 @@ export function parseLiveSession(raw: unknown): LiveSession {
     ip: strOrNull(raw.ip),
     userAgent: strOrNull(raw.user_agent),
     client: parseClientInfo(raw),
+    reported: parseReportedClient(raw.client_report),
     createdAtMs: num(raw.created_at_ms),
     lastSeenMs: numOrNull(raw.last_seen_ms),
     idleSecs: numOrNull(raw.idle_secs),
@@ -310,6 +316,7 @@ export function parseAuditEvent(raw: unknown): AuditEvent {
     ip: strOrNull(raw.ip),
     userAgent: strOrNull(raw.user_agent),
     client: parseClientInfo(raw),
+    reported: isJson(raw.details) ? parseReportedClient(raw.details.client) : null,
     action: str(raw.action),
     target: strOrNull(raw.target),
     outcome: OUTCOMES.find((o) => o === raw.outcome) ?? "ok",
@@ -373,6 +380,42 @@ export function guestPolicyBody(p: GuestPolicy): Json {
     only_without_lock: p.onlyWithoutLock,
     show_decoder_events: p.showDecoderEvents,
     privacy_text: p.privacyText,
+  };
+}
+
+export type CollectScope = "off" | "users" | "all";
+export const COLLECT_SCOPES: readonly CollectScope[] = ["off", "users", "all"];
+
+/** Whose browsers report device details, and whether they also look up their public address. */
+export interface ClientReportPolicy {
+  collect: CollectScope;
+  askPublicIp: boolean;
+  publicIpService: string;
+}
+
+export const DEFAULT_PUBLIC_IP_SERVICE = "https://api.ipify.org?format=json";
+
+export const DEFAULT_CLIENT_REPORT_POLICY: ClientReportPolicy = {
+  collect: "off",
+  askPublicIp: false,
+  publicIpService: DEFAULT_PUBLIC_IP_SERVICE,
+};
+
+export function parseClientReportPolicy(raw: unknown): ClientReportPolicy {
+  const p = isJson(raw) && isJson(raw.client_report) ? raw.client_report : null;
+  if (!p) return bad("client report policy");
+  return {
+    collect: COLLECT_SCOPES.find((c) => c === p.collect) ?? "off",
+    askPublicIp: p.ask_public_ip === true,
+    publicIpService: str(p.public_ip_service, DEFAULT_PUBLIC_IP_SERVICE),
+  };
+}
+
+export function clientReportPolicyBody(p: ClientReportPolicy): Json {
+  return {
+    collect: p.collect,
+    ask_public_ip: p.askPublicIp,
+    public_ip_service: p.publicIpService,
   };
 }
 
@@ -478,6 +521,8 @@ export interface AdminApi {
   putAuditSettings(s: AuditSettings): Promise<AuditSettings>;
   getLimits(signal?: AbortSignal): Promise<Limits>;
   putLimits(l: Limits): Promise<Limits>;
+  getClientReportPolicy(signal?: AbortSignal): Promise<ClientReportPolicy>;
+  putClientReportPolicy(p: ClientReportPolicy): Promise<ClientReportPolicy>;
 }
 
 export interface SelfApi {
@@ -594,6 +639,16 @@ export function createAdminApi(fetchImpl?: FetchLike): AdminApi {
       return parseAuditSettings(
         (await call("PUT", `${ADMIN}/audit-settings`, auditSettingsBody(s))).body,
       ).settings;
+    },
+    async getClientReportPolicy(signal) {
+      return parseClientReportPolicy(
+        (await call("GET", `${ADMIN}/client-report-policy`, undefined, signal)).body,
+      );
+    },
+    async putClientReportPolicy(p) {
+      return parseClientReportPolicy(
+        (await call("PUT", `${ADMIN}/client-report-policy`, clientReportPolicyBody(p))).body,
+      );
     },
     async getLimits(signal) {
       return parseLimits((await call("GET", `${ADMIN}/limits`, undefined, signal)).body);

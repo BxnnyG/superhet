@@ -30,6 +30,8 @@ interface Props {
   locked: boolean;
   /** Also show mode, bandwidth and squelch (phones: the tuning strip only has the frequency). */
   showDemodulator: boolean;
+  /** Device sample rate, bounds the custom bandwidth. */
+  sampleRateHz?: number | null;
   onUpdate: Update;
   onRemove: (id: number) => void;
 }
@@ -43,6 +45,7 @@ export function ReceiverPanel({
   autoSquelch,
   locked,
   showDemodulator,
+  sampleRateHz,
   onUpdate,
   onRemove,
 }: Props) {
@@ -81,7 +84,12 @@ export function ReceiverPanel({
       {showDemodulator && (
         <Block title="Demodulator" readOnly={readOnly}>
           <ModeSelect vfo={vfo} onUpdate={onUpdate} />
-          <BandwidthSelect vfo={vfo} onUpdate={onUpdate} className="w-full" />
+          <BandwidthSelect
+            vfo={vfo}
+            onUpdate={onUpdate}
+            sampleRateHz={sampleRateHz}
+            className="w-full"
+          />
           <div className="flex flex-col gap-1">
             <SquelchControl vfo={vfo} audio={audio} autoSquelch={autoSquelch} onUpdate={onUpdate} />
             <SMeter audio={audio} vfoId={vfo.id} compact />

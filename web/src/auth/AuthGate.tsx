@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useClientReport } from "../clientreport/useClientReport";
 import { setLockIdentity } from "../state/locks";
 import { Alert, Button } from "../ui";
 import { inviteTokenOf, navigate, usePath } from "../router";
@@ -193,6 +194,11 @@ export function AuthGate({ children, client = defaultClient }: Props) {
       signOut,
     };
   }, [state, client, signOut]);
+  // Tell the server what this browser is, once per page load, when the admin policy asks for it.
+  useClientReport(
+    state.kind === "app" ? (state.status.clientReport ?? null) : null,
+    state.kind === "app" ? `${state.status.kind}:${state.status.userId ?? ""}` : null,
+  );
   const holder = ctx?.permissions.holderId;
   useEffect(() => {
     setLockIdentity(ctx === null ? undefined : holder);
