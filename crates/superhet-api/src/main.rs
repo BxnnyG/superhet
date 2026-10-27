@@ -7,6 +7,7 @@ mod audio_ws;
 mod audit;
 mod auth;
 mod bookmarks;
+mod channel_plans;
 mod clientinfo;
 mod decoder_events;
 mod devices;
@@ -60,6 +61,9 @@ fn app(
             devices.clone(),
             deps.db.clone(),
         )))
+        .merge(channel_plans::router(
+            channel_plans::ChannelPlansState::new(devices.clone(), deps.db.clone()),
+        ))
         .merge(decoder_events::router(decoder_events::EventsState::new(
             devices.clone(),
             deps.db.clone(),

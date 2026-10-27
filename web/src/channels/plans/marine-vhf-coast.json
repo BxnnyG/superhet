@@ -1,0 +1,162 @@
+{
+  "v": 1,
+  "id": "marine-vhf-coast",
+  "name": "Marine VHF (coast side)",
+  "service": "Marine VHF",
+  "chip": "Coast",
+  "aliases": ["coast"],
+  "regions": ["WORLD"],
+  "licence": "licensed",
+  "licence_note": "Coast stations transmit here; receive-only for everybody without a licence.",
+  "mode": "nfm",
+  "bandwidth_hz": 25000,
+  "step_hz": 25000,
+  "note": "Coast-station transmit frequency of the duplex channels (ship transmit frequency + 4.600 MHz), plus the AIS channels 87B and 88B.",
+  "source": "ITU Radio Regulations Appendix 18; ITU-R M.1084-5 Annex 4",
+  "channels": [
+    {
+      "number": "01",
+      "freq_hz": 160650000
+    },
+    {
+      "number": "02",
+      "freq_hz": 160700000
+    },
+    {
+      "number": "03",
+      "freq_hz": 160750000
+    },
+    {
+      "number": "04",
+      "freq_hz": 160800000
+    },
+    {
+      "number": "05",
+      "freq_hz": 160850000
+    },
+    {
+      "number": "07",
+      "freq_hz": 160950000
+    },
+    {
+      "number": "18",
+      "freq_hz": 161500000
+    },
+    {
+      "number": "19",
+      "freq_hz": 161550000
+    },
+    {
+      "number": "20",
+      "freq_hz": 161600000
+    },
+    {
+      "number": "21",
+      "freq_hz": 161650000
+    },
+    {
+      "number": "22",
+      "freq_hz": 161700000
+    },
+    {
+      "number": "23",
+      "freq_hz": 161750000
+    },
+    {
+      "number": "24",
+      "freq_hz": 161800000
+    },
+    {
+      "number": "25",
+      "freq_hz": 161850000
+    },
+    {
+      "number": "26",
+      "freq_hz": 161900000
+    },
+    {
+      "number": "27",
+      "freq_hz": 161950000
+    },
+    {
+      "number": "28",
+      "freq_hz": 162000000
+    },
+    {
+      "number": "60",
+      "freq_hz": 160625000
+    },
+    {
+      "number": "61",
+      "freq_hz": 160675000
+    },
+    {
+      "number": "62",
+      "freq_hz": 160725000
+    },
+    {
+      "number": "63",
+      "freq_hz": 160775000
+    },
+    {
+      "number": "64",
+      "freq_hz": 160825000
+    },
+    {
+      "number": "65",
+      "freq_hz": 160875000
+    },
+    {
+      "number": "66",
+      "freq_hz": 160925000
+    },
+    {
+      "number": "78",
+      "freq_hz": 161525000
+    },
+    {
+      "number": "79",
+      "freq_hz": 161575000
+    },
+    {
+      "number": "80",
+      "freq_hz": 161625000
+    },
+    {
+      "number": "81",
+      "freq_hz": 161675000
+    },
+    {
+      "number": "82",
+      "freq_hz": 161725000
+    },
+    {
+      "number": "83",
+      "freq_hz": 161775000
+    },
+    {
+      "number": "84",
+      "freq_hz": 161825000
+    },
+    {
+      "number": "85",
+      "freq_hz": 161875000
+    },
+    {
+      "number": "86",
+      "freq_hz": 161925000
+    },
+    {
+      "number": "87B",
+      "name": "AIS 1",
+      "freq_hz": 161975000,
+      "note": "Automatic Identification System, GMSK data. Decoding needs an AIS decoder."
+    },
+    {
+      "number": "88B",
+      "name": "AIS 2",
+      "freq_hz": 162025000,
+      "note": "Automatic Identification System, GMSK data. Decoding needs an AIS decoder."
+    }
+  ]
+}

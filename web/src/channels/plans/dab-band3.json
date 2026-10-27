@@ -1,0 +1,169 @@
+{
+  "v": 1,
+  "id": "dab-band3",
+  "name": "DAB / DAB+ Band III",
+  "service": "DAB",
+  "chip": "DAB",
+  "aliases": ["dab"],
+  "regions": ["WORLD"],
+  "licence": "receive-only",
+  "licence_note": "Broadcast. Reception only.",
+  "mode": "dab",
+  "bandwidth_hz": 1536000,
+  "note": "Block centre frequencies 5A-13F; each block is 1.536 MHz wide. Which ensembles transmit on which block depends on the region, so they are not listed here: a scan (DAB plugin, coming in P2) discovers them. Selecting a block moves the device centre, it does not open a VFO.",
+  "source": "ETSI EN 300 401 (DAB), Band III block table",
+  "channels": [
+    {
+      "number": "5A",
+      "freq_hz": 174928000
+    },
+    {
+      "number": "5B",
+      "freq_hz": 176640000
+    },
+    {
+      "number": "5C",
+      "freq_hz": 178352000
+    },
+    {
+      "number": "5D",
+      "freq_hz": 180064000
+    },
+    {
+      "number": "6A",
+      "freq_hz": 181936000
+    },
+    {
+      "number": "6B",
+      "freq_hz": 183648000
+    },
+    {
+      "number": "6C",
+      "freq_hz": 185360000
+    },
+    {
+      "number": "6D",
+      "freq_hz": 187072000
+    },
+    {
+      "number": "7A",
+      "freq_hz": 188928000
+    },
+    {
+      "number": "7B",
+      "freq_hz": 190640000
+    },
+    {
+      "number": "7C",
+      "freq_hz": 192352000
+    },
+    {
+      "number": "7D",
+      "freq_hz": 194064000
+    },
+    {
+      "number": "8A",
+      "freq_hz": 195936000
+    },
+    {
+      "number": "8B",
+      "freq_hz": 197648000
+    },
+    {
+      "number": "8C",
+      "freq_hz": 199360000
+    },
+    {
+      "number": "8D",
+      "freq_hz": 201072000
+    },
+    {
+      "number": "9A",
+      "freq_hz": 202928000
+    },
+    {
+      "number": "9B",
+      "freq_hz": 204640000
+    },
+    {
+      "number": "9C",
+      "freq_hz": 206352000
+    },
+    {
+      "number": "9D",
+      "freq_hz": 208064000
+    },
+    {
+      "number": "10A",
+      "freq_hz": 209936000
+    },
+    {
+      "number": "10B",
+      "freq_hz": 211648000
+    },
+    {
+      "number": "10C",
+      "freq_hz": 213360000
+    },
+    {
+      "number": "10D",
+      "freq_hz": 215072000
+    },
+    {
+      "number": "11A",
+      "freq_hz": 216928000
+    },
+    {
+      "number": "11B",
+      "freq_hz": 218640000
+    },
+    {
+      "number": "11C",
+      "freq_hz": 220352000
+    },
+    {
+      "number": "11D",
+      "freq_hz": 222064000
+    },
+    {
+      "number": "12A",
+      "freq_hz": 223936000
+    },
+    {
+      "number": "12B",
+      "freq_hz": 225648000
+    },
+    {
+      "number": "12C",
+      "freq_hz": 227360000
+    },
+    {
+      "number": "12D",
+      "freq_hz": 229072000
+    },
+    {
+      "number": "13A",
+      "freq_hz": 230784000
+    },
+    {
+      "number": "13B",
+      "freq_hz": 232496000
+    },
+    {
+      "number": "13C",
+      "freq_hz": 234208000
+    },
+    {
+      "number": "13D",
+      "freq_hz": 235776000
+    },
+    {
+      "number": "13E",
+      "freq_hz": 237488000
+    },
+    {
+      "number": "13F",
+      "freq_hz": 239200000
+    }
+  ]
+}

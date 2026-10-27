@@ -34,6 +34,11 @@ export function PaletteHost({ r, inspector, shortcutCtx, onClose }: Props) {
     selectedId: r.vfoSnap.selectedId,
     bookmarks: r.bookmarkSnap.bookmarks,
     recent,
+    channels: {
+      plans: r.channelSnap.plans,
+      region: r.channelSnap.region,
+      tuneChannel: r.tuneChannel,
+    },
     audioEnabled: r.audioSnap.enabled,
     tune: (target, newVfo) => (newVfo ? r.tuneNew(target) : r.tuneTo(target)),
     remember: (entry) => saveRecent(pushRecent(loadRecent(), entry)),

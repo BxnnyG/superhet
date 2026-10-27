@@ -51,6 +51,7 @@ export function App({ device = "dev0" }: Props) {
     focusFrequency: () => emitAppEvent(EDIT_FREQUENCY_EVENT),
     openPalette,
     togglePalette,
+    stepChannels: r.stepChannels,
   };
   useShortcuts(shortcutCtx);
 
@@ -88,6 +89,7 @@ export function App({ device = "dev0" }: Props) {
                 createVfoAt={r.createVfoAt}
                 overlaySettings={r.overlay}
                 bookmarks={r.bookmarks}
+                channels={r.channels}
                 onAnnotationTune={(t, newVfo) => (newVfo ? r.tuneNew(t) : r.tuneTo(t))}
                 metrics={r.metrics}
                 registerView={r.registerView}

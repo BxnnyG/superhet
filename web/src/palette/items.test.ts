@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { newInput, type Bookmark } from "../bookmarks/model";
 import type { Vfo } from "../vfo/api";
+import { builtinPlans } from "../channels/catalog";
 import { buildSections, flatten, type PaletteDeps } from "./items";
 
 const vfo = (id: number, patch: Partial<Vfo> = {}): Vfo => ({
@@ -154,6 +155,52 @@ describe("buildSections", () => {
   it("ranks data above actions for the same text", () => {
     const { value } = deps();
     expect(groups(value, "tower")[0]).toBe("Bookmarks");
+  });
+});
+
+describe("channel words", () => {
+  const withChannels = () => {
+    const tuneChannel = vi.fn();
+    const { value } = deps({
+      channels: { plans: builtinPlans(), region: "DE", tuneChannel },
+    });
+    return { value, tuneChannel };
+  };
+
+  it("resolves 'pmr 3', 'dab 5c', 'marine 16' and 'ch16' through the plans", () => {
+    const { value } = withChannels();
+    expect(titles(value, "pmr 3")[0]).toBe("PMR 3 · 446.031 250 MHz");
+    expect(groups(value, "pmr 3")[0]).toBe("Channels");
+    expect(titles(value, "freenet 2")[0]).toMatch(/^Freenet 2 · 149\.037 500/);
+    expect(titles(value, "dab 5c")[0]).toMatch(/^DAB 5C · 178\.352/);
+    expect(titles(value, "marine 16")[0]).toMatch(/^Marine 16 · International distress/);
+    expect(titles(value, "ch16")[0]).toMatch(/^Marine 16/);
+  });
+
+  it("runs the tune callback, Alt+Enter asks for a new VFO, DAB never does", () => {
+    const { value, tuneChannel } = withChannels();
+    const [pmr] = flatten(buildSections(value, "pmr 3"));
+    pmr?.run({ newVfo: false });
+    pmr?.run({ newVfo: true });
+    expect(tuneChannel).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ id: "pmr446" }),
+      expect.objectContaining({ number: "3" }),
+      false,
+    );
+    expect(tuneChannel.mock.calls[1]?.[2]).toBe(true);
+    const [dab] = flatten(buildSections(value, "dab 5c"));
+    expect(pmr?.newVfoAlt).toBe(true);
+    expect(dab?.newVfoAlt).toBe(false);
+    expect(dab?.subtitle).toMatch(/device centre/);
+  });
+
+  it("adds nothing without plans, for a plain frequency or an empty query", () => {
+    const { value } = deps();
+    expect(groups(value, "pmr 3")).not.toContain("Channels");
+    const { value: v2 } = withChannels();
+    expect(groups(v2, "446.00625")).not.toContain("Channels");
+    expect(groups(v2, "")).not.toContain("Channels");
   });
 });
 

@@ -4,7 +4,13 @@ import { INSPECTOR_LABEL, visibleTabs, type InspectorState, type InspectorTab } 
 import { PHONE_QUERY, useMediaQuery } from "./useMediaQuery";
 
 /** Tabs of the phone tab bar; Decoders live inside the Receiver tab there. */
-const BAR_TABS: readonly InspectorTab[] = ["receiver", "bookmarks", "display", "source"];
+const BAR_TABS: readonly InspectorTab[] = [
+  "receiver",
+  "bookmarks",
+  "channels",
+  "display",
+  "source",
+];
 
 /** Bottom tab bar below 600 px: each button opens (or closes) the inspector sheet on its tab. */
 export function MobileTabBar({ inspector }: { inspector: InspectorState }) {

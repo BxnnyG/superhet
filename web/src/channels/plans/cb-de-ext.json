@@ -1,0 +1,178 @@
+{
+  "v": 1,
+  "id": "cb-de-ext",
+  "name": "CB radio Germany 41-80",
+  "service": "CB radio",
+  "chip": "CB",
+  "aliases": ["cb"],
+  "regions": ["DE"],
+  "licence": "licence-free",
+  "licence_note": "German extension, FM only, licence-free with approved equipment.",
+  "mode": "nfm",
+  "bandwidth_hz": 12500,
+  "step_hz": 10000,
+  "note": "Channels 41-80 on 26.565-26.955 MHz, FM only. HF: this needs an upconverter or direct sampling.",
+  "source": "BNetzA Allgemeinzuteilung CB-Funk (Kanaele 41-80)",
+  "channels": [
+    {
+      "number": "41",
+      "freq_hz": 26565000
+    },
+    {
+      "number": "42",
+      "freq_hz": 26575000
+    },
+    {
+      "number": "43",
+      "freq_hz": 26585000
+    },
+    {
+      "number": "44",
+      "freq_hz": 26595000
+    },
+    {
+      "number": "45",
+      "freq_hz": 26605000
+    },
+    {
+      "number": "46",
+      "freq_hz": 26615000
+    },
+    {
+      "number": "47",
+      "freq_hz": 26625000
+    },
+    {
+      "number": "48",
+      "freq_hz": 26635000
+    },
+    {
+      "number": "49",
+      "freq_hz": 26645000
+    },
+    {
+      "number": "50",
+      "freq_hz": 26655000
+    },
+    {
+      "number": "51",
+      "freq_hz": 26665000
+    },
+    {
+      "number": "52",
+      "freq_hz": 26675000
+    },
+    {
+      "number": "53",
+      "freq_hz": 26685000
+    },
+    {
+      "number": "54",
+      "freq_hz": 26695000
+    },
+    {
+      "number": "55",
+      "freq_hz": 26705000
+    },
+    {
+      "number": "56",
+      "freq_hz": 26715000
+    },
+    {
+      "number": "57",
+      "freq_hz": 26725000
+    },
+    {
+      "number": "58",
+      "freq_hz": 26735000
+    },
+    {
+      "number": "59",
+      "freq_hz": 26745000
+    },
+    {
+      "number": "60",
+      "freq_hz": 26755000
+    },
+    {
+      "number": "61",
+      "freq_hz": 26765000
+    },
+    {
+      "number": "62",
+      "freq_hz": 26775000
+    },
+    {
+      "number": "63",
+      "freq_hz": 26785000
+    },
+    {
+      "number": "64",
+      "freq_hz": 26795000
+    },
+    {
+      "number": "65",
+      "freq_hz": 26805000
+    },
+    {
+      "number": "66",
+      "freq_hz": 26815000
+    },
+    {
+      "number": "67",
+      "freq_hz": 26825000
+    },
+    {
+      "number": "68",
+      "freq_hz": 26835000
+    },
+    {
+      "number": "69",
+      "freq_hz": 26845000
+    },
+    {
+      "number": "70",
+      "freq_hz": 26855000
+    },
+    {
+      "number": "71",
+      "freq_hz": 26865000
+    },
+    {
+      "number": "72",
+      "freq_hz": 26875000
+    },
+    {
+      "number": "73",
+      "freq_hz": 26885000
+    },
+    {
+      "number": "74",
+      "freq_hz": 26895000
+    },
+    {
+      "number": "75",
+      "freq_hz": 26905000
+    },
+    {
+      "number": "76",
+      "freq_hz": 26915000
+    },
+    {
+      "number": "77",
+      "freq_hz": 26925000
+    },
+    {
+      "number": "78",
+      "freq_hz": 26935000
+    },
+    {
+      "number": "79",
+      "freq_hz": 26945000
+    },
+    {
+      "number": "80",
+      "freq_hz": 26955000
+    }
+  ]
+}

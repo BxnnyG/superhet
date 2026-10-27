@@ -1,0 +1,41 @@
+{
+  "v": 1,
+  "id": "airband",
+  "name": "Air band (VHF voice)",
+  "service": "Air band",
+  "chip": "Air",
+  "aliases": ["air", "airband"],
+  "regions": ["WORLD"],
+  "licence": "receive-only",
+  "licence_note": "Reception only; transmitting needs an aeronautical licence.",
+  "mode": "am",
+  "bandwidth_hz": 8000,
+  "step_hz": 25000,
+  "note": "118.000-136.975 MHz. Stepping follows the channel raster: 25 kHz everywhere, 8.33 kHz in European airspace (three channels per 25 kHz, named like 118.005, 118.010, 118.015). Voice is AM.",
+  "source": "ICAO Annex 10 Vol. V (118-137 MHz, 25 kHz and 8.33 kHz channel spacing); Commission Implementing Regulation (EU) 1079/2012",
+  "channels": [
+    {
+      "number": "Guard",
+      "name": "Emergency (guard)",
+      "freq_hz": 121500000,
+      "note": "International aeronautical emergency frequency."
+    }
+  ],
+  "rasters": [
+    {
+      "id": "25k",
+      "label": "25 kHz",
+      "start_hz": 118000000,
+      "end_hz": 136975000,
+      "step_hz": 25000
+    },
+    {
+      "id": "8.33k",
+      "label": "8.33 kHz",
+      "start_hz": 118000000,
+      "end_hz": 136991667,
+      "step_hz": 8333.3333333,
+      "naming": "icao-8.33"
+    }
+  ]
+}

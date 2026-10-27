@@ -32,10 +32,13 @@ notes and tokens: `docs/ui-design.md`.
 - **Spectrum and waterfall** fill the remaining height (`flex-1 min-h-0`). Overlays: band ranges as a
   thin ribbon above the scale, point bookmarks as clickable pins, VFO passbands.
 - **Right inspector** (w-80, collapsible, `]` toggles it, state persisted in `localStorage`) with the
-  tabs Receiver, Bookmarks, Decoders, Display, Source. Every tab body scrolls on its own.
+  tabs Receiver, Bookmarks, Channels, Decoders, Display, Source. Every tab body scrolls on its own.
   - Receiver: the selected VFO in detail (stereo and de-emphasis, output volume, RDS or CTCSS/DTMF,
     remove).
   - Bookmarks: the bookmark panel.
+  - Channels: fixed-channel services by region, a channel grid per plan, region and "step by
+    channel" settings, plan import (`docs/channel-plans.md`). The tuning strip shows a chip
+    ("PMR 3") when the VFO sits on a channel; the palette resolves `pmr 3`, `dab 5c`, `ch16`.
   - Decoders: RDS and Tones (also shown inside Receiver).
   - Display: levels, zoom, floor and ceiling, band plan categories.
   - Source: centre, sample rate, gain, AGC, ppm, tuning lock, profiles, audio device.

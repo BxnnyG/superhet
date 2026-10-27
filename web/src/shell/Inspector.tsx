@@ -3,6 +3,7 @@ import { AudioControls } from "../audio/AudioControls";
 import { usePermissions } from "../auth/context";
 import { BandPlanPanel } from "../bandplan/BandPlanPanel";
 import { BookmarksPanel } from "../bookmarks/BookmarksPanel";
+import { ChannelsPanel } from "../channels/ChannelsPanel";
 import { DecodersTab } from "../decoders/DecodersTab";
 import { ProfilesPanel } from "../profiles/ProfilesPanel";
 import { DisplayControls } from "../spectrum/DisplayControls";
@@ -176,6 +177,8 @@ function TabBody({ r, tab, phoneUp }: { r: Receiver; tab: InspectorTab; phoneUp:
           />
         </div>
       );
+    case "channels":
+      return <ChannelsPanel r={r} />;
     case "decoders":
       return (
         <DecodersTab

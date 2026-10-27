@@ -214,6 +214,11 @@ pub const RULES: &[Rule] = &[
     rule("PUT", "/api/v1/bookmark-groups/order", Operator),
     rule("PATCH", "/api/v1/bookmark-groups/{id}", Operator),
     rule("DELETE", "/api/v1/bookmark-groups/{id}", Operator),
+    // Custom channel plans: everybody reads, operators edit (the built-in plans ship with the UI).
+    rule("GET", "/api/v1/channel-plans", Listener),
+    rule("POST", "/api/v1/channel-plans", Operator),
+    rule("PUT", "/api/v1/channel-plans/{id}", Operator),
+    rule("DELETE", "/api/v1/channel-plans/{id}", Operator),
     // Own sessions.
     rule("GET", "/api/v1/me/sessions", Listener),
     rule("DELETE", "/api/v1/me/sessions/{sid}", Listener),
@@ -390,6 +395,7 @@ mod tests {
             include_str!("profiles.rs"),
             include_str!("bookmarks.rs"),
             include_str!("plugins.rs"),
+            include_str!("channel_plans.rs"),
             include_str!("admin/mod.rs"),
         ];
         let mut paths = Vec::new();
