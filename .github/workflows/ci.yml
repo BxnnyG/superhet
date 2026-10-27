@@ -36,7 +36,7 @@ jobs:
       # The golden tests of the decoder plugins fail (instead of skipping) when a tool is missing.
       SUPERHET_REQUIRE_PLUGIN_TOOLS: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Service containers cannot take command arguments, so start NATS with JetStream by hand.
       - name: Start NATS
         run: |
@@ -67,7 +67,7 @@ jobs:
   deny:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
@@ -78,7 +78,7 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
@@ -89,7 +89,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate compose file
         run: |
           cp .env.example .env
@@ -114,7 +114,7 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: web/package.json
@@ -153,7 +153,7 @@ jobs:
       SUPERHET_DATABASE_URL: postgres://superhet:ci-only-password@localhost:5432/superhet
       SUPERHET_NATS_URL: nats://localhost:4222
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Start NATS
         run: |
           docker run -d --name nats -p 4222:4222 -p 8222:8222 nats:2.15.1-alpine -js -m 8222
