@@ -31,6 +31,8 @@ pub mod env {
     pub const PLUGIN_DIR: &str = "SUPERHET_PLUGIN_DIR";
     /// Device name, when the instance is bound to one.
     pub const DEVICE: &str = "SUPERHET_DEVICE";
+    /// VFO id, when the instance is fed from one.
+    pub const VFO: &str = "SUPERHET_VFO";
     /// Frequency in Hz, when the instance is bound to one.
     pub const FREQ_HZ: &str = "SUPERHET_FREQ_HZ";
     /// Instance configuration as one line of JSON (`null` when none was given).
@@ -50,6 +52,8 @@ pub struct InstanceEnv<'a> {
     pub plugin_dir: &'a std::path::Path,
     /// Bound device.
     pub device: Option<&'a str>,
+    /// Bound VFO.
+    pub vfo: Option<u32>,
     /// Bound frequency (Hz).
     pub freq_hz: Option<u64>,
     /// Operator configuration.
@@ -68,6 +72,9 @@ impl InstanceEnv<'_> {
         ];
         if let Some(device) = self.device {
             vars.push((env::DEVICE, device.to_owned()));
+        }
+        if let Some(vfo) = self.vfo {
+            vars.push((env::VFO, vfo.to_string()));
         }
         if let Some(freq) = self.freq_hz {
             vars.push((env::FREQ_HZ, freq.to_string()));
@@ -93,6 +100,7 @@ mod tests {
             instance_id: "i1",
             plugin_dir: std::path::Path::new("/p"),
             device: None,
+            vfo: None,
             freq_hz: Some(144_800_000),
             config: &config,
         }

@@ -54,9 +54,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      # The API live tests spawn target/debug/superhet-sdrd and -worker; build them explicitly
-      # rather than relying on the workspace test build to leave them there.
-      - run: cargo build -p superhet-sdrd -p superhet-worker
+      # The API live tests spawn target/debug/superhet-{sdrd,pluginhost,worker}; build them
+      # explicitly rather than relying on the workspace test build to leave them there.
+      - run: cargo build -p superhet-sdrd -p superhet-pluginhost -p superhet-worker
       - run: cargo test --workspace
 
   deny:

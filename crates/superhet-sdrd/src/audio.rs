@@ -22,11 +22,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use superhet_bus::audio::{AudioFrame, FLAG_SQUELCH_OPEN, FLAG_STEREO, FRAME_SAMPLES};
 use superhet_bus::opus::Encoder;
 use superhet_bus::rds::RdsMessage;
+use superhet_bus::tap::{TapKind, TapOpen};
 use superhet_bus::tones::TonesMessage;
 use superhet_device::IqBlock;
 use superhet_dsp::{Channel, Mode, OUTPUT_RATE};
 
 use crate::rds_quality::RdsQuality;
+use crate::tap::{TapOutput, TapStream, sync_streams};
 use crate::vfo::{Status, Tuning, Vfo, VfoShared};
 
 /// IQ blocks buffered between the spectrum thread and the VFO thread.
@@ -119,11 +121,27 @@ impl AudioEngine {
     ///
     /// # Errors
     /// Fails if the thread cannot be spawned.
+    #[cfg(test)]
     pub fn start_with_sinks(
         vfos: Arc<VfoShared>,
         sink: impl FnMut(u32, Vec<u8>) + Send + 'static,
         rds_sink: impl FnMut(u32, Vec<u8>) + Send + 'static,
         tones_sink: impl FnMut(u32, Vec<u8>) + Send + 'static,
+    ) -> io::Result<Self> {
+        Self::start_with_taps(vfos, sink, rds_sink, tones_sink, None)
+    }
+
+    /// Like [`Self::start_with_sinks`], plus plugin input taps (`taps`): the thread converts
+    /// what the taps ask for and hands the chunks to the tap sink.
+    ///
+    /// # Errors
+    /// Fails if the thread cannot be spawned.
+    pub fn start_with_taps(
+        vfos: Arc<VfoShared>,
+        sink: impl FnMut(u32, Vec<u8>) + Send + 'static,
+        rds_sink: impl FnMut(u32, Vec<u8>) + Send + 'static,
+        tones_sink: impl FnMut(u32, Vec<u8>) + Send + 'static,
+        taps: Option<TapOutput>,
     ) -> io::Result<Self> {
         let (tx, rx) = mpsc::sync_channel(QUEUE_BLOCKS);
         let tap = IqTap {
@@ -136,7 +154,7 @@ impl AudioEngine {
             let tap = tap.clone();
             std::thread::Builder::new()
                 .name("sdrd-vfo".into())
-                .spawn(move || run(&rx, &vfos, &stop, &tap, sink, rds_sink, tones_sink))?
+                .spawn(move || run(&rx, &vfos, &stop, &tap, sink, rds_sink, tones_sink, taps))?
         };
         Ok(Self {
             stop,
@@ -223,6 +241,11 @@ struct Slot {
     tones_active: bool,
     /// The channel was replaced, removed or lost its detector: publish an empty tone state.
     tones_clear: bool,
+    /// Plugin taps on this VFO.
+    taps: Vec<TapStream>,
+    /// Channels of the audio in `scratch` (0: none was produced for the last block).
+    scratch_channels: usize,
+    tap_mono: Vec<f32>,
 }
 
 impl Slot {
@@ -251,6 +274,64 @@ impl Slot {
             tones_at: Instant::now(),
             tones_active: false,
             tones_clear: false,
+            taps: Vec::new(),
+            scratch_channels: 0,
+            tap_mono: Vec::new(),
+        }
+    }
+
+    /// Serve exactly the taps of `wanted` that belong to this VFO.
+    fn sync_taps(&mut self, wanted: &[TapOpen]) {
+        let id = self.vfo.id;
+        sync_streams(
+            &mut self.taps,
+            wanted
+                .iter()
+                .filter(|t| t.kind != TapKind::Window && t.vfo == Some(id)),
+        );
+        self.apply_capture();
+    }
+
+    /// Have the channel keep its baseband while an `iq` tap needs it.
+    fn apply_capture(&mut self) {
+        let wanted = self.taps.iter().any(|t| t.open.kind == TapKind::Iq);
+        if let Some(channel) = self.channel.as_mut() {
+            channel.set_iq_capture(wanted);
+        }
+    }
+
+    /// Convert the block just processed for every tap.
+    fn feed_taps(&mut self, sink: &mut dyn FnMut(&str, Vec<u8>)) {
+        let Some(channel) = self.channel.as_ref() else {
+            return;
+        };
+        if self.taps.iter().any(|t| t.open.kind == TapKind::Audio) && !self.scratch.is_empty() {
+            self.tap_mono.clear();
+            if self.scratch_channels == 2 {
+                self.tap_mono.extend(
+                    self.scratch
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|p| 0.5 * (p[0] + p[1])),
+                );
+            } else {
+                self.tap_mono.extend_from_slice(&self.scratch);
+            }
+            for tap in self
+                .taps
+                .iter_mut()
+                .filter(|t| t.open.kind == TapKind::Audio)
+            {
+                tap.push_audio(&self.tap_mono, f64::from(OUTPUT_RATE), sink);
+            }
+        }
+        let iq = channel.captured_iq();
+        if !iq.is_empty() {
+            let rate = channel.channel_rate();
+            for tap in self.taps.iter_mut().filter(|t| t.open.kind == TapKind::Iq) {
+                tap.push_iq(iq, rate, sink);
+            }
         }
     }
 
@@ -319,6 +400,7 @@ impl Slot {
         channel.set_stereo(self.vfo.stereo_enabled());
         channel.set_tones(self.vfo.tones_enabled());
         channel.set_tone_squelch(self.vfo.tone_squelch_hz);
+        channel.set_iq_capture(self.taps.iter().any(|t| t.open.kind == TapKind::Iq));
         let channels = channel.output_channels();
         self.ensure_encoder(bitrate_for(cfg.mode, channels), channels);
     }
@@ -445,7 +527,12 @@ impl Slot {
             impl FnMut(u32, Vec<u8>),
         >,
     ) {
+        self.scratch.clear();
+        self.scratch_channels = 0;
         self.process_audio(block, block_start_ns, &mut sinks.audio);
+        if let Some(taps) = sinks.taps.as_mut() {
+            self.feed_taps(&mut *taps.sink);
+        }
         self.publish_rds(&mut sinks.rds);
         self.publish_tones(&mut sinks.tones);
     }
@@ -467,6 +554,7 @@ impl Slot {
         self.timeline.push_back((self.produced, block_start_ns));
         self.scratch.clear();
         let stats = channel.process(&block.samples, &mut self.scratch);
+        self.scratch_channels = channels;
         self.power_dbfs = stats.power_dbfs;
         self.squelch_open = stats.squelch_open;
         self.stereo_locked = channels == 2 && channel.stereo_locked();
@@ -545,8 +633,10 @@ struct Sinks<A, R, T> {
     audio: A,
     rds: R,
     tones: T,
+    taps: Option<TapOutput>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run(
     rx: &Receiver<Arc<IqBlock>>,
     shared: &VfoShared,
@@ -555,13 +645,17 @@ fn run(
     sink: impl FnMut(u32, Vec<u8>),
     rds_sink: impl FnMut(u32, Vec<u8>),
     tones_sink: impl FnMut(u32, Vec<u8>),
+    taps: Option<TapOutput>,
 ) {
     let mut sinks = Sinks {
         audio: sink,
         rds: rds_sink,
         tones: tones_sink,
+        taps,
     };
     let mut slots: Vec<Slot> = Vec::new();
+    let mut window_taps: Vec<TapStream> = Vec::new();
+    let mut seen_taps = u64::MAX;
     let mut seen_generation = u64::MAX;
     let mut tuned: Option<(Tuning, u64)> = None;
     let mut settle = 0usize;
@@ -579,11 +673,27 @@ fn run(
         };
         let retuned = tuned != Some((tuning, block.tuning_epoch));
         let generation = shared.generation();
-        if retuned || generation != seen_generation {
-            if generation != seen_generation {
+        let taps_now = sinks.taps.as_ref().map(|t| t.shared.generation());
+        let taps_changed = taps_now.is_some_and(|g| g != seen_taps);
+        if retuned || generation != seen_generation || taps_changed {
+            let vfos_changed = generation != seen_generation;
+            if vfos_changed {
                 let (revision, vfos) = shared.snapshot();
                 seen_generation = revision;
                 sync_slots(&mut slots, &vfos);
+            }
+            if (vfos_changed || taps_changed)
+                && let Some(out) = &sinks.taps
+            {
+                seen_taps = taps_now.unwrap_or(seen_taps);
+                let wanted = out.shared.snapshot();
+                for slot in &mut slots {
+                    slot.sync_taps(&wanted);
+                }
+                sync_streams(
+                    &mut window_taps,
+                    wanted.iter().filter(|t| t.kind == TapKind::Window),
+                );
             }
             tuned = Some((tuning, block.tuning_epoch));
             if retuned {
@@ -591,6 +701,15 @@ fn run(
             }
             for slot in &mut slots {
                 slot.configure(tuning, retuned);
+            }
+        }
+        if let Some(out) = sinks.taps.as_mut() {
+            for tap in &mut window_taps {
+                if tap.open.rate == block.sample_rate
+                    && tap.open.center_hz.is_none_or(|c| c == block.center_hz)
+                {
+                    tap.push_iq(&block.samples, f64::from(block.sample_rate), &mut *out.sink);
+                }
             }
         }
         if settle > 0 {
@@ -747,6 +866,152 @@ mod tests {
         let crossings = tail.windows(2).filter(|w| w[0] * w[1] < 0.0).count() as f32;
         let hz = crossings / 2.0 / (tail.len() as f32 / 48_000.0);
         assert!((650.0..750.0).contains(&hz), "pitch {hz}");
+    }
+
+    fn tap_request(
+        id: &str,
+        kind: TapKind,
+        vfo: Option<u32>,
+        format: superhet_bus::tap::TapFormat,
+        rate: u32,
+    ) -> TapOpen {
+        TapOpen {
+            v: 1,
+            id: id.into(),
+            kind,
+            vfo,
+            rate,
+            format,
+            center_hz: None,
+        }
+    }
+
+    /// Run an engine with the given taps over `blocks`; returns the bytes each tap received.
+    fn run_taps(
+        shared: &Arc<VfoShared>,
+        taps: Vec<TapOpen>,
+        blocks: &[Arc<IqBlock>],
+    ) -> std::collections::HashMap<String, Vec<u8>> {
+        let table = Arc::new(crate::tap::TapShared::default());
+        for tap in taps {
+            table.open(tap, Duration::from_secs(60)).expect("open tap");
+        }
+        let (tx, rx) = channel::<(String, Vec<u8>)>();
+        let output = TapOutput {
+            shared: Arc::clone(&table),
+            sink: Box::new(move |id, bytes| {
+                let _ = tx.send((id.to_owned(), bytes));
+            }),
+        };
+        let engine = AudioEngine::start_with_taps(
+            Arc::clone(shared),
+            |_, _| {},
+            |_, _| {},
+            |_, _| {},
+            Some(output),
+        )
+        .expect("start");
+        feed(&engine.tap(), blocks);
+        let mut got: std::collections::HashMap<String, Vec<u8>> = Default::default();
+        while let Ok((id, bytes)) = rx.recv_timeout(Duration::from_millis(300)) {
+            got.entry(id).or_default().extend(bytes);
+        }
+        drop(engine);
+        got
+    }
+
+    #[test]
+    fn audio_tap_delivers_demodulated_pcm_at_the_requested_rate() {
+        use superhet_bus::tap::TapFormat;
+        let shared = Arc::new(VfoShared::default());
+        let id = create(&shared, CENTER + 50_000, VfoMode::Nfm);
+        let other = create(&shared, CENTER - 50_000, VfoMode::Nfm);
+        let taps = vec![
+            tap_request("a", TapKind::Audio, Some(id), TapFormat::S16le, 22_050),
+            tap_request("b", TapKind::Audio, Some(id), TapFormat::F32le, 48_000),
+            // A VFO without a signal still yields (silent) audio of the right length.
+            tap_request("c", TapKind::Audio, Some(other), TapFormat::S16le, 8_000),
+        ];
+        let got = run_taps(&shared, taps, &fm_blocks(50_000.0, 300, 0, CENTER));
+
+        // 1.2 s of signal.
+        let a = &got["a"];
+        let samples = a.len() / 2;
+        assert!(
+            (22_050 * 3 / 4..=22_050 * 6 / 5).contains(&samples),
+            "{samples}"
+        );
+        let rms = (a
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .skip(4_000)
+            .map(|b| (f64::from(i16::from_le_bytes(*b)) / 32_768.0).powi(2))
+            .sum::<f64>()
+            / (samples - 4_000) as f64)
+            .sqrt();
+        // 3 kHz of 5 kHz NFM deviation: amplitude 0.6, rms about 0.42.
+        assert!((0.25..0.6).contains(&rms), "rms {rms}");
+        let f32_samples = got["b"].len() / 4;
+        assert!(
+            (48_000 * 3 / 4..=48_000 * 6 / 5).contains(&f32_samples),
+            "{f32_samples}"
+        );
+        assert!(got["c"].len() / 2 >= 4_000, "{}", got["c"].len());
+    }
+
+    #[test]
+    fn iq_tap_delivers_the_vfo_baseband() {
+        use superhet_bus::tap::TapFormat;
+        let shared = Arc::new(VfoShared::default());
+        let id = create(&shared, CENTER + 50_000, VfoMode::Nfm);
+        let taps = vec![tap_request(
+            "iq",
+            TapKind::Iq,
+            Some(id),
+            TapFormat::Cf32,
+            48_000,
+        )];
+        let got = run_taps(&shared, taps, &fm_blocks(50_000.0, 300, 0, CENTER));
+        let bytes = &got["iq"];
+        let samples = bytes.len() / 8;
+        assert!(
+            (48_000 * 3 / 4..=48_000 * 6 / 5).contains(&samples),
+            "{samples}"
+        );
+        // A constant-envelope FM carrier: |IQ| stays near the same value after the filters settled.
+        let magnitudes: Vec<f32> = bytes
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .skip(8_000)
+            .map(|b| {
+                let re = f32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+                let im = f32::from_le_bytes([b[4], b[5], b[6], b[7]]);
+                re.hypot(im)
+            })
+            .collect();
+        let mean = magnitudes.iter().sum::<f32>() / magnitudes.len() as f32;
+        assert!((0.3..0.7).contains(&mean), "mean magnitude {mean}");
+    }
+
+    #[test]
+    fn window_tap_passes_blocks_of_the_requested_rate_and_centre_only() {
+        use superhet_bus::tap::TapFormat;
+        let shared = Arc::new(VfoShared::default());
+        let mut right = tap_request("w", TapKind::Window, None, TapFormat::Cu8, RATE);
+        right.center_hz = Some(CENTER);
+        let mut wrong_centre = tap_request("x", TapKind::Window, None, TapFormat::Cu8, RATE);
+        wrong_centre.center_hz = Some(CENTER + 1);
+        let wrong_rate = tap_request("y", TapKind::Window, None, TapFormat::Cu8, RATE / 2);
+        let got = run_taps(
+            &shared,
+            vec![right, wrong_centre, wrong_rate],
+            &fm_blocks(0.0, 20, 0, CENTER),
+        );
+        assert!(got["w"].len() >= 20 * BLOCK * 2 - 64 * 1024);
+        assert!(!got.contains_key("x"));
+        assert!(!got.contains_key("y"));
     }
 
     #[test]

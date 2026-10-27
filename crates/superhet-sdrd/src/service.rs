@@ -16,6 +16,7 @@ use async_nats::jetstream::{self, kv};
 use async_nats::{Client, Message, connection::State as Connection};
 use futures_util::StreamExt;
 use superhet_bus::subjects;
+use superhet_bus::tap::{self, ById, ClaimAcquire, TapKind, TapOpen};
 use superhet_bus::zoom::ZoomCommand;
 use superhet_device::DeviceControl;
 use tokio::sync::{mpsc, watch};
@@ -26,11 +27,14 @@ use crate::control::{
 };
 use crate::controller::Controller;
 use crate::overload::OverloadStatus;
+use crate::tap::TapShared;
 use crate::vfo::VfoShared;
 use crate::zoom::ZoomHandle;
 
 /// Tune requests queued between the bus loop and the executor.
 const QUEUE_JOBS: usize = 64;
+/// How often tap and claim leases are checked for expiry.
+const LEASE_POLL: Duration = Duration::from_secs(1);
 /// How often the ADC overload state is checked for changes.
 const OVERLOAD_POLL: Duration = Duration::from_secs(1);
 /// Minimum spacing of state refreshes caused by a changed dropped-block count.
@@ -69,6 +73,7 @@ pub async fn start(
     vfos: Arc<VfoShared>,
     zoom: ZoomHandle,
     overload: Arc<OverloadStatus>,
+    taps: Arc<TapShared>,
 ) -> Result<Service, Box<dyn std::error::Error>> {
     let ctl_subject = subjects::ctl_all(&device)?;
     let state_subject = subjects::state(&device)?;
@@ -76,6 +81,11 @@ pub async fn start(
     let restore_key = subjects::restore_key(&device)?;
 
     let (state_tx, state_rx) = watch::channel(None);
+    let plugin_input = Arc::new(PluginInput {
+        device: device.clone(),
+        vfos: Arc::clone(&vfos),
+        taps,
+    });
     let controller = Arc::new(
         Controller::new(device, control, vfos, state_tx).with_overload(Arc::clone(&overload)),
     );
@@ -101,6 +111,10 @@ pub async fn start(
         state_rx,
     ));
     let overload_watch = tokio::spawn(watch_overload(Arc::clone(&controller), overload));
+    let lease_watch = tokio::spawn(expire_leases(
+        Arc::clone(&controller),
+        Arc::clone(&plugin_input),
+    ));
     let executor = tokio::spawn(execute_jobs(
         job_rx,
         client.clone(),
@@ -110,12 +124,12 @@ pub async fn start(
         let client = client.clone();
         tokio::spawn(async move {
             while let Some(message) = subscription.next().await {
-                handle_message(&client, &controller, &job_tx, &zoom, message).await;
+                handle_message(&client, &controller, &plugin_input, &job_tx, &zoom, message).await;
             }
         })
     };
     Ok(Service {
-        tasks: vec![publisher, executor, server, overload_watch],
+        tasks: vec![publisher, executor, server, overload_watch, lease_watch],
         client,
         key,
     })
@@ -282,9 +296,79 @@ where
     }
 }
 
+/// What the plugin input requests (taps) need besides the controller.
+struct PluginInput {
+    device: String,
+    vfos: Arc<VfoShared>,
+    taps: Arc<TapShared>,
+}
+
+impl PluginInput {
+    /// `tap.open`: validate, check the VFO and create or refresh the tap.
+    fn open(&self, payload: &[u8]) -> Result<Vec<u8>, CtlError> {
+        let open: TapOpen = serde_json::from_slice(payload)
+            .map_err(|err| CtlError::invalid(format!("malformed tap request: {err}")))?;
+        open.validate()
+            .map_err(|err| CtlError::invalid(err.to_string()))?;
+        if open.kind != TapKind::Window {
+            let wanted = open.vfo.unwrap_or_default();
+            let (_, vfos) = self.vfos.snapshot();
+            if !vfos.iter().any(|v| v.id == wanted) {
+                return Err(CtlError::new(
+                    control::ErrorCode::NotFound,
+                    format!("no VFO {wanted}"),
+                ));
+            }
+        }
+        let subject = subjects::tap(&self.device, &open.id)
+            .map_err(|err| CtlError::invalid(err.to_string()))?;
+        let id = open.id.clone();
+        if self.taps.open(open, tap::LEASE_TTL)? {
+            tracing::info!(tap = %id, "plugin tap opened");
+        }
+        Ok(
+            serde_json::json!({"v": control::VERSION, "ok": true, "subject": subject})
+                .to_string()
+                .into_bytes(),
+        )
+    }
+
+    /// `tap.close`.
+    fn close(&self, payload: &[u8]) -> Result<Vec<u8>, CtlError> {
+        let request: ById = serde_json::from_slice(payload)
+            .map_err(|err| CtlError::invalid(format!("malformed tap request: {err}")))?;
+        if self.taps.close(&request.id) {
+            tracing::info!(tap = %request.id, "plugin tap closed");
+        }
+        Ok(serde_json::json!({"v": control::VERSION, "ok": true})
+            .to_string()
+            .into_bytes())
+    }
+}
+
+/// Drop taps and claims whose lease ran out (their owner died or lost the bus).
+async fn expire_leases(controller: Arc<Controller>, input: Arc<PluginInput>) {
+    let mut tick = tokio::time::interval(LEASE_POLL);
+    loop {
+        tick.tick().await;
+        let now = std::time::Instant::now();
+        for id in input.taps.expire(now) {
+            tracing::warn!(tap = %id, "plugin tap lease expired");
+        }
+        let controller = Arc::clone(&controller);
+        if tokio::task::spawn_blocking(move || controller.claim_expire(now))
+            .await
+            .is_err()
+        {
+            tracing::error!("claim expiry panicked");
+        }
+    }
+}
+
 async fn handle_message(
     client: &Client,
     controller: &Arc<Controller>,
+    input: &Arc<PluginInput>,
     jobs: &mpsc::Sender<TuneJob>,
     zoom: &ZoomHandle,
     message: Message,
@@ -346,6 +430,39 @@ async fn handle_message(
                 move || {
                     let request = control::parse_lock(&payload, acquire)?;
                     Ok(ok_reply(&controller.change_lock(&request)))
+                }
+            })
+            .await;
+            respond(client, &message, reply).await;
+        }
+        "tap.open" | "tap.close" => {
+            let reply = match if command == "tap.open" {
+                input.open(&message.payload)
+            } else {
+                input.close(&message.payload)
+            } {
+                Ok(reply) => reply,
+                Err(err) => error_reply(&err),
+            };
+            respond(client, &message, reply).await;
+        }
+        "claim.acquire" | "claim.release" => {
+            let acquire = command == "claim.acquire";
+            let reply = run_blocking({
+                let controller = Arc::clone(controller);
+                let payload = message.payload.clone();
+                move || {
+                    if acquire {
+                        let request: ClaimAcquire = serde_json::from_slice(&payload)
+                            .map_err(|err| CtlError::invalid(format!("malformed claim: {err}")))?;
+                        controller
+                            .claim_acquire(&request, tap::LEASE_TTL)
+                            .map(|json| ok_reply(&json))
+                    } else {
+                        let request: ById = serde_json::from_slice(&payload)
+                            .map_err(|err| CtlError::invalid(format!("malformed claim: {err}")))?;
+                        Ok(ok_reply(&controller.claim_release(&request.id)))
+                    }
                 }
             })
             .await;

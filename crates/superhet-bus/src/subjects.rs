@@ -19,6 +19,8 @@ pub const ALL_AUDIO: &str = "sh.v1.dev.*.audio.>";
 pub const ALL_RDS: &str = "sh.v1.dev.*.rds.>";
 /// Wildcard matching the tone state (CTCSS, DTMF) of every VFO of every device.
 pub const ALL_TONES: &str = "sh.v1.dev.*.tones.>";
+/// Wildcard matching the plugin input taps of every device.
+pub const ALL_TAP: &str = "sh.v1.dev.*.tap.>";
 /// Wildcard matching every plugin event.
 pub const ALL_EVENTS: &str = "sh.v1.events.>";
 /// Wildcard matching the decoder history events of every device.
@@ -94,6 +96,28 @@ pub fn ctl_lock(device: &str, action: &str) -> Result<String, InvalidToken> {
     Ok(format!("{PREFIX}.dev.{device}.ctl.lock.{action}"))
 }
 
+/// Plugin input tap subject: `sh.v1.dev.<dev>.ctl.tap.<action>` with `action` `open` or `close`
+/// (see [`crate::tap`]).
+///
+/// # Errors
+/// Fails if a token is invalid.
+pub fn ctl_tap(device: &str, action: &str) -> Result<String, InvalidToken> {
+    check(device)?;
+    check(action)?;
+    Ok(format!("{PREFIX}.dev.{device}.ctl.tap.{action}"))
+}
+
+/// Exclusive claim subject: `sh.v1.dev.<dev>.ctl.claim.<action>` with `action` `acquire` or
+/// `release` (see [`crate::tap`]).
+///
+/// # Errors
+/// Fails if a token is invalid.
+pub fn ctl_claim(device: &str, action: &str) -> Result<String, InvalidToken> {
+    check(device)?;
+    check(action)?;
+    Ok(format!("{PREFIX}.dev.{device}.ctl.claim.{action}"))
+}
+
 /// Profile subject: `sh.v1.dev.<dev>.ctl.profile.<action>` with `action` `load`.
 ///
 /// # Errors
@@ -103,6 +127,9 @@ pub fn ctl_profile(device: &str, action: &str) -> Result<String, InvalidToken> {
     check(action)?;
     Ok(format!("{PREFIX}.dev.{device}.ctl.profile.{action}"))
 }
+
+/// Name of the JetStream stream that keeps `sh.v1.events.>` (plugin events) durable.
+pub const EVENTS_STREAM: &str = "EVENTS";
 
 /// Name of the JetStream KV bucket holding the latest state of every device.
 pub const STATE_BUCKET: &str = "STATE";
@@ -200,6 +227,16 @@ pub fn tones(device: &str, vfo: &str) -> Result<String, InvalidToken> {
     check(device)?;
     check(vfo)?;
     Ok(format!("{PREFIX}.dev.{device}.tones.{vfo}"))
+}
+
+/// Plugin input tap subject: `sh.v1.dev.<dev>.tap.<id>` (see [`crate::tap`]).
+///
+/// # Errors
+/// Fails if a token is invalid.
+pub fn tap(device: &str, id: &str) -> Result<String, InvalidToken> {
+    check(device)?;
+    check(id)?;
+    Ok(format!("{PREFIX}.dev.{device}.tap.{id}"))
 }
 
 /// Decoder history event subject (published by the worker for every stored event):

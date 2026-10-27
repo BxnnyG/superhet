@@ -46,6 +46,9 @@ pub struct HostEvent {
     pub instance_id: String,
     /// Device the instance is bound to.
     pub device: Option<String>,
+    /// VFO the instance is fed from.
+    #[serde(default)]
+    pub vfo: Option<u32>,
     /// Frequency (Hz) the instance is bound to.
     pub freq_hz: Option<u64>,
     /// Event type.

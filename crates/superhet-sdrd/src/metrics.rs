@@ -15,7 +15,7 @@ use crate::overload::OverloadStatus;
 use crate::vfo::{Status, Tuning, Vfo};
 
 /// Lossy outputs that count dropped frames, in label order.
-const STREAMS: [&str; 5] = ["spectrum", "zoom", "audio", "rds", "tones"];
+const STREAMS: [&str; 6] = ["spectrum", "zoom", "audio", "rds", "tones", "tap"];
 
 /// Process-wide counters.
 #[derive(Debug)]
@@ -79,7 +79,7 @@ impl Metrics {
     }
 
     /// Counts a dropped frame of output `stream` (one of `spectrum`, `zoom`, `audio`, `rds`,
-    /// `tones`) and returns the new total of that output.
+    /// `tones`, `tap`) and returns the new total of that output.
     pub fn frame_dropped(&self, stream: &str) -> u64 {
         STREAMS.iter().position(|s| *s == stream).map_or(0, |i| {
             self.frames_dropped[i].fetch_add(1, Ordering::Relaxed) + 1
@@ -265,6 +265,7 @@ mod tests {
             "superhet_sdrd_iq_blocks_total 7",
             "superhet_sdrd_dropped_blocks_total{stage=\"device\"} 3",
             "superhet_sdrd_dropped_frames_total{stream=\"audio\"} 2",
+            "superhet_sdrd_dropped_frames_total{stream=\"tap\"} 0",
             "superhet_sdrd_clipped_percent{device=\"rtl0\"} 7.3",
             "superhet_sdrd_adc_overload{device=\"rtl0\"} 1",
             "superhet_sdrd_vfos{state=\"active\"} 1",

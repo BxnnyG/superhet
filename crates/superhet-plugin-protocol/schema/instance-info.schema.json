@@ -79,6 +79,21 @@
       "description": "Instance id.",
       "type": "string"
     },
+    "input_dropped": {
+      "default": 0,
+      "description": "Input chunks dropped because the plugin did not read its `stdin` fast enough.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "input_error": {
+      "default": null,
+      "description": "Why the input is not flowing (VFO missing, device claimed, daemon unreachable).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "last_error": {
       "description": "Description of the last exit or failure.",
       "type": [
@@ -123,6 +138,16 @@
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "vfo": {
+      "default": null,
+      "description": "VFO of the device whose audio or IQ feeds the instance.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     }
   },
   "required": [

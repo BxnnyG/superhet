@@ -10,8 +10,8 @@ routes run the `Origin` check (`403 forbidden`).
 
 | Role | May |
 |---|---|
-| `admin` | everything, including `/api/v1/admin/*` |
-| `operator` | listener rights plus: centre/rate/gain/ppm/bias (`/tune`), the tuning lock, profiles, bookmark edits, clearing the decoder history, modifying and hearing any VFO |
+| `admin` | everything, including `/api/v1/admin/*` and installing / removing plugins (`docs/api-plugins.md`) |
+| `operator` | listener rights plus: centre/rate/gain/ppm/bias (`/tune`), the tuning lock, profiles, bookmark edits, clearing the decoder history, modifying and hearing any VFO, listing plugins and starting / stopping / restarting plugin instances |
 | `listener` | own VFOs (create, move, change, delete) and their audio, shared VFOs (listen only), spectrum, state, decoder history, reading bookmarks |
 | guest | like `listener`, but no account: no bookmarks, no own sessions page, decoder history only if the policy shows it, and every limit of the guest policy |
 

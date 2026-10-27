@@ -27,6 +27,8 @@ pub fn all() -> Vec<(&'static str, Value)> {
         ("ctl-install-request", schema_of::<ctl::InstallRequest>()),
         ("ctl-start-request", schema_of::<ctl::StartRequest>()),
         ("ctl-instance-ref", schema_of::<ctl::InstanceRef>()),
+        ("ctl-remove-request", schema_of::<ctl::RemoveRequest>()),
+        ("ctl-removed-reply", schema_of::<ctl::RemovedReply>()),
         ("ctl-error-reply", schema_of::<ctl::ErrorReply>()),
         ("ctl-plugins-reply", schema_of::<ctl::PluginsReply>()),
         ("ctl-plugin-reply", schema_of::<ctl::PluginReply>()),

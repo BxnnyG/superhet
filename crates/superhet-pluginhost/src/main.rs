@@ -1,7 +1,8 @@
 //! Superhet plugin host (supervises out-of-process plugins). Port 8075 by default (health only).
 //!
 //! Plugins live in `SUPERHET_PLUGIN_DIR` (default `/data/plugins`). The control API is served on
-//! the bus (`sh.v1.plugin.ctl.<cmd>`, `docs/plugin-contract.md`).
+//! the bus (`sh.v1.plugin.ctl.<cmd>`, `docs/plugin-contract.md`). With `SUPERHET_DATABASE_URL`
+//! started instances are stored and come back after a restart.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -9,7 +10,9 @@ use std::sync::Arc;
 
 use axum::{Router, routing::get};
 use superhet_pluginhost::ctl::{self, Host, QueueSink};
+use superhet_pluginhost::inputs::BusInputs;
 use superhet_pluginhost::registry::Registry;
+use superhet_pluginhost::store::InstanceStore;
 use superhet_pluginhost::supervisor::{NullSink, Policy, Supervisor};
 use tracing_subscriber::EnvFilter;
 
@@ -40,16 +43,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = Arc::new(Registry::open(&plugin_dir)?);
     tracing::info!(dir = %plugin_dir.display(), plugins = registry.list().len(), "plugin registry loaded");
 
+    let db = superhet_db::connect_from_env().await?;
+    if let Some(pool) = &db {
+        superhet_db::migrate(pool).await?;
+        tracing::info!("database ready, instances are persistent");
+    } else {
+        tracing::warn!("SUPERHET_DATABASE_URL is not set: instances do not survive a restart");
+    }
+    let store = InstanceStore::new(db);
+
     let nats = superhet_bus::connect_background_from_env("superhet-pluginhost").await?;
     let (supervisor, tasks) = match nats {
         Some(client) => {
             let (sink, events) = QueueSink::new(EVENT_QUEUE);
-            let supervisor = Supervisor::new(Policy::default(), Arc::new(sink));
+            let supervisor = Supervisor::with_inputs(
+                Policy::default(),
+                Arc::new(sink),
+                Arc::new(BusInputs::new(client.clone())),
+            );
             let host = Host {
                 registry: Arc::clone(&registry),
                 supervisor: supervisor.clone(),
+                store,
             };
             let tasks = vec![
+                tokio::spawn(ctl::ensure_events_stream(client.clone())),
+                tokio::spawn({
+                    let host = host.clone();
+                    async move { ctl::restore(&host).await }
+                }),
                 tokio::spawn(ctl::publish_events(client.clone(), events)),
                 tokio::spawn(ctl::publish_state(client.clone(), supervisor.clone())),
                 tokio::spawn({

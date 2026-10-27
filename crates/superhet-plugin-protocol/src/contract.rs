@@ -53,6 +53,7 @@ pub fn run_simple(
         instance_id: "contract-test",
         plugin_dir: &package.dir,
         device: Some("test0"),
+        vfo: None,
         freq_hz: Some(100_000_000),
         config,
     };

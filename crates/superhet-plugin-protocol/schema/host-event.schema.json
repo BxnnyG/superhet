@@ -53,6 +53,16 @@
       "format": "uint32",
       "minimum": 0,
       "type": "integer"
+    },
+    "vfo": {
+      "default": null,
+      "description": "VFO the instance is fed from.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     }
   },
   "required": [

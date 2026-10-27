@@ -42,6 +42,8 @@ pub enum ErrorCode {
     Device,
     /// The tuning lock forbids a centre or sample-rate change.
     Locked,
+    /// The request clashes with the current state (the device is claimed by another plugin).
+    Conflict,
 }
 
 impl ErrorCode {
@@ -52,6 +54,7 @@ impl ErrorCode {
             Self::Unsupported => "unsupported",
             Self::Device => "device",
             Self::Locked => "locked",
+            Self::Conflict => "conflict",
         }
     }
 }

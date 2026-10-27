@@ -161,7 +161,7 @@ async fn records_dtmf_ctcss_and_rds_and_announces_them() {
     let dtmf = wait_for(&pool, "dtmf", "12").await;
     assert_eq!(dtmf.data.freq_hz, Some(433_500_000));
     assert_eq!(dtmf.data.mode.as_deref(), Some("nfm"));
-    assert_eq!(dtmf.data.vfo, 1);
+    assert_eq!(dtmf.data.vfo, Some(1));
     let ctcss = wait_for(&pool, "ctcss", "88.5 Hz").await;
     assert_eq!(ctcss.data.meta["edge"], "start");
     let ps = wait_for(&pool, "rds_ps", "RADIO X").await;

@@ -18,6 +18,7 @@ mod pipeline;
 mod publish;
 mod rds_quality;
 mod service;
+mod tap;
 mod vfo;
 mod window;
 mod zoom;
@@ -178,8 +179,18 @@ async fn start_pipeline(
     let audio_sink = publish::spawn_audio_publisher(client.clone(), &config.device_id)?;
     let rds_sink = publish::spawn_rds_publisher(client.clone(), &config.device_id)?;
     let tones_sink = publish::spawn_tones_publisher(client.clone(), &config.device_id)?;
-    let audio =
-        audio::AudioEngine::start_with_sinks(Arc::clone(&vfos), audio_sink, rds_sink, tones_sink)?;
+    let taps = Arc::new(tap::TapShared::default());
+    let tap_output = tap::TapOutput {
+        shared: Arc::clone(&taps),
+        sink: publish::spawn_tap_publisher(client.clone(), &config.device_id)?,
+    };
+    let audio = audio::AudioEngine::start_with_taps(
+        Arc::clone(&vfos),
+        audio_sink,
+        rds_sink,
+        tones_sink,
+        Some(tap_output),
+    )?;
     let sink = publish::spawn_spectrum_publisher(client.clone(), subject, "spectrum");
     let zoom_handle = zoom::ZoomHandle::default();
     let zoom_sink = publish::spawn_spectrum_publisher(
@@ -210,6 +221,7 @@ async fn start_pipeline(
         vfos,
         zoom_handle,
         pipeline.overload(),
+        taps,
     )
     .await?;
     let running = Running {

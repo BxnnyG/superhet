@@ -37,6 +37,7 @@ fn host(dir: &Path) -> Host {
     Host {
         registry: Arc::new(Registry::open(dir).expect("registry")),
         supervisor: Supervisor::new(Policy::default(), Arc::new(NullSink)),
+        store: Default::default(),
     }
 }
 
@@ -192,4 +193,53 @@ async fn install_refuses_symlinks_and_bad_manifests() {
         .flatten()
         .collect();
     assert!(leftovers.is_empty(), "{leftovers:?}");
+}
+
+#[tokio::test]
+async fn remove_deletes_a_plugin_unless_it_runs() {
+    let dir = TempDir::new("remove");
+    let host = host(&dir.0);
+    let installed = call(&host, "install", json!({"v": 1, "path": echo_source()})).await;
+    assert_eq!(installed["ok"], true, "{installed}");
+    let started = call(
+        &host,
+        "start",
+        json!({"v": 1, "plugin_id": "org.superhet.example.echo"}),
+    )
+    .await;
+    let id = started["instance"]["id"].as_str().expect("id").to_owned();
+
+    let busy = call(
+        &host,
+        "remove",
+        json!({"v": 1, "plugin_id": "org.superhet.example.echo"}),
+    )
+    .await;
+    assert_eq!(busy["code"], "conflict", "{busy}");
+    assert!(dir.0.join("org.superhet.example.echo").is_dir());
+
+    call(&host, "stop", json!({"v": 1, "id": id})).await;
+    let removed = call(
+        &host,
+        "remove",
+        json!({"v": 1, "plugin_id": "org.superhet.example.echo"}),
+    )
+    .await;
+    assert_eq!(removed["ok"], true, "{removed}");
+    assert_eq!(removed["versions"], json!(["1.0.0"]));
+    assert!(!dir.0.join("org.superhet.example.echo").exists());
+    let listed = call(&host, "list", json!({"v": 1})).await;
+    assert_eq!(listed["plugins"], json!([]));
+
+    for (body, want) in [
+        (
+            json!({"v": 1, "plugin_id": "org.superhet.example.echo"}),
+            "not_found",
+        ),
+        (json!({"v": 1, "plugin_id": "../etc"}), "invalid"),
+        (json!({"v": 1}), "invalid"),
+    ] {
+        let reply = call(&host, "remove", body).await;
+        assert_eq!(reply["code"], want, "{reply}");
+    }
 }

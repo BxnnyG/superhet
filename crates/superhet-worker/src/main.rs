@@ -1,11 +1,12 @@
 //! Superhet worker (background jobs and event consumers). Port 8076 by default (health only).
 //!
-//! Today it records the decoder history (DTMF bursts, tone changes, RDS changes) into PostgreSQL
-//! (`docs/api-decoder-events.md`).
+//! Today it records the decoder history (DTMF bursts, tone changes, RDS changes and the events of
+//! decoder plugins) into PostgreSQL (`docs/api-decoder-events.md`).
 
 mod audit;
 mod consumer;
 mod metrics;
+mod plugin_events;
 mod recorder;
 
 use std::net::SocketAddr;
@@ -73,6 +74,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let recorder = match (db, nats) {
         (Some(pool), Some(client)) => {
+            let plugin_events = {
+                let (pool, client, mut stop) = (pool.clone(), client.clone(), stop_rx.clone());
+                tokio::spawn(async move {
+                    let wait = async move {
+                        let _ = stop.wait_for(|stopped| *stopped).await;
+                    };
+                    plugin_events::run(pool, client, wait).await;
+                })
+            };
             let mut stop = stop_rx.clone();
             Some(tokio::spawn(async move {
                 let wait = async move {
@@ -81,6 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Err(err) = consumer::run(pool, client, retention, wait).await {
                     tracing::error!(%err, "decoder history recorder stopped");
                 }
+                let _ = plugin_events.await;
             }))
         }
         _ => {

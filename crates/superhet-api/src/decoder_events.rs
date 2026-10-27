@@ -106,6 +106,8 @@ fn invalid(message: &str) -> Box<Response> {
 struct Filter {
     /// Comma-separated kinds.
     kind: Option<String>,
+    /// `core` or a plugin id.
+    source: Option<String>,
     dev: Option<String>,
     vfo: Option<u32>,
     from: Option<i64>,
@@ -123,7 +125,7 @@ impl Filter {
             if kind.is_empty() {
                 continue;
             }
-            if !KINDS.contains(&kind) {
+            if !KINDS.contains(&kind) && !decoder_events::is_plugin_kind(kind) {
                 return Err(invalid("unknown kind"));
             }
             if !kinds.iter().any(|k| k == kind) {
@@ -146,8 +148,22 @@ impl Filter {
         if device.as_ref().is_some_and(|d| d.len() > 64) {
             return Err(invalid("invalid dev"));
         }
+        let source = self
+            .source
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        if source.is_some_and(|s| {
+            s.len() > 128
+                || !s
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
+        }) {
+            return Err(invalid("invalid source"));
+        }
         Ok(DbQuery {
             kinds,
+            source: source.map(str::to_owned),
             device,
             vfo: match self.vfo {
                 Some(v) => Some(i32::try_from(v).map_err(|_| invalid("invalid vfo"))?),
@@ -262,12 +278,13 @@ fn csv_row(e: &Event) -> String {
         iso(d.ts_ms),
         d.ts_ms.to_string(),
         d.device.clone(),
-        d.vfo.to_string(),
+        d.vfo.map_or_else(String::new, |v| v.to_string()),
         d.freq_hz.map_or_else(String::new, |f| f.to_string()),
         d.mode.clone().unwrap_or_default(),
         d.kind.clone(),
         d.value.clone(),
         d.meta.to_string(),
+        d.source.clone(),
     ];
     let mut line = fields
         .iter()
@@ -278,7 +295,7 @@ fn csv_row(e: &Event) -> String {
     line
 }
 
-const CSV_HEADER: &str = "time,ts_ms,device,vfo,freq_hz,mode,kind,value,meta\r\n";
+const CSV_HEADER: &str = "time,ts_ms,device,vfo,freq_hz,mode,kind,value,meta,source\r\n";
 
 async fn export_csv(State(state): State<EventsState>, Query(filter): Query<Filter>) -> Response {
     let result = async {
@@ -417,10 +434,11 @@ mod tests {
             data: NewEvent {
                 ts_ms: 1_700_000_000_123,
                 device: "rtl0".into(),
-                vfo: 1,
+                vfo: Some(1),
                 freq_hz: Some(433_500_000),
                 mode: Some("nfm".into()),
                 kind: "rds_rt".into(),
+                source: "core".into(),
                 value: value.into(),
                 meta: serde_json::json!({"a": 1}),
             },
@@ -474,10 +492,28 @@ mod tests {
         assert_eq!(ok.vfo, Some(2));
         assert_eq!(ok.search.as_deref(), Some("hi"));
         let bad = Filter {
-            kind: Some("nope".into()),
+            kind: Some("Nope!".into()),
             ..Filter::default()
         };
         assert!(bad.to_query().is_err());
+        // Plugin event types and sources are accepted.
+        let plugin = Filter {
+            kind: Some("pocsag.message,dtmf".into()),
+            source: Some("org.superhet.decoder.pocsag".into()),
+            ..Filter::default()
+        }
+        .to_query()
+        .expect("plugin filter");
+        assert_eq!(plugin.kinds, ["pocsag.message", "dtmf"]);
+        assert_eq!(
+            plugin.source.as_deref(),
+            Some("org.superhet.decoder.pocsag")
+        );
+        let bad_source = Filter {
+            source: Some("Org X".into()),
+            ..Filter::default()
+        };
+        assert!(bad_source.to_query().is_err());
         let long = Filter {
             q: Some("x".repeat(101)),
             ..Filter::default()

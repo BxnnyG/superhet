@@ -132,3 +132,47 @@ fn spawn_vfo_publisher(
         }
     })
 }
+
+/// Chunks buffered between the VFO thread and the tap publisher task (about 1.3 s of a 250 kS/s
+/// cu8 tap, 5 s of audio).
+const TAP_QUEUE_CHUNKS: usize = 256;
+
+/// Start a publisher task for the plugin input taps of `device`; the sink takes
+/// `(tap id, bytes)` and publishes on `sh.v1.dev.<dev>.tap.<id>`. Same drop behaviour as the other
+/// sinks (counted as stream `tap`): a plugin that cannot keep up loses samples instead of
+/// stalling the VFO thread.
+///
+/// # Errors
+/// Fails if `device` is not usable as a subject token.
+pub fn spawn_tap_publisher(
+    client: Client,
+    device: &str,
+) -> Result<crate::tap::TapSink, superhet_bus::subjects::InvalidToken> {
+    superhet_bus::subjects::tap(device, "x")?;
+    let device = device.to_owned();
+    let status = client.clone();
+    let (tx, mut rx) = mpsc::channel::<(String, Vec<u8>)>(TAP_QUEUE_CHUNKS);
+    tokio::spawn(async move {
+        while let Some((id, bytes)) = rx.recv().await {
+            let subject = format!("{}.dev.{device}.tap.{id}", superhet_bus::subjects::PREFIX);
+            if let Err(e) = client.publish(subject, bytes.into()).await {
+                tracing::warn!(error = %e, "tap publish failed");
+            }
+        }
+    });
+    Ok(Box::new(move |id: &str, bytes: Vec<u8>| {
+        let reason = if status.connection_state() != State::Connected {
+            "bus is disconnected"
+        } else {
+            match tx.try_send((id.to_owned(), bytes)) {
+                Ok(()) => return,
+                Err(TrySendError::Full(_)) => "bus is lagging",
+                Err(TrySendError::Closed(_)) => return,
+            }
+        };
+        let n = crate::metrics::global().frame_dropped("tap");
+        if n == 1 || n.is_multiple_of(250) {
+            tracing::warn!(total = n, reason, "dropping plugin input chunks");
+        }
+    }))
+}

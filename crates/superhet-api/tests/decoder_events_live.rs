@@ -11,10 +11,11 @@ fn ev(ts_ms: i64, vfo: i32, kind: &str, value: &str) -> NewEvent {
     NewEvent {
         ts_ms,
         device: "rtl0".into(),
-        vfo,
+        vfo: Some(vfo),
         freq_hz: Some(433_500_000),
         mode: Some("nfm".into()),
         kind: kind.into(),
+        source: "core".into(),
         value: value.into(),
         meta: json!({}),
     }
@@ -119,7 +120,8 @@ async fn list_filter_page_export_clear() {
 
     // Bad input.
     for bad in [
-        "kind=bogus",
+        "kind=BOGUS",
+        "source=Not%20A%20Plugin",
         "limit=0",
         "limit=5000",
         "cursor=nope",
@@ -144,7 +146,7 @@ async fn list_filter_page_export_clear() {
     let lines: Vec<&str> = csv.body.lines().collect();
     assert_eq!(
         lines[0],
-        "time,ts_ms,device,vfo,freq_hz,mode,kind,value,meta"
+        "time,ts_ms,device,vfo,freq_hz,mode,kind,value,meta,source"
     );
     assert!(
         lines[1].starts_with(

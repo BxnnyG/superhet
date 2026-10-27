@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Reply to `remove`.",
+  "properties": {
+    "ok": {
+      "description": "Always true.",
+      "type": "boolean"
+    },
+    "plugin_id": {
+      "description": "Plugin id.",
+      "type": "string"
+    },
+    "v": {
+      "description": "Contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "versions": {
+      "description": "Versions that were deleted.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "v",
+    "ok",
+    "plugin_id",
+    "versions"
+  ],
+  "title": "RemovedReply",
+  "type": "object"
+}
