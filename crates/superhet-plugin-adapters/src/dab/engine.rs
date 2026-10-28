@@ -192,6 +192,9 @@ pub struct Setup {
     pub timing: Timing,
     /// Program to start (`welle-cli`).
     pub program: String,
+    /// Library preloaded into welle-cli that makes its web interface listen on loopback only
+    /// (`plugins/dab/loopback-bind.c`); `None` where the image does not ship it.
+    pub loopback_shim: Option<String>,
 }
 
 /// The engine.
@@ -358,7 +361,11 @@ impl Engine {
             Ok(addr) => addr,
             Err(err) => return self.fail(format!("no free port for welle-cli: {err}")),
         };
-        let spawned = Command::new(&self.s.program)
+        let mut command = Command::new(&self.s.program);
+        if let Some(shim) = &self.s.loopback_shim {
+            command.env("LD_PRELOAD", shim);
+        }
+        let spawned = command
             .args([
                 "-c",
                 channel,

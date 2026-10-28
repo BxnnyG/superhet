@@ -49,17 +49,22 @@ for name in pocsag aprs rtl433 dab; do cp -r "plugins/$name" "$work/bundled/$nam
 # The DAB plugin runs the real adapter against a stand-in welle-cli (python3): blocks 5C and 6A
 # carry the "DR Deutschland" ensemble, a tone plays as audio, the slide is a tiny PNG.
 mkdir -p "$work/bin"
-ln -s "$(pwd)/crates/superhet-plugin-adapters/tests/dab/fake-welle-cli" "$work/bin/welle-cli"
+# E2E_WELLE=/path/to/welle-cli (or a wrapper) swaps in a real decoder for manual checks.
+ln -s "${E2E_WELLE:-$(pwd)/crates/superhet-plugin-adapters/tests/dab/fake-welle-cli}" "$work/bin/welle-cli"
 
 # 1 s of random cu8 samples at 2.048 MS/s: valid IQ, plays in a loop.
-head -c 4096000 /dev/urandom >"$work/noise.cu8"
+if [ -n "${E2E_IQ_FILE:-}" ]; then
+    ln -s "$E2E_IQ_FILE" "$work/noise.cu8"
+else
+    head -c 4096000 /dev/urandom >"$work/noise.cu8"
+fi
 
 export SUPERHET_NATS_URL
 export RUST_LOG="${RUST_LOG:-error}"
 
 SUPERHET_LISTEN="127.0.0.1:$((port + 1))" \
     SUPERHET_DEVICE_ID=dev0 \
-    SUPERHET_DEVICE="file:$work/noise.cu8?format=cu8&rate=2048000&freq=100000000&block=4096" \
+    SUPERHET_DEVICE="file:$work/noise.cu8?format=cu8&rate=2048000&freq=${E2E_IQ_FREQ:-100000000}&block=4096" \
     "$bins/superhet-sdrd" &
 pids+=($!)
 

@@ -15,6 +15,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends librtlsdr-dev libopus-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
+# LD_PRELOAD shim that confines welle-cli's web interface to 127.0.0.1 (plugins/dab/loopback-bind.c).
+COPY plugins/dab/loopback-bind.c /tmp/loopback-bind.c
+RUN gcc -shared -fPIC -O2 -Wall -o /usr/local/lib/libsuperhet-loopback-bind.so /tmp/loopback-bind.c
 COPY Cargo.toml Cargo.lock rust-toolchain.toml rustfmt.toml ./
 COPY crates/ crates/
 RUN cargo build --release --locked --features superhet-sdrd/rtlsdr \
@@ -47,6 +50,8 @@ RUN apt-get update \
 # welle-cli as built by Debian, with its licence text (GPL-2.0-or-later; source: apt-get source welle.io).
 COPY --from=welle /usr/bin/welle-cli /usr/bin/welle-cli
 COPY --from=welle /usr/share/doc/welle.io/copyright /usr/share/doc/welle.io/copyright
+
+COPY --from=rust /usr/local/lib/libsuperhet-loopback-bind.so /usr/local/lib/superhet/libsuperhet-loopback-bind.so
 
 # One image for every service; compose selects the binary via `command`.
 COPY --from=rust /src/target/release/superhet-api /src/target/release/superhet-sdrd \

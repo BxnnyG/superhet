@@ -72,6 +72,7 @@ pub fn run(program: &str, config: &Value, socket: &str, freq_hz: Option<u64>) ->
         service,
         timing: timing_from(config),
         program: program.to_owned(),
+        loopback_shim: loopback_shim(&link),
     });
     let engine_thread = {
         let link = Arc::clone(&link);
@@ -126,6 +127,21 @@ pub fn run(program: &str, config: &Value, socket: &str, freq_hz: Option<u64>) ->
     let _ = commands.send(Cmd::Shutdown);
     let _ = engine_thread.join();
     ExitCode::SUCCESS
+}
+
+/// Where the image keeps the library that confines welle-cli's web interface to loopback.
+const LOOPBACK_SHIM: &str = "/usr/local/lib/superhet/libsuperhet-loopback-bind.so";
+
+/// The shim if it is installed; otherwise a warning in the host log (welle-cli then listens on
+/// every address of the container while an instance runs).
+fn loopback_shim(link: &link::Link) -> Option<String> {
+    if std::path::Path::new(LOOPBACK_SHIM).is_file() {
+        return Some(LOOPBACK_SHIM.to_owned());
+    }
+    let _ = link.log(
+        "warning: the loopback shim is not installed; welle-cli's web interface is not restricted to 127.0.0.1",
+    );
+    None
 }
 
 /// Dwell timing, overridable with `{"timing": {"no_signal_ms", "stable_ms", "max_ms"}}` in the

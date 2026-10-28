@@ -42,4 +42,14 @@ else
     docker run --rm --entrypoint sh "$image" -c 'ldd /usr/bin/welle-cli | grep "not found"' || true
     fail=1
 fi
+
+# The shim must confine welle-cli's web interface to loopback (it binds 0.0.0.0 on its own).
+listening="$(docker run --rm --entrypoint sh -e LD_PRELOAD=/usr/local/lib/superhet/libsuperhet-loopback-bind.so "$image" -c \
+    'welle-cli -c 5C -f /dev/zero -w 18555 -T >/dev/null 2>&1 & sleep 2; awk "NR>1 && \$4==\"0A\" {print \$2}" /proc/net/tcp')"
+if [ "$listening" = "0100007F:487B" ]; then
+    echo "ok   welle-cli web interface listens on 127.0.0.1 only"
+else
+    echo "FAIL welle-cli web interface listens on: ${listening:-nothing}"
+    fail=1
+fi
 exit "$fail"
