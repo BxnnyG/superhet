@@ -80,6 +80,9 @@ services:
       SUPERHET_TRUSTED_PROXIES: ${SUPERHET_TRUSTED_PROXIES:-}
       SUPERHET_REVERSE_DNS: ${SUPERHET_REVERSE_DNS:-true}
       SUPERHET_GEOIP_DB: ${SUPERHET_GEOIP_DB:-}
+      SUPERHET_MAP_TILE_URL: ${SUPERHET_MAP_TILE_URL:-}
+      SUPERHET_MAP_ATTRIBUTION: ${SUPERHET_MAP_ATTRIBUTION:-}
+      SUPERHET_MAP_ATTRIBUTION_URL: ${SUPERHET_MAP_ATTRIBUTION_URL:-}
     depends_on:
       postgres: { condition: service_healthy }
       nats: { condition: service_healthy }

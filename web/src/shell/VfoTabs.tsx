@@ -8,6 +8,7 @@ import {
   ownVfoCount,
 } from "../auth/permissions";
 import { VfoDecoderMark } from "../plugins/parts";
+import { claimHint } from "../plugins/claim";
 import { instancesOnVfo, pluginName } from "../plugins/store";
 import { formatFrequency } from "../spectrum/freq";
 import { CloseIcon, IconButton, PauseIcon, PlainButton, PlusIcon, cn } from "../ui";
@@ -56,7 +57,13 @@ export function VfoTabs({ r }: { r: Receiver }) {
               canListen={canListenVfo(perms, v)}
               canClose={canModifyVfo(perms, v)}
               listening={r.audioSnap.levels[v.id]?.listening ?? true}
-              pausedHint={locked ? VFO_PAUSED_HINT : VFO_PAUSED_FREE_HINT}
+              pausedHint={
+                r.claim !== null
+                  ? claimHint(r.claim, centerHz, v.freqHz)
+                  : locked
+                    ? VFO_PAUSED_HINT
+                    : VFO_PAUSED_FREE_HINT
+              }
               decoders={instancesOnVfo(plugins.instances, r.device, v.id)}
               decoderNames={instancesOnVfo(plugins.instances, r.device, v.id).map((i) =>
                 pluginName(plugins.plugins, i.pluginId),

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthContext, type AuthContextValue } from "../auth/context";
 import { FULL_ACCESS } from "../auth/permissions";
+import type { PluginInstance } from "../plugins/api";
 import { PluginStore } from "../plugins/store";
 import { fakePluginApi, instance } from "../plugins/testing";
 import { fake, vfo } from "../shell/fixtures";
@@ -27,11 +28,13 @@ const asListener = (ui: ReactNode) => (
   </AuthContext.Provider>
 );
 
-async function setup(opts: { running?: boolean; status?: Record<string, unknown> } = {}) {
+async function setup(
+  opts: { running?: boolean; status?: Record<string, unknown>; instances?: PluginInstance[] } = {},
+) {
   const { r } = fake([vfo(1)], 1);
   const dabApi = fakeDabApi(dabReply(opts.status ? { status: dabStatusRaw(opts.status) } : {}));
   const dab = new DabStore("dev0", dabApi.api, fakeEventApi());
-  const plugins = fakePluginApi(undefined, []);
+  const plugins = fakePluginApi(undefined, opts.instances ?? []);
   const pluginStore = new PluginStore(plugins.api);
   const enable = vi.fn();
   Object.assign(r, {
@@ -145,6 +148,37 @@ describe("DabPanel", () => {
       pluginId: "org.superhet.decoder.dab",
       device: "dev0",
       freqHz: 178_352_000,
+    });
+    expect(dab.getSnapshot()).toMatchObject({ instanceId: "i-new", pending: null });
+  });
+
+  it("offers to stop ADS-B instead of failing with a claim message", async () => {
+    const adsb = instance({
+      id: "i-adsb",
+      plugin_id: "org.superhet.decoder.adsb",
+      exclusive: true,
+      state: "running",
+    });
+    const { r, dab, pluginStore } = await setup({ running: false, instances: [adsb] });
+    const order: string[] = [];
+    vi.spyOn(pluginStore, "stopInstance").mockImplementation(async (id) => void order.push(id));
+    const start = vi.spyOn(pluginStore, "startInstance").mockImplementation(async () => {
+      order.push("start");
+      return instance({ id: "i-new", plugin_id: "org.superhet.decoder.dab" });
+    });
+    render(<DabPanel r={r} />);
+    dab.request({ channel: "11D", freqHz: 222_064_000 });
+    const dialog = await screen.findByRole("dialog", { name: "Start DAB on 11D?" });
+    expect(dialog).toHaveTextContent("ADS-B is using the device. Stop ADS-B to start DAB.");
+    expect(dialog).not.toHaveTextContent(/claimed by instance/);
+    expect(within(dialog).queryByRole("button", { name: "Start DAB" })).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Stop ADS-B and start DAB" }));
+    await flush();
+    expect(order).toEqual(["i-adsb", "start"]);
+    expect(start).toHaveBeenCalledWith({
+      pluginId: "org.superhet.decoder.dab",
+      device: "dev0",
+      freqHz: 222_064_000,
     });
     expect(dab.getSnapshot()).toMatchObject({ instanceId: "i-new", pending: null });
   });

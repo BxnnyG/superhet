@@ -1,6 +1,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { usePermissions } from "../auth/context";
 import { describeHttpError } from "../http";
+import { blockingInstance, conflictText, shortPluginName, startReplacing } from "../plugins/claim";
 import { StateBadge } from "../plugins/parts";
 import type { Receiver } from "../shell/useReceiver";
 import {
@@ -36,6 +37,11 @@ export function AdsbPanel({ r }: { r: Receiver }) {
     pluginSnap.plugins.some((p) => p.id === ADSB_PLUGIN_ID);
   const parsed = parseReceiver(position);
 
+  // Another exclusive plugin (DAB) holds the device: starting means stopping it first.
+  const blocker = perms.canUsePlugins
+    ? blockingInstance(pluginSnap.instances, r.device, ADSB_PLUGIN_ID)
+    : null;
+
   const act = async (what: () => Promise<unknown>) => {
     setBusy(true);
     setProblem(null);
@@ -52,7 +58,7 @@ export function AdsbPanel({ r }: { r: Receiver }) {
     act(async () => {
       if (parsed.error !== null) return;
       saveReceiverText(position);
-      const instance = await r.plugins.startInstance({
+      const instance = await startReplacing(r.plugins, blocker, {
         pluginId: ADSB_PLUGIN_ID,
         device: r.device,
         config: parsed.receiver
@@ -136,7 +142,11 @@ export function AdsbPanel({ r }: { r: Receiver }) {
       {confirming && (
         <ConfirmDialog
           title="Start ADS-B on 1090 MHz?"
-          confirmLabel="Start ADS-B"
+          confirmLabel={
+            blocker === null
+              ? "Start ADS-B"
+              : `Stop ${shortPluginName(pluginSnap.plugins, blocker.pluginId)} and start ADS-B`
+          }
           busy={busy}
           onConfirm={() => void start()}
           onCancel={() => setConfirming(false)}
@@ -172,6 +182,11 @@ export function AdsbPanel({ r }: { r: Receiver }) {
           {parsed.error !== null && (
             <Alert tone="warn" className="mt-2">
               {parsed.error}
+            </Alert>
+          )}
+          {blocker !== null && (
+            <Alert tone="warn" className="mt-2">
+              {conflictText(blocker, pluginSnap.plugins, "ADS-B")}
             </Alert>
           )}
           {problem !== null && <Alert className="mt-2">{problem}</Alert>}

@@ -13,6 +13,7 @@ mod decoder_events;
 mod devices;
 mod hub;
 mod maintenance;
+mod map;
 mod metrics;
 mod origin;
 mod plugins;
@@ -77,6 +78,7 @@ fn app(
             devices.clone(),
         )))
         .merge(plugins::router(devices.clone()))
+        .merge(map::router())
         .merge(devices::router(devices));
     let router = Router::new()
         .route("/healthz", get(healthz))
@@ -133,6 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if nats.is_some() {
         tracing::info!("nats client started (connecting in the background)");
     }
+    map::init_from_env();
     let origins = origin::OriginPolicy::from_env();
     let auth = auth::AuthState::new(db.clone(), origins.clone(), auth::AuthConfig::from_env()?)?;
     auth.prepare_setup().await?;

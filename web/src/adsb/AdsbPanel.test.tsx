@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthContext, type AuthContextValue } from "../auth/context";
 import { FULL_ACCESS } from "../auth/permissions";
 import { ADSB_RAW, fakePluginApi, instance } from "../plugins/testing";
-import { parseManifest } from "../plugins/api";
+import { parseManifest, type PluginInstance } from "../plugins/api";
 import { PluginStore } from "../plugins/store";
 import { fake, vfo } from "../shell/fixtures";
 import type { Receiver } from "../shell/useReceiver";
@@ -36,13 +36,18 @@ const asListener = (ui: ReactNode) => (
 );
 
 async function setup(
-  opts: { running?: boolean; installed?: boolean; status?: Record<string, unknown> } = {},
+  opts: {
+    running?: boolean;
+    installed?: boolean;
+    status?: Record<string, unknown>;
+    instances?: PluginInstance[];
+  } = {},
 ) {
   const { r } = fake([vfo(1)], 1);
   const api = fakeAdsbApi(adsbReply(opts.status ? { status: adsbStatusRaw(opts.status) } : {}));
   const adsb = new AdsbStore(api.api);
   const pluginStore = new PluginStore(
-    fakePluginApi(opts.installed === false ? [] : [ours], []).api,
+    fakePluginApi(opts.installed === false ? [] : [ours], opts.instances ?? []).api,
   );
   Object.assign(r, { adsb, plugins: pluginStore });
   adsb.start();
@@ -104,6 +109,29 @@ describe("AdsbPanel", () => {
     expect(adsb.getSnapshot()).toMatchObject({ instanceId: "i-new", viewOpen: true });
     // The position is remembered for the next start.
     expect(window.localStorage.getItem(RECEIVER_STORAGE_KEY)).toContain("51,25");
+  });
+
+  it("offers to stop DAB instead of failing with a claim message", async () => {
+    const dab = instance({
+      id: "i-dab",
+      plugin_id: "org.superhet.decoder.dab",
+      exclusive: true,
+      state: "running",
+    });
+    const { r, pluginStore } = await setup({ running: false, instances: [dab] });
+    const order: string[] = [];
+    vi.spyOn(pluginStore, "stopInstance").mockImplementation(async (id) => void order.push(id));
+    vi.spyOn(pluginStore, "startInstance").mockImplementation(async () => {
+      order.push("start");
+      return instance({ id: "i-new", plugin_id: ADSB_PLUGIN_ID });
+    });
+    render(<AdsbPanel r={r} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start ADS-B…" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("DAB is using the device. Stop DAB to start ADS-B.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Stop DAB and start ADS-B" }));
+    await flush();
+    expect(order).toEqual(["i-dab", "start"]);
   });
 
   it("starts without a position when the fields are empty", async () => {

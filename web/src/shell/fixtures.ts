@@ -69,6 +69,7 @@ export function fake(vfos: Vfo[], selectedId: number | null, locks: LockHolder[]
     vfoCtl: { update: fns.update, select: fns.select, remove: fns.remove },
     tuning: { request: fns.request },
     locks,
+    claim: null,
     step: "auto",
     setStep: fns.setStep,
     createVfoAt: fns.createVfoAt,

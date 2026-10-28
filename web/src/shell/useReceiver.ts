@@ -26,6 +26,7 @@ import { channelTarget, matchChannel, stepChannelBy } from "../channels/lookup";
 import { modeOf, type Plan, type PlanChannel } from "../channels/schema";
 import { ChannelStore } from "../channels/store";
 import { DecoderEventStore } from "../decoders/store";
+import { claimOwner } from "../plugins/claim";
 import { PluginStore } from "../plugins/store";
 import { createProfileApi } from "../profiles/api";
 import type { StateDoc } from "../state/doc";
@@ -344,6 +345,11 @@ export function useReceiver(device: string) {
   )?.id;
   const adsbFollowId = adsbInstance ?? claimId ?? null;
   useEffect(() => adsb.follow(adsbFollowId), [adsb, adsbFollowId]);
+  // Who owns the device while a claim is held: the tuning strip says so instead of showing a
+  // VFO that merely sits at its old frequency. Non-operators only learn it for DAB.
+  const claim = claimOwner(locks, pluginSnap.instances, pluginSnap.plugins, [
+    { instanceId: dabSnap.instanceId, pluginId: dabSnap.reply?.pluginId ?? null },
+  ]);
   const profileApi = useMemo(() => createProfileApi(), []);
   const currentDoc = useMemo<StateDoc | null>(
     () =>
@@ -408,6 +414,7 @@ export function useReceiver(device: string) {
     store,
     feed,
     locks,
+    claim,
     toggleLock,
     profileApi,
     currentDoc,

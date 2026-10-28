@@ -1,6 +1,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { usePermissions } from "../auth/context";
 import { describeHttpError } from "../http";
+import { blockingInstance, conflictText, shortPluginName, startReplacing } from "../plugins/claim";
 import { StateBadge } from "../plugins/parts";
 import type { Receiver } from "../shell/useReceiver";
 import {
@@ -59,6 +60,11 @@ export function DabPanel({ r }: { r: Receiver }) {
     pluginSnap.error !== null ||
     pluginSnap.plugins.some((p) => p.id === DAB_PLUGIN_ID);
 
+  // Another exclusive plugin (ADS-B) holds the device: starting means stopping it first.
+  const blocker = perms.canUsePlugins
+    ? blockingInstance(pluginSnap.instances, r.device, DAB_PLUGIN_ID)
+    : null;
+
   const act = async (what: () => Promise<unknown>) => {
     setBusy(true);
     setProblem(null);
@@ -75,11 +81,12 @@ export function DabPanel({ r }: { r: Receiver }) {
     act(async () => {
       const freqHz = blockFreq(channel);
       if (freqHz === null) return;
-      const instance = await r.plugins.startInstance({
+      const instance = await startReplacing(r.plugins, blocker, {
         pluginId: DAB_PLUGIN_ID,
         device: r.device,
         freqHz,
       });
+      if (blocker !== null) r.adsb.closeView();
       r.dab.request(null);
       r.dab.follow(instance.id);
     });
@@ -162,7 +169,11 @@ export function DabPanel({ r }: { r: Receiver }) {
       {snap.pending !== null && (
         <ConfirmDialog
           title={`Start DAB on ${snap.pending.channel}?`}
-          confirmLabel="Start DAB"
+          confirmLabel={
+            blocker === null
+              ? "Start DAB"
+              : `Stop ${shortPluginName(pluginSnap.plugins, blocker.pluginId)} and start DAB`
+          }
           busy={busy}
           onConfirm={() => void start(snap.pending?.channel ?? block)}
           onCancel={() => r.dab.request(null)}
@@ -172,6 +183,11 @@ export function DabPanel({ r }: { r: Receiver }) {
             Receivers outside that window are paused, nobody can retune until DAB is stopped, and
             the current tuning comes back when you stop it.
           </p>
+          {blocker !== null && (
+            <Alert tone="warn" className="mt-2">
+              {conflictText(blocker, pluginSnap.plugins, "DAB")}
+            </Alert>
+          )}
           {problem !== null && <Alert className="mt-2">{problem}</Alert>}
         </ConfirmDialog>
       )}

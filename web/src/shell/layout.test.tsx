@@ -52,6 +52,35 @@ it("strip: marks a paused VFO", () => {
   expect(screen.getByText("paused")).toBeInTheDocument();
 });
 
+it("strip: says which plugin owns the device instead of a bare 'paused'", () => {
+  const { r } = fake([vfo(1, { status: "paused", freqHz: 1_089_812_500 })], 1);
+  Object.assign(r, {
+    claim: { instanceId: "i-dab", pluginId: "org.superhet.decoder.dab", name: "DAB" },
+  });
+  render(<TuningStrip r={r} />);
+  const badge = screen.getByText("DAB has the device");
+  expect(screen.queryByText("paused")).toBeNull();
+  // The tooltip names the device centre and where the VFO resumes.
+  expect(badge.closest("[title]")).toHaveAttribute(
+    "title",
+    expect.stringContaining("keeps 1089.8125 MHz and resumes when DAB stops"),
+  );
+  expect(badge.closest("[title]")).toHaveAttribute(
+    "title",
+    expect.stringContaining("at 100.000 MHz"),
+  );
+});
+
+it("tab row: a paused VFO's tooltip names the plugin that owns the device", () => {
+  const { r } = fake([vfo(1, { status: "paused" })], 1);
+  Object.assign(r, { claim: { instanceId: "i-a", pluginId: null, name: "A plugin" } });
+  render(<VfoTabs r={r} />);
+  expect(screen.getByRole("button", { name: /^VFO 1 .*\(paused\)/ })).toHaveAttribute(
+    "title",
+    expect.stringContaining("A plugin is using the whole device"),
+  );
+});
+
 it("centre pill shows the centre and opens the source settings", () => {
   const { r, fns } = fake([vfo(1)], 1);
   render(<CentrePill r={r} />);

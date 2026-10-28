@@ -1,6 +1,8 @@
-import { fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import L from "leaflet";
 import { describe, expect, it, vi } from "vitest";
-import { AdsbMap, TILE_ATTRIBUTION, TILE_URL } from "./AdsbMap";
+import { AdsbMap, TILE_REFERRER_POLICY } from "./AdsbMap";
+import { DEFAULT_MAP } from "./mapConfig";
 import { parseStatus, tracked, type Tracked } from "./model";
 import { adsbStatusRaw } from "./testing";
 
@@ -17,19 +19,65 @@ const props = {
   selected: null,
   onSelect: () => {},
   fitSignal: 0,
+  tiles: DEFAULT_MAP,
 };
 
 describe("AdsbMap", () => {
   it("uses OpenStreetMap tiles with the attribution the tile policy asks for", () => {
-    expect(TILE_URL).toBe("https://tile.openstreetmap.org/{z}/{x}/{y}.png");
+    const layer = vi.spyOn(L, "tileLayer");
     const { container } = render(<AdsbMap aircraft={picture()} {...props} />);
+    expect(layer.mock.calls[0]?.[0]).toBe("https://tile.openstreetmap.org/{z}/{x}/{y}.png");
     const attribution = container.querySelector(".leaflet-control-attribution");
-    expect(attribution).toHaveTextContent("OpenStreetMap");
+    expect(attribution).toHaveTextContent("OpenStreetMap contributors");
     expect(attribution?.querySelector('a[href*="openstreetmap"]')).toHaveAttribute(
       "href",
       "https://www.openstreetmap.org/copyright",
     );
-    expect(TILE_ATTRIBUTION).toContain("contributors");
+    layer.mockRestore();
+  });
+
+  it("sends the page origin as Referer with tile requests (OSM blocks clients without one)", () => {
+    const layer = vi.spyOn(L, "tileLayer");
+    render(<AdsbMap aircraft={picture()} {...props} />);
+    const options = layer.mock.calls[0]?.[1];
+    expect(TILE_REFERRER_POLICY).toBe("strict-origin-when-cross-origin");
+    expect(options?.referrerPolicy).toBe(TILE_REFERRER_POLICY);
+    // A failed tile must not leave a broken-image grid behind.
+    expect(options?.errorTileUrl).toMatch(/^data:image\//);
+    layer.mockRestore();
+  });
+
+  it("loads tiles from the configured server and shows its attribution as text", () => {
+    const layer = vi.spyOn(L, "tileLayer");
+    const tiles = {
+      tileUrl: "http://tiles.lan:8080/{z}/{x}/{y}.png",
+      attribution: "Own <b>tiles</b>",
+      attributionUrl: null,
+    };
+    const { container } = render(<AdsbMap aircraft={picture()} {...props} tiles={tiles} />);
+    expect(layer.mock.calls[0]?.[0]).toBe(tiles.tileUrl);
+    const attribution = container.querySelector(".leaflet-control-attribution");
+    expect(attribution?.querySelector("b")).toBeNull();
+    expect(attribution).toHaveTextContent("Own <b>tiles</b>");
+    layer.mockRestore();
+  });
+
+  it("explains a refusing tile server instead of leaving a grid of broken tiles", () => {
+    const layer = vi.spyOn(L, "tileLayer");
+    render(<AdsbMap aircraft={picture()} {...props} />);
+    const tileLayer = layer.mock.results[0]?.value as L.TileLayer;
+    const problem = /map background could not be loaded from tile\.openstreetmap\.org/;
+    expect(screen.queryByText(problem)).toBeNull();
+    act(() => {
+      for (let i = 0; i < 3; i++) tileLayer.fire("tileerror");
+    });
+    expect(screen.getByText(problem)).toBeInTheDocument();
+    // The first tile that does load clears it.
+    act(() => {
+      tileLayer.fire("tileload");
+    });
+    expect(screen.queryByText(problem)).toBeNull();
+    layer.mockRestore();
   });
 
   it("draws a labelled marker per aircraft with a position and one for the receiver", () => {

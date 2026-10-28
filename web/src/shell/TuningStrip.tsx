@@ -24,6 +24,7 @@ import {
 } from "../vfo/model";
 import { BandwidthSelect, ModeSelect, SquelchControl } from "../vfo/controls";
 import { channelTitle, chipLabel } from "../channels/lookup";
+import { claimBadge, claimHint } from "../plugins/claim";
 import { DigitalModeControl } from "../digital/DigitalModeControl";
 import { SMeter } from "../vfo/SMeter";
 import type { VfoPatch } from "../vfo/api";
@@ -176,12 +177,22 @@ function ActiveVfo({
         >
           <BookmarkIcon />
         </IconButton>
-        {vfo.status === "paused" && (
-          <Badge tone="warn" title={locked ? VFO_PAUSED_HINT : VFO_PAUSED_FREE_HINT}>
-            <PauseIcon size={10} />
-            paused
-          </Badge>
-        )}
+        {vfo.status === "paused" &&
+          (r.claim !== null ? (
+            // An exclusive plugin moved the centre; this receiver waits at its own frequency.
+            <Badge
+              tone="warn"
+              title={claimHint(r.claim, r.tuningSnap.display?.centerHz ?? null, vfo.freqHz)}
+            >
+              <PauseIcon size={10} />
+              {claimBadge(r.claim)}
+            </Badge>
+          ) : (
+            <Badge tone="warn" title={locked ? VFO_PAUSED_HINT : VFO_PAUSED_FREE_HINT}>
+              <PauseIcon size={10} />
+              paused
+            </Badge>
+          ))}
       </fieldset>
       {wide && (
         <fieldset
