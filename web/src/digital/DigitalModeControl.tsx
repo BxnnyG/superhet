@@ -21,6 +21,8 @@ interface Props {
   device: string;
   plugins: PluginStore;
   onUpdate: (id: number, patch: VfoPatch) => void;
+  /** Stretch the select to the container width (phone sheet) instead of the compact strip width. */
+  fill?: boolean;
 }
 
 const ANALOG = "";
@@ -31,7 +33,7 @@ const ANALOG = "";
  * panel below the spectrum shows what it decodes. "Analog" stops it again. A small chip offers
  * the mode that usually lives on the VFO's frequency.
  */
-export function DigitalModeControl({ vfo, device, plugins, onUpdate }: Props) {
+export function DigitalModeControl({ vfo, device, plugins, onUpdate, fill = false }: Props) {
   const perms = usePermissions();
   const snap = useSyncExternalStore(plugins.subscribe, plugins.getSnapshot);
   const [busy, setBusy] = useState(false);
@@ -90,7 +92,7 @@ export function DigitalModeControl({ vfo, device, plugins, onUpdate }: Props) {
       <Select
         aria-label="Digital mode"
         size="sm"
-        className="w-28 shrink-0"
+        className={fill ? "w-full" : "w-28 shrink-0"}
         disabled={busy}
         title={
           active
@@ -107,7 +109,7 @@ export function DigitalModeControl({ vfo, device, plugins, onUpdate }: Props) {
       {hinted !== null && (
         <Chip
           selected={false}
-          className="max-w-36 truncate"
+          className={fill ? "max-w-full self-start truncate max-phone:h-11" : "max-w-36 truncate"}
           disabled={busy}
           aria-label={`Try ${hinted.mode.label} here`}
           title={`${hinted.note}: click to start ${hinted.mode.label} on this receiver`}
