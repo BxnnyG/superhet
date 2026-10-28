@@ -57,10 +57,13 @@ ADR-0013.
    shared by everybody listening, so a choice changes the audio for all and is treated like
    tuning a VFO. Listeners and guests (per guest policy) see the DAB tab read-only and hear the
    stream. `status` and `media` follow the decoder history's visibility.
-8. **Security.** `welle-cli` binds its web interface to all addresses of the container. The
-   adapter picks a random port and the interface is up only while an instance runs; it is
-   unauthenticated and can only retune its (ignored) input. On host networking the port is
-   visible on the LAN; the install notice says so.
+8. **Security.** `welle-cli` hard-codes `INADDR_ANY` for its web interface and has no option to
+   change it. The adapter starts it with a small `LD_PRELOAD` library
+   (`plugins/dab/loopback-bind.c`, built in the Dockerfile) that turns a `bind()` to 0.0.0.0 into
+   127.0.0.1, so the unauthenticated interface is never reachable from the network, also with
+   host networking (`scripts/check-plugin-image.sh` verifies the listening address). Without the
+   library (a development host) the adapter logs a warning. The port is random and open only
+   while an instance runs.
 
 ## Consequences
 

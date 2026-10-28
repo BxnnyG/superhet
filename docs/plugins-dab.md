@@ -96,10 +96,10 @@ the old block reach the new decoder).
 - **Gain.** welle-cli's gain commands are ignored; set the tuner gain in the Source tab. A weak
   or overloaded front end shows as a low SNR / many FIC errors in the badge. A good Band III
   antenna (a dipole or a DAB whip, not the FM whip indoors) matters more than for FM.
-- **Network.** welle-cli opens an unauthenticated web interface on a random port of the
-  container while an instance runs. With the default compose network it is not published; with
-  host networking (`deploy/compose.hostnet.yaml`) it is visible on the LAN. It only serves what
-  is broadcast anyway.
+- **Network.** welle-cli opens an unauthenticated web interface on a random port while an
+  instance runs. It binds every address on its own; the image preloads a shim
+  (`plugins/dab/loopback-bind.c`) that makes it listen on 127.0.0.1 only, also with host
+  networking. Outside the image (development host) the adapter logs a warning instead.
 - **Not covered.** TII (transmitter id) is switched off, no EPG/Journaline, no data services, no
   recording of the DAB stream yet (it is an ordinary audio stream, so recording and Instant Replay
   can use it later).
@@ -118,8 +118,17 @@ the old block reach the new decoder).
   (`tests/fixtures/fake_framed.py`).
 - `web/e2e/zz-dab.e2e.ts`: browser scenario against the real stack with the stand-in welle-cli.
 - `scripts/check-plugin-image.sh` checks that `welle-cli` of the image starts and links.
-- Real welle-cli in Debian bookworm was checked against the stand-in `rtl_tcp` server with noise:
-  it connects, reports the dongle and serves `/mux.json` (id `0x0000`, no services).
+- Real welle-cli in Debian bookworm against the stand-in `rtl_tcp` server: with noise it connects
+  and serves `/mux.json` (id `0x0000`, no services).
+- **Real signal.** A 30 s recording of block 5C (RTL-SDR, gain 30, 2.048 MS/s cu8, strong signal),
+  looped by the file backend, through the full chain (file sdrd, host, adapter, real welle-cli
+  2.4): ensemble `DR Deutschland` (EId 10BC, ECC E0) with 16 services (14 DAB+ audio, 2 data) after
+  about 3 s, SNR 12 dB; DLS for all four services played (e.g. "Deutschlandfunk - Alles von
+  Relevanz"); about 580 Opus frames in 12 s on the pseudo VFO without a sequence gap, decodable
+  (ffmpeg: stable level, speech/music-like). Not seen: a slideshow image (none of the services sent
+  one within 30 s per service). The decoder loses and regains sync at every loop seam of the
+  recording; that is an artefact of the test. About 3 s (6 MB) of IQ give the complete service
+  list; a slice under 2 MB (0.46 s) gives nothing, so no fixture of the recording is committed.
 
 ## Manual check on real hardware (block 5C, 178.352 MHz)
 
