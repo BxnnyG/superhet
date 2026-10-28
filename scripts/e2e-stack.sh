@@ -10,7 +10,8 @@
 # Needs: a FRESH PostgreSQL database and a NATS server (JetStream not required), given as
 # SUPERHET_DATABASE_URL / SUPERHET_NATS_URL (optionally SUPERHET_NATS_USER/PASSWORD; JetStream
 # enabled for the plugin events), the four debug binaries (cargo build -p superhet-api
-# -p superhet-sdrd -p superhet-worker -p superhet-pluginhost -p superhet-plugin-adapters) and web/dist (pnpm -C web build).
+# -p superhet-sdrd -p superhet-worker -p superhet-pluginhost -p superhet-plugin-adapters) and web/dist
+# (pnpm -C web build).
 # scripts/e2e.sh sets all of that up locally.
 #
 # Ports (loopback only): api E2E_PORT (default 18073), sdrd +1, pluginhost +2, worker +3.
@@ -51,6 +52,30 @@ for name in pocsag aprs rtl433 dab; do cp -r "plugins/$name" "$work/bundled/$nam
 mkdir -p "$work/bin"
 # E2E_WELLE=/path/to/welle-cli (or a wrapper) swaps in a real decoder for manual checks.
 ln -s "${E2E_WELLE:-$(pwd)/crates/superhet-plugin-adapters/tests/dab/fake-welle-cli}" "$work/bin/welle-cli"
+
+# A stand-in for multimon-ng so the digital-mode scenario needs no decoder installed: it prints a
+# page per second (the inverted decoder, -i, prints different text) until its stdin is closed.
+mkdir -p "$work/tools"
+cat >"$work/tools/multimon-ng" <<'FAKE'
+#!/bin/sh
+tag=normal
+for a in "$@"; do [ "$a" = "-i" ] && tag=inverted; done
+(
+    n=0
+    while :; do
+        n=$((n + 1))
+        echo "POCSAG1200: Address: 1234567  Function: 3  Alpha:   e2e $tag page $n"
+        sleep 1
+    done
+) &
+loop=$!
+cat >/dev/null
+kill "$loop" 2>/dev/null
+FAKE
+chmod +x "$work/tools/multimon-ng"
+# The plugin host passes PATH on to plugins: the adapter binary and the stand-in tool.
+case "$bins" in /*) bin_abs="$bins" ;; *) bin_abs="$PWD/$bins" ;; esac
+export PATH="$bin_abs:$work/tools:$PATH"
 
 # 1 s of random cu8 samples at 2.048 MS/s: valid IQ, plays in a loop.
 if [ -n "${E2E_IQ_FILE:-}" ]; then

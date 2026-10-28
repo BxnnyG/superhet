@@ -17,7 +17,7 @@ Status: protocol version `1`. Plugin `plugin.protocol` must equal it; incompatib
 | Simple transport (stdin samples, stdout JSON Lines events, stderr log) | done, supervised by the host |
 | Framed transport (frame codec, hello, samples in; event, audio, log, status, media, tune out; control in) | done (ADR-0016); voice frames are accepted by the codec but dropped by the host |
 | Supervisor: spawn, health, restart with backoff, `error` after 5 crashes in 5 min | done |
-| Control API on the bus (list, install from local path, instances, start, stop, restart) | done |
+| Control API on the bus (list, install from local path, instances, start, stop, restart, reconfigure) | done |
 | Feeding VFO audio / IQ and the whole window from sdrd into `stdin` | done ("Feeding input") |
 | Exclusive device claims | done: manifest, one claim per device in the host, `claim.*` in sdrd |
 | Instances survive a host restart | done (PostgreSQL, `plugin_instances`) |
@@ -239,6 +239,13 @@ Instance states (`InstanceState`): `starting`, `running`, `backoff`, `error`, `s
 - Crashes are counted over a sliding 5 minute window. The 5th crash inside it puts the instance
   into `error` and no further start is attempted; `last_error` says why. `restart` clears the
   history and starts again.
+- `reconfigure` replaces the instance's config and restarts the process with it: the old process
+  is stopped like on `stop` (stdin closed, killed after 5 s), the new one is spawned with the new
+  `SUPERHET_CONFIG`. The instance keeps its id, binding, counters and event history; the restart
+  is not a crash (no backoff, crash history cleared), an instance in `backoff` starts at once and
+  one in `error` is revived. The new config is stored for host restarts. The host does not
+  validate the config (the plugin does at start): a bad config shows up as `last_error` and the
+  usual crash handling, and the next `reconfigure` fixes it.
 - `stop` closes stdin, waits up to 5 s, kills, and removes the instance. On host shutdown all
   instances are stopped the same way.
 - Instances are persistent: with `SUPERHET_DATABASE_URL` the host stores every started instance in
@@ -271,15 +278,22 @@ Request/reply JSON on `sh.v1.plugin.ctl.<cmd>`. Requests carry `"v":1`; replies 
 | `control` | `{"v":1,"id":"...","message":{...}}` | `{}`; the object is sent to a framed plugin as a `control` frame (`conflict` while it has no session, `invalid` for a non-object or more than 64 KiB) |
 | `status` | `{"v":1,"id":"..."}` | `{"plugin_id","device","state","freq_hz","audio_vfo","status":{...}\|null,"updated_unix_ms","media":[{"key","mime","size","revision"}]}` |
 | `media` | `{"v":1,"id":"...","key":"slide.d210"}` | success: one line of JSON (`ok`, `key`, `mime`, `revision`), a newline, the object bytes; failure: the usual JSON error reply |
+| `reconfigure` | `{"v":1,"id":"...","config":{...}}` | `{"instance":InstanceInfo}` with the new config; `config` is the complete new configuration (object or `null`), `invalid` for anything else, `not_found` for unknown ids |
 
 Every state change of an instance is also published as `InstanceInfo` JSON on
 `sh.v1.plugin.state` (core NATS). `InstanceInfo`: `id`, `plugin_id`, `device`, `vfo`, `freq_hz`,
 `config`, `exclusive`, `state`, `pid`, `restarts`, `crashes_in_window`, `retry_in_ms`,
 `last_error`, `events_ok`, `events_invalid`, `input_dropped`, `input_error`, `audio_vfo`
-(plugins with `[output.audio]`), `updated_unix_ms` (`schema/instance-info.schema.json`).
+(plugins with `[output.audio]`), `updated_unix_ms` and the liveness counters `input_bytes` (sample bytes written to the plugin's stdin since the
+instance was created, survives process restarts), `input_level_db` (smoothed RMS level of the input
+in dBFS, `null` before the first chunk), `last_input_unix_ms`, `last_event_unix_ms` (`null` until
+the first), `created_unix_ms`, `reconfigures` (`schema/instance-info.schema.json`). The counters
+are not published on every change; poll `get` / `instances` for them. "Running but nothing
+decoded" shows as `input_bytes` growing with `events_ok` at 0, "no input" as `input_bytes` standing
+still.
 
 The API edge (`docs/api-plugins.md`) is the only caller in production: install and remove are
-`admin`, listing plugins and start / stop / restart are `operator` or `admin` (ROADMAP P2
+`admin`, listing plugins and start / stop / restart / reconfigure are `operator` or `admin` (ROADMAP P2
 criterion 8), declared in `access::RULES`, every change audited.
 
 NATS permissions (`deploy/nats/nats.conf`): the `pluginhost` user subscribes to

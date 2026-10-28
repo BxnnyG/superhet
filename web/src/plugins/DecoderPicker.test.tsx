@@ -112,7 +112,9 @@ describe("starting a decoder", () => {
 
     // Config form of the first-party plugin.
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "1200" }));
-    fireEvent.click(within(dialog).getByRole("switch", { name: "Invert the signal" }));
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "Signal polarity" }), {
+      target: { value: "inverted" },
+    });
     fireEvent.change(within(dialog).getByRole("combobox", { name: "National characters" }), {
       target: { value: "DE" },
     });
@@ -213,9 +215,12 @@ describe("running instances", () => {
     const row = screen.getByTestId("instance-i-1");
     expect(row).toHaveTextContent("Running");
     expect(row).toHaveTextContent("VFO 1 · dev0");
-    expect(row).toHaveTextContent("2 restarts");
-    expect(row).toHaveTextContent("5 events");
-    expect(row).toHaveTextContent("7 dropped input chunks");
+    expect(within(row).getByText("Restarts")).toBeInTheDocument();
+    expect(within(row).getByTestId("facts-decoded")).toHaveTextContent("5 events");
+    expect(row).toHaveTextContent("7 chunks");
+    // Liveness: what arrived and when the last event was.
+    expect(within(row).getByTestId("facts-input")).toHaveTextContent("441 kB");
+    expect(within(row).getByTestId("facts-input")).toHaveTextContent("-33 dBFS");
     fireEvent.click(within(row).getByRole("button", { name: "Stop POCSAG / FLEX pagers" }));
     await flush();
     expect(api.stop).toHaveBeenCalledWith("i-1");

@@ -137,6 +137,28 @@ it("lists one card per decoding VFO, the selected one first, and skips other mod
   expect(within(cards[1] as HTMLElement).getByText(/VFO 2/)).toBeInTheDocument();
 });
 
+it("shows no RDS card for a WFM receiver outside the FM broadcast band or too narrow", () => {
+  setup([vfo({ id: 1, freqHz: 433_920_000 })], snap());
+  expect(screen.queryByTestId("rds-ps")).not.toBeInTheDocument();
+  expect(screen.getByText(/RDS needs a WFM receiver on the FM broadcast band/)).toBeInTheDocument();
+});
+
+it("needs enough bandwidth for the RDS subcarrier", () => {
+  const { unmount } = render(
+    <LiveCards
+      vfos={[vfo({ bandwidthHz: 100_000 })]}
+      selectedId={1}
+      audio={{ clearDigits: vi.fn() } as unknown as AudioController}
+      audioSnap={snap()}
+      onUpdate={vi.fn()}
+    />,
+  );
+  expect(screen.queryByTestId("rds-ps")).not.toBeInTheDocument();
+  unmount();
+  setup([vfo({ bandwidthHz: 120_000 })], snap());
+  expect(screen.getByTestId("rds-ps")).toBeInTheDocument();
+});
+
 it("explains when no receiver has a decoder", () => {
   setup([vfo({ mode: "usb" })], snap());
   expect(screen.getByText("No decoders for this mode")).toBeInTheDocument();

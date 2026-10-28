@@ -102,6 +102,8 @@ export type ConfigField =
       label: string;
       hint?: string;
       options: readonly { value: string; label: string }[];
+      /** Config value per option, for options whose value is not the option string itself. */
+      values?: Readonly<Record<string, string | boolean>>;
     }
   | { type: "numlist"; key: string; label: string; hint?: string; placeholder?: string };
 
@@ -117,11 +119,16 @@ export const CONFIG_FIELDS: Readonly<Record<string, readonly ConfigField[]>> = {
     },
     { type: "bool", key: "flex", label: "Decode FLEX as well", default: true },
     {
-      type: "bool",
+      type: "select",
       key: "invert",
-      label: "Invert the signal",
-      hint: "For receivers with inverted audio.",
-      default: false,
+      label: "Signal polarity",
+      hint: "Automatic runs a normal and an inverted decoder side by side; pick one only to save CPU.",
+      options: [
+        { value: "", label: "Automatic (both)" },
+        { value: "normal", label: "Normal" },
+        { value: "inverted", label: "Inverted" },
+      ],
+      values: { normal: false, inverted: true },
     },
     {
       type: "select",
@@ -163,6 +170,32 @@ export function defaultDraft(fields: readonly ConfigField[]): ConfigDraft {
   return draft;
 }
 
+/** The form state of an existing config (the inverse of [`buildConfig`]); unknown keys are ignored. */
+export function configToDraft(fields: readonly ConfigField[], config: unknown): ConfigDraft {
+  const draft = defaultDraft(fields);
+  if (typeof config !== "object" || config === null || Array.isArray(config)) return draft;
+  const c = config as Rec;
+  for (const f of fields) {
+    const v = c[f.key];
+    if (v === undefined || v === null) continue;
+    if (f.type === "bool") {
+      if (typeof v === "boolean") draft[f.key] = v;
+    } else if (f.type === "multi") {
+      if (Array.isArray(v)) draft[f.key] = v.filter((x): x is number => typeof x === "number");
+    } else if (f.type === "select") {
+      const mapped = f.values
+        ? Object.entries(f.values).find(([, value]) => value === v)?.[0]
+        : typeof v === "string"
+          ? v
+          : undefined;
+      if (mapped !== undefined) draft[f.key] = mapped;
+    } else if (Array.isArray(v)) {
+      draft[f.key] = v.join(", ");
+    }
+  }
+  return draft;
+}
+
 export type BuiltConfig = { ok: true; config: Rec } | { ok: false; error: string };
 
 /** The config object of a draft: only values that differ from the plugin's defaults. */
@@ -177,7 +210,7 @@ export function buildConfig(fields: readonly ConfigField[], draft: ConfigDraft):
         config[f.key] = [...v].sort((a, b) => a - b);
       }
     } else if (f.type === "select") {
-      if (typeof v === "string" && v !== "") config[f.key] = v;
+      if (typeof v === "string" && v !== "") config[f.key] = f.values?.[v] ?? v;
     } else if (typeof v === "string" && v.trim() !== "") {
       const items = v.split(/[\s,;]+/).filter((s) => s !== "");
       const nums = items.map((s) => (/^\d{1,5}$/.test(s) ? Number(s) : NaN));

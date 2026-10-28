@@ -92,7 +92,7 @@ Concurrency inside sdrd: tokio for I/O; DSP runs on dedicated OS threads (device
 | `sh.v1.events.<plugin>.<type...>` | JetStream `EVENTS` (7 days) plus core delivery | pluginhost → worker (durable consumer, persists into `decoder_events`), api (live); `<plugin>` = plugin id with `.` as `_`, one token per type segment (ADR-0014) |
 | `sh.v1.lookup.<key>` | request/reply | api/worker → worker lookup service |
 | `sh.v1.audit.<source>` | core NATS | sdrd/pluginhost → worker (persist as `audit_events`, `docs/api-audit.md`) |
-| `sh.v1.plugin.ctl.<cmd>` | request/reply | api → pluginhost (`list`, `install`, `remove`, `instances`, `get`, `start`, `stop`, `restart`; `docs/plugin-contract.md`, REST in `docs/api-plugins.md`) |
+| `sh.v1.plugin.ctl.<cmd>` | request/reply | api → pluginhost (`list`, `install`, `remove`, `instances`, `get`, `start`, `stop`, `restart`, `reconfigure`; `docs/plugin-contract.md`, REST in `docs/api-plugins.md`) |
 | `sh.v1.plugin.state` | pub/sub (core NATS) | pluginhost → api (JSON `InstanceInfo` on every instance state change) |
 
 ## 2. Data flow: stick → browser

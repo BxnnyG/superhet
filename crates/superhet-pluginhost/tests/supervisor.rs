@@ -661,3 +661,102 @@ async fn stopping_kills_the_whole_process_group() {
         "helper {helper} survived the plugin"
     );
 }
+
+#[tokio::test]
+async fn reconfigure_restarts_with_the_new_config_and_keeps_the_instance() {
+    let dir = TempDir::new();
+    let supervisor = Supervisor::new(fast_policy(), Arc::new(Collect::default()));
+    let package = shell_plugin(&dir, "echo \"$SUPERHET_CONFIG\" >> cfg.log; sleep 300", "");
+    let info = supervisor
+        .start(
+            Arc::clone(&package),
+            StartSpec {
+                config: json!({"n": 1}),
+                ..StartSpec::default()
+            },
+        )
+        .expect("start");
+    let first = wait_for(&supervisor, &info.id, "running", |i| {
+        i.state == InstanceState::Running
+    })
+    .await;
+    let log = package.dir.join("cfg.log");
+    let lines = || {
+        std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    for _ in 0..200 {
+        if !lines().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let after = supervisor
+        .reconfigure(&info.id, json!({"n": 2}))
+        .expect("reconfigure");
+    assert_eq!(after.id, info.id);
+    assert_eq!(after.config, json!({"n": 2}));
+    assert_eq!(after.reconfigures, 1);
+    for _ in 0..300 {
+        if lines().len() >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(lines(), [r#"{"n":1}"#, r#"{"n":2}"#]);
+    let running = wait_for(&supervisor, &info.id, "running again", |i| {
+        i.state == InstanceState::Running && i.pid != first.pid
+    })
+    .await;
+    // Not counted as a crash.
+    assert_eq!(running.restarts, 0);
+    assert_eq!(running.crashes_in_window, 0);
+    assert_eq!(running.created_unix_ms, first.created_unix_ms);
+
+    assert!(matches!(
+        supervisor.reconfigure(&info.id, json!([1])),
+        Err(StartError::Invalid(_))
+    ));
+    assert!(matches!(
+        supervisor.reconfigure("i-nope", json!({})),
+        Err(StartError::NotFound)
+    ));
+    supervisor.stop(&info.id).await.expect("stopped");
+}
+
+#[tokio::test]
+async fn reconfigure_revives_an_instance_in_error() {
+    let dir = TempDir::new();
+    let supervisor = Supervisor::new(fast_policy(), Arc::new(Collect::default()));
+    let package = shell_plugin(
+        &dir,
+        "if echo \"$SUPERHET_CONFIG\" | grep -q bad; then exit 2; fi; sleep 300",
+        "",
+    );
+    let info = supervisor
+        .start(
+            package,
+            StartSpec {
+                config: json!({"mode": "bad"}),
+                ..StartSpec::default()
+            },
+        )
+        .expect("start");
+    wait_for(&supervisor, &info.id, "error", |i| {
+        i.state == InstanceState::Error
+    })
+    .await;
+    supervisor
+        .reconfigure(&info.id, json!({"mode": "good"}))
+        .expect("reconfigure");
+    let running = wait_for(&supervisor, &info.id, "running", |i| {
+        i.state == InstanceState::Running
+    })
+    .await;
+    assert_eq!(running.crashes_in_window, 0);
+    supervisor.stop(&info.id).await.expect("stopped");
+}

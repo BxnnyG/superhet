@@ -32,9 +32,13 @@ a WFM or AM VFO gives the decoder the wrong signal. Squelch is applied before th
 ## POCSAG / FLEX
 
 Config (all optional): `baud` (array of 512 / 1200 / 2400, default all), `flex` (bool, default
-true), `invert` (bool, for receivers with inverted audio), `charset` (`US FR DE DK SE SI`, for
+true), `invert` (`"auto"` (default), `false` or `true`), `charset` (`US FR DE DK SE SI`, for
 umlauts in alphanumeric pages). Unknown keys make the instance fail at start (visible as
-`last_error`).
+`last_error`). Everything runs at once by default: all three baud rates plus FLEX in one
+multimon-ng process (several `-a`), and because multimon-ng does not detect the polarity of the
+audio (it needs `-i` for inverted audio), `invert: "auto"` starts a second, inverted process on the
+same input; the wrong polarity never finds a sync word, so nothing is reported twice. The adapter
+copies its stdin to both and ends if one of them dies. `false` / `true` run one process only.
 
 `pocsag.message` data: `baud`, `address` (RIC, `null` for continuation words), `function` (0-3),
 `kind` (`alpha`, `numeric`, `skyper`), `message`, `summary`. `flex.message`: `baud`, `levels`,

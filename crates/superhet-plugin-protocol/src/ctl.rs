@@ -26,6 +26,9 @@ pub mod cmd {
     pub const STOP: &str = "stop";
     /// Start an instance in state `error` or `stopped` again.
     pub const RESTART: &str = "restart";
+    /// Replace the configuration of an instance and restart its process with it (same id,
+    /// counters and binding are kept).
+    pub const RECONFIGURE: &str = "reconfigure";
     /// Remove an installed plugin (all versions); refused while instances of it exist.
     pub const REMOVE: &str = "remove";
     /// Send a control message to a framed instance.
@@ -120,6 +123,25 @@ pub struct InstanceInfo {
     pub audio_vfo: Option<u32>,
     /// Unix milliseconds of the last state change.
     pub updated_unix_ms: u64,
+    /// Sample bytes delivered to the plugin's `stdin` since the instance was created (survives
+    /// process restarts); `0` while nothing flowed.
+    #[serde(default)]
+    pub input_bytes: u64,
+    /// Smoothed RMS level of the input in dBFS (`None` until the first chunk arrived).
+    #[serde(default)]
+    pub input_level_db: Option<f32>,
+    /// Unix milliseconds of the last input chunk.
+    #[serde(default)]
+    pub last_input_unix_ms: Option<u64>,
+    /// Unix milliseconds of the last valid event.
+    #[serde(default)]
+    pub last_event_unix_ms: Option<u64>,
+    /// Unix milliseconds the instance was created (not reset by restarts or reconfigures).
+    #[serde(default)]
+    pub created_unix_ms: u64,
+    /// How often the configuration was replaced with `reconfigure`.
+    #[serde(default)]
+    pub reconfigures: u32,
 }
 
 /// An installed plugin.
@@ -304,6 +326,19 @@ impl MediaReplyHeader {
         let header: Self = serde_json::from_slice(&payload[..split]).ok()?;
         header.ok.then_some((header, &payload[split + 1..]))
     }
+}
+
+/// `reconfigure`: new configuration for an instance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReconfigureRequest {
+    /// Contract version.
+    pub v: u32,
+    /// Instance id.
+    pub id: String,
+    /// The complete new configuration (object or `null` for the plugin's defaults).
+    #[serde(default)]
+    pub config: Value,
 }
 
 /// Machine-readable error classes.

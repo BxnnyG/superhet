@@ -1,6 +1,7 @@
 // Fixtures for the plugin tests: manifests as the API sends them and a fake plugin API.
 
 import { vi } from "vitest";
+import type { Rec } from "../spectrum/api";
 import {
   parseInstance,
   parseManifest,
@@ -11,6 +12,7 @@ import {
 
 export const POCSAG_ID = "org.superhet.decoder.pocsag";
 export const RTL433_ID = "org.superhet.decoder.rtl433";
+export const APRS_ID = "org.superhet.decoder.aprs";
 export const ADSB_ID = "org.example.decoder.adsb";
 
 /** Manifest JSON of the first-party POCSAG plugin (plugins/pocsag/plugin.toml). */
@@ -68,6 +70,23 @@ export const ADSB_RAW = {
   device: { exclusive: true, sample_rate: 2400000, center_hz: 1090000000 },
 };
 
+export const APRS_RAW = {
+  plugin: {
+    id: APRS_ID,
+    name: "APRS (1200 baud)",
+    version: "0.1.0",
+    protocol: 1,
+    license: "AGPL-3.0-only",
+    type: "decoder",
+    description: "Decodes APRS packets with direwolf",
+  },
+  runtime: { kind: "process", transport: "simple", command: ["superhet-plugin-adapter", "aprs"] },
+  input: { kind: "discriminator", sample_rate: 22050, format: "s16le", bandwidth_hz: 12500 },
+  device: { exclusive: false },
+  install: { acknowledge: { text: "APRS positions can be personal data." } },
+};
+
+export const aprs: PluginManifest = parseManifest(APRS_RAW);
 export const pocsag: PluginManifest = parseManifest(POCSAG_RAW);
 export const rtl433: PluginManifest = parseManifest(RTL433_RAW);
 export const adsb: PluginManifest = parseManifest(ADSB_RAW);
@@ -91,6 +110,12 @@ export const instanceRaw = (over: Record<string, unknown> = {}) => ({
   input_dropped: 0,
   input_error: null,
   updated_unix_ms: 1_700_000_000_000,
+  input_bytes: 441_000,
+  input_level_db: -32.5,
+  last_input_unix_ms: 1_700_000_000_000,
+  last_event_unix_ms: 1_700_000_000_000,
+  created_unix_ms: 1_699_999_000_000,
+  reconfigures: 0,
   ...over,
 });
 
@@ -126,6 +151,12 @@ export function fakePluginApi(
     restart: vi.fn((id: string) =>
       Promise.resolve(state.instances.find((i) => i.id === id) ?? instance({ id })),
     ),
+    reconfigure: vi.fn((id: string, config: Rec) => {
+      const found = state.instances.find((i) => i.id === id) ?? instance({ id });
+      const next = { ...found, config, reconfigures: found.reconfigures + 1 };
+      state.instances = state.instances.map((i) => (i.id === id ? next : i));
+      return Promise.resolve(next);
+    }),
   } satisfies PluginApi;
   return { api, state };
 }

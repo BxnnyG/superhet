@@ -251,7 +251,7 @@ export function StartDialog({ plugin, vfo, device, store, onUpdateVfo, onClose }
   );
 }
 
-function ConfigRow({
+export function ConfigRow({
   field,
   value,
   onChange,

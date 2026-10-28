@@ -17,6 +17,9 @@ import {
 import type { Vfo, VfoPatch } from "../vfo/api";
 import type { PluginInstance, PluginManifest } from "./api";
 import { describeBinding, describeInput, instanceProblem, suggestVfo } from "./model";
+import { InstanceFacts } from "./InstanceFacts";
+import { InstanceSettings, hasSettings } from "./InstanceSettings";
+import { useFlow, verdict } from "./liveness";
 import { StateBadge } from "./parts";
 import { StartDialog } from "./StartDialog";
 import { instancesOnDevice, instancesOnVfo, pluginName, type PluginStore } from "./store";
@@ -248,8 +251,11 @@ function InstanceRow({
   store: PluginStore;
 }) {
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const flow = useFlow(i);
   const name = pluginName(plugins, i.pluginId);
   const problem = instanceProblem(i);
+  const state = verdict(i, flow);
   const run = async (what: "stop" | "restart") => {
     setBusy(true);
     try {
@@ -284,6 +290,17 @@ function InstanceRow({
             Restart
           </Button>
         )}
+        {hasSettings(i.pluginId) && (
+          <Button
+            size="sm"
+            variant="secondary"
+            aria-expanded={editing}
+            aria-label={`Settings of ${name}`}
+            onClick={() => setEditing(!editing)}
+          >
+            Settings
+          </Button>
+        )}
         <Button
           size="sm"
           variant="secondary"
@@ -295,12 +312,16 @@ function InstanceRow({
           Stop
         </Button>
       </div>
-      <p className="mt-1 text-[11px] text-fg-subtle">
-        {describeBinding(i)}
-        {i.restarts > 0 && ` · ${i.restarts} restart${i.restarts === 1 ? "" : "s"}`}
-        {i.eventsOk > 0 && ` · ${i.eventsOk} event${i.eventsOk === 1 ? "" : "s"}`}
-        {i.inputDropped > 0 && ` · ${i.inputDropped} dropped input chunks`}
-      </p>
+      <p className="mt-1 text-[11px] text-fg-subtle">{describeBinding(i)}</p>
+      <InstanceFacts instance={i} flow={flow} className="mt-1" />
+      {i.state === "running" && problem === null && state.tone !== "success" && (
+        <p className="mt-1 text-xs text-warn">{state.text}</p>
+      )}
+      {editing && (
+        <div className="mt-2 border-t border-border pt-2">
+          <InstanceSettings instance={i} store={store} />
+        </div>
+      )}
       {problem !== null && (
         <p className="mt-1 line-clamp-3 text-xs break-words text-danger" title={problem}>
           {problem}

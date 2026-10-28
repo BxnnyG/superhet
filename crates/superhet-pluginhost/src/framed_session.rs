@@ -107,7 +107,7 @@ async fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
         instance_id: shared.id.clone(),
         device: shared.spec.device.clone(),
         freq_hz: shared.freq_hz(),
-        config: shared.spec.config.clone(),
+        config: shared.config(),
     };
     send_json(&mut write, FrameKind::Hello, &hello).await?;
     let frame = tokio::time::timeout(HELLO_TIMEOUT, reader.next())

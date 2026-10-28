@@ -12,7 +12,7 @@ application/json`. Roles (`access::RULES`, `docs/api-users.md`):
 | Route | Role |
 |---|---|
 | `GET /api/v1/plugins`, `GET /api/v1/plugin-instances[/{id}]` | `operator` |
-| `POST /api/v1/plugin-instances`, `POST .../{id}/stop`, `POST .../{id}/restart`, `POST .../{id}/control` | `operator` |
+| `POST /api/v1/plugin-instances`, `POST .../{id}/stop`, `POST .../{id}/restart`, `POST .../{id}/reconfigure`, `POST .../{id}/control` | `operator` |
 | `GET .../{id}/status`, `GET .../{id}/media/{key}` | everybody who may see the decoder history (listener, guests per guest policy) |
 | `POST /api/v1/plugins`, `DELETE /api/v1/plugins/{id}` | `admin` |
 
@@ -44,7 +44,10 @@ while an instance of the plugin exists (stop it first).
 `GET /api/v1/plugin-instances/{id}` – `{"instance":InstanceInfo}` (`404` for unknown ids).
 `InstanceInfo`: `id`, `plugin_id`, `device`, `vfo`, `freq_hz`, `config`, `exclusive`, `state`
 (`starting|running|backoff|error|stopped`), `pid`, `restarts`, `crashes_in_window`, `retry_in_ms`,
-`last_error`, `events_ok`, `events_invalid`, `input_dropped`, `input_error`, `updated_unix_ms`.
+`last_error`, `events_ok`, `events_invalid`, `input_dropped`, `input_error`, `updated_unix_ms`
+and the liveness counters `input_bytes` (sample bytes fed to the plugin), `input_level_db`
+(smoothed input level, dBFS, `null` before the first chunk), `last_input_unix_ms`,
+`last_event_unix_ms` (`null` until the first event), `created_unix_ms` and `reconfigures`.
 The same documents stream on the bus subject `sh.v1.plugin.state` (no WebSocket yet: poll).
 
 `POST /api/v1/plugin-instances` `{"plugin_id", "device"?, "vfo"?, "freq_hz"?, "config"?}` – start
@@ -63,6 +66,13 @@ an instance, `201` with `{"instance":InstanceInfo}`. Unknown fields are `400`.
 whole process group), forgets the instance. `200` with the final `InstanceInfo` (`stopped`).
 `POST /api/v1/plugin-instances/{id}/restart` – only for state `error`; clears the crash history
 and starts again (`409` otherwise).
+`POST /api/v1/plugin-instances/{id}/reconfigure` `{"config": {...}}` – replace the configuration
+(the complete new one, `null` or `{}` for the plugin's defaults) and restart the process with it.
+`200` with the `InstanceInfo`. The instance keeps its id, binding, counters and history; the
+decoder is down for the moment the process needs to restart, and the restart is not counted as a
+crash. A config the plugin refuses shows up as `last_error` (the plugin validates at start);
+reconfigure again to fix it, also from `error` or `backoff`. Other fields than `config` are `400`,
+unknown ids `404`.
 
 `InstanceInfo` has one more field for plugins with audio output: `audio_vfo`, the pseudo VFO id of the instance's audio stream on the audio WebSocket (`docs/protocol-audio.md`).
 
@@ -77,8 +87,8 @@ and starts again (`409` otherwise).
 ## Audit
 
 `plugin.install` (target: plugin id, details: path, version), `plugin.remove` (plugin id,
-versions), `plugin.start` (instance id; plugin id, device, vfo, freq_hz), `plugin.stop` and
-`plugin.restart` (instance id), `plugin.control` (instance id; details: the message). Refusals by the host (conflict, not found, invalid) are recorded
+versions), `plugin.start` (instance id; plugin id, device, vfo, freq_hz), `plugin.stop`, `plugin.restart` and
+`plugin.reconfigure` (instance id; plugin id) and `plugin.control` (instance id; details: the message). Refusals by the host (conflict, not found, invalid) are recorded
 with outcome `denied`, other failures with `error`. Role refusals (403) are not recorded by the
 route (like the other routes). Plugin crashes are the host's to report (`sh.v1.audit.>`).
 

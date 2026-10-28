@@ -5,6 +5,7 @@
 //   GET    /api/v1/plugin-instances             -> { instances: [InstanceInfo] }    (operator)
 //   POST   /api/v1/plugin-instances             -> { instance }                     (operator)
 //   POST   /api/v1/plugin-instances/{id}/stop|restart -> { instance }               (operator)
+//   POST   /api/v1/plugin-instances/{id}/reconfigure { config } -> { instance }     (operator)
 // Errors are `{ ok: false, code, error }`; they surface as ApiError(message, status, code).
 
 import { apiFetch } from "../auth/session";
@@ -74,6 +75,15 @@ export interface PluginInstance {
   inputDropped: number;
   inputError: string | null;
   updatedMs: number;
+  /** Sample bytes delivered to the plugin since the instance was created. */
+  inputBytes: number;
+  /** Smoothed input level in dBFS; null before the first chunk. */
+  inputLevelDb: number | null;
+  /** Server time (ms) of the last input chunk / the last valid event; null if none yet. */
+  lastInputMs: number | null;
+  lastEventMs: number | null;
+  createdMs: number;
+  reconfigures: number;
 }
 
 export interface StartRequest {
@@ -92,6 +102,8 @@ export interface PluginApi {
   start(req: StartRequest): Promise<PluginInstance>;
   stop(instanceId: string): Promise<PluginInstance>;
   restart(instanceId: string): Promise<PluginInstance>;
+  /** Replace the configuration; the process restarts with it (same id, counters kept). */
+  reconfigure(instanceId: string, config: Rec): Promise<PluginInstance>;
 }
 
 // ---------- parsing ----------
@@ -174,6 +186,12 @@ export function parseInstance(raw: unknown): PluginInstance {
     inputDropped: count(raw.input_dropped),
     inputError: strOrNull(raw.input_error),
     updatedMs: count(raw.updated_unix_ms),
+    inputBytes: count(raw.input_bytes),
+    inputLevelDb: numOrNull(raw.input_level_db),
+    lastInputMs: numOrNull(raw.last_input_unix_ms),
+    lastEventMs: numOrNull(raw.last_event_unix_ms),
+    createdMs: count(raw.created_unix_ms),
+    reconfigures: count(raw.reconfigures),
   };
 }
 
@@ -240,6 +258,11 @@ export function createPluginApi(fetchImpl: typeof fetch = apiFetch): PluginApi {
     },
     async restart(instanceId) {
       return instance(await call("POST", `${BASE}/plugin-instances/${enc(instanceId)}/restart`));
+    },
+    async reconfigure(instanceId, config) {
+      return instance(
+        await call("POST", `${BASE}/plugin-instances/${enc(instanceId)}/reconfigure`, { config }),
+      );
     },
   };
 }

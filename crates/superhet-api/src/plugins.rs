@@ -58,6 +58,10 @@ pub fn router(state: DevicesState) -> Router {
             "/api/v1/plugin-instances/{id}/control",
             post(instance_control).layer(limit),
         )
+        .route(
+            "/api/v1/plugin-instances/{id}/reconfigure",
+            post(reconfigure_instance).layer(limit),
+        )
         .with_state(state)
 }
 
@@ -555,6 +559,49 @@ async fn restart_instance(
     headers: HeaderMap,
 ) -> Response {
     change_instance(state, principal, id, headers, "restart").await
+}
+
+/// `POST /api/v1/plugin-instances/{id}/reconfigure` `{"config": {...}}` – replace the
+/// configuration and restart the process with it (operator).
+async fn reconfigure_instance(
+    State(state): State<DevicesState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let result = async {
+        guard_mutation(&state, &headers, true)?;
+        check_id(&id)?;
+        let map = object(&body)?;
+        for key in map.keys() {
+            if key != "config" {
+                return Err(bad(&format!("unknown field {key:?}")));
+            }
+        }
+        let config = map.get("config").cloned().unwrap_or(Value::Null);
+        let client = connected(state.nats.as_ref()).map_err(|e| Box::new(e.into_response()))?;
+        let result = host_call(client, "reconfigure", json!({"id": id, "config": config})).await;
+        let outcome = outcome_of(&result);
+        audit(
+            &state,
+            &principal,
+            "plugin.reconfigure",
+            &id,
+            outcome,
+            result.as_ref().map_or_else(
+                |_| json!({}),
+                |v| json!({"plugin_id": v["instance"]["plugin_id"]}),
+            ),
+        )
+        .await;
+        result
+    }
+    .await;
+    match result {
+        Ok(value) => reply(StatusCode::OK, &value),
+        Err(response) => *response,
+    }
 }
 
 async fn change_instance(

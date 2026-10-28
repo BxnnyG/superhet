@@ -17,8 +17,8 @@ use superhet_bus::subjects;
 use superhet_plugin_protocol::PROTOCOL_VERSION;
 use superhet_plugin_protocol::ctl::{
     ControlRequest, ErrorReply, InstallRequest, InstanceRef, InstanceReply, InstancesReply,
-    MediaReplyHeader, MediaRequest, OkReply, PluginInfo, PluginReply, PluginsReply, RemoveRequest,
-    RemovedReply, StartRequest, StatusReply, cmd, code,
+    MediaReplyHeader, MediaRequest, OkReply, PluginInfo, PluginReply, PluginsReply,
+    ReconfigureRequest, RemoveRequest, RemovedReply, StartRequest, StatusReply, cmd, code,
 };
 use superhet_plugin_protocol::event::HostEvent;
 use tokio::sync::mpsc;
@@ -279,6 +279,26 @@ async fn handle_inner(host: &Host, command: &str, payload: &[u8]) -> Result<Valu
                 updated_unix_ms: snapshot.updated_unix_ms,
                 media: snapshot.media,
             }))
+        }
+        cmd::RECONFIGURE => {
+            let req: ReconfigureRequest = parse(payload)?;
+            let info = host
+                .supervisor
+                .reconfigure(&req.id, req.config)
+                .map_err(|err| start_error(&err))?;
+            host.store
+                .save(
+                    &info.id,
+                    &info.plugin_id,
+                    &StartSpec {
+                        device: info.device.clone(),
+                        vfo: info.vfo,
+                        freq_hz: info.freq_hz,
+                        config: info.config.clone(),
+                    },
+                )
+                .await;
+            Ok(instance(info))
         }
         other => Err(error(code::NOT_FOUND, format!("unknown command {other:?}"))),
     }

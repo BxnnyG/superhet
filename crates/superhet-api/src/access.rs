@@ -204,6 +204,11 @@ pub const RULES: &[Rule] = &[
         GuestDecoder,
     ),
     rule("POST", "/api/v1/plugin-instances/{id}/control", Operator),
+    rule(
+        "POST",
+        "/api/v1/plugin-instances/{id}/reconfigure",
+        Operator,
+    ),
     // Profiles.
     rule("GET", "/api/v1/profiles", Operator),
     rule("POST", "/api/v1/profiles", Operator),

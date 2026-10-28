@@ -53,6 +53,13 @@
       "minimum": 0,
       "type": "integer"
     },
+    "created_unix_ms": {
+      "default": 0,
+      "description": "Unix milliseconds the instance was created (not reset by restarts or reconfigures).",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
     "device": {
       "description": "Device the instance is bound to.",
       "type": [
@@ -89,6 +96,13 @@
       "description": "Instance id.",
       "type": "string"
     },
+    "input_bytes": {
+      "default": 0,
+      "description": "Sample bytes delivered to the plugin's `stdin` since the instance was created (survives\nprocess restarts); `0` while nothing flowed.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
     "input_dropped": {
       "default": 0,
       "description": "Input chunks dropped because the plugin did not read its `stdin` fast enough.",
@@ -104,10 +118,39 @@
         "null"
       ]
     },
+    "input_level_db": {
+      "default": null,
+      "description": "Smoothed RMS level of the input in dBFS (`None` until the first chunk arrived).",
+      "format": "float",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
     "last_error": {
       "description": "Description of the last exit or failure.",
       "type": [
         "string",
+        "null"
+      ]
+    },
+    "last_event_unix_ms": {
+      "default": null,
+      "description": "Unix milliseconds of the last valid event.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "last_input_unix_ms": {
+      "default": null,
+      "description": "Unix milliseconds of the last input chunk.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
         "null"
       ]
     },
@@ -123,6 +166,13 @@
     "plugin_id": {
       "description": "Plugin id.",
       "type": "string"
+    },
+    "reconfigures": {
+      "default": 0,
+      "description": "How often the configuration was replaced with `reconfigure`.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
     },
     "restarts": {
       "description": "How often the process was started again after a crash.",
