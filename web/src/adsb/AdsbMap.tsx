@@ -14,7 +14,8 @@ import { altitudeColor, label, type Tracked } from "./model";
 /**
  * Tile requests carry the page's origin as Referer. The page itself sends none cross-origin
  * (`Referrer-Policy: same-origin`), but OpenStreetMap's tile usage policy blocks requests
- * without a valid Referer (HTTP 403, "Access blocked"). Scoped to the tile images only.
+ * without a valid Referer (HTTP 403, "Access blocked"). Scoped to the tile images only; only
+ * matters in direct tile mode, the default proxy serves tiles from our own origin.
  */
 export const TILE_REFERRER_POLICY = "strict-origin-when-cross-origin";
 
@@ -218,9 +219,11 @@ export function AdsbMap({ aircraft, receiver, selected, onSelect, fitSignal, til
       {tileProblem && (
         <div className="pointer-events-none absolute inset-x-0 top-0 z-[1000] p-3">
           <Alert tone="warn" className="pointer-events-auto mx-auto max-w-lg">
-            The map background could not be loaded from {tileHost(tiles.tileUrl)}. The tile server
-            may refuse this server (OpenStreetMap blocks clients that break its tile usage policy)
-            or it is not reachable. Aircraft are still shown. An administrator can set{" "}
+            {tiles.proxied
+              ? "The server could not load the map background from its tile server. "
+              : `The map background could not be loaded from ${tileHost(tiles.tileUrl)}. `}
+            The tile server may refuse this server (OpenStreetMap blocks clients that break its tile
+            usage policy) or it is not reachable. Aircraft are still shown. An administrator can set{" "}
             <code>SUPERHET_MAP_TILE_URL</code> to another tile server.
           </Alert>
         </div>

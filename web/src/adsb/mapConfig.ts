@@ -1,12 +1,16 @@
 // Where the ADS-B map gets its tiles from: `GET /api/v1/map-config` (docs/plugins-adsb.md). The
 // server default is OpenStreetMap; `SUPERHET_MAP_TILE_URL` points it elsewhere and the CSP
-// follows. An older server without the route simply gets the OpenStreetMap default.
+// follows. By default the tiles come through the server's caching proxy (a same-origin path) so
+// the browser never contacts the provider. An older server without the route simply gets the
+// OpenStreetMap default, fetched directly.
 
 import { apiFetch } from "../auth/session";
 
 export interface MapConfig {
   /** Tile URL template with {z}, {x} and {y}. */
   tileUrl: string;
+  /** Tiles come through this server's proxy (the browser never contacts the tile provider). */
+  proxied: boolean;
   /** Plain-text attribution the provider asks for (may be empty). */
   attribution: string;
   /** Link of the attribution; null for none. */
@@ -16,6 +20,7 @@ export interface MapConfig {
 /** OSM's standard tile server; its tile usage policy requires this attribution. */
 export const DEFAULT_MAP: MapConfig = {
   tileUrl: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+  proxied: false,
   attribution: "© OpenStreetMap contributors",
   attributionUrl: "https://www.openstreetmap.org/copyright",
 };
@@ -29,14 +34,21 @@ function webLink(v: unknown): string | null {
   return s !== null && /^https?:\/\//i.test(s) ? s : null;
 }
 
+/** A same-origin path such as the tile proxy's (not protocol-relative). */
+function sameOriginPath(v: unknown): string | null {
+  const s = text(v);
+  return s !== null && /^\/(?!\/)/.test(s) ? s : null;
+}
+
 /** Validate a server reply; anything unusable falls back to the default source. */
 export function parseMapConfig(raw: unknown): MapConfig {
   if (typeof raw !== "object" || raw === null) return DEFAULT_MAP;
   const o = raw as Record<string, unknown>;
-  const tileUrl = webLink(o.tile_url);
+  const tileUrl = webLink(o.tile_url) ?? sameOriginPath(o.tile_url);
   if (tileUrl === null) return DEFAULT_MAP;
   return {
     tileUrl,
+    proxied: o.proxied === true,
     attribution: text(o.attribution) ?? "",
     attributionUrl: webLink(o.attribution_url),
   };

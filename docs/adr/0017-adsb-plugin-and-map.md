@@ -70,14 +70,24 @@ This ADR records how ADS-B uses them and where it differs from DAB (ADR-0016).
 8. **Map library and tiles.** Leaflet 1.9.4 (BSD-2-Clause), npm, exact version pinned in
    `package.json` and the lockfile (no CDN: the page's CSP is `script-src 'self'`). Tiles come
    from OpenStreetMap's standard tile server `https://tile.openstreetmap.org`, with the
-   attribution its tile usage policy requires. The page CSP gets exactly that origin in
-   `img-src` (never `script-src` / `connect-src`). Consequence for privacy: a viewer who opens the
-   map sends tile requests (their IP address and the tile area) to the OpenStreetMap Foundation;
-   the install notice says so. OSM's policy allows light use, not a public high-traffic service;
-   an operator who needs more points `SUPERHET_MAP_TILE_URL` at a tile provider (`img-src` follows
-   it; `docs/plugins-adsb.md`). Tile images send the page origin as Referer
-   (`referrerpolicy="strict-origin-when-cross-origin"`, the page policy stays `same-origin`)
-   because OSM answers requests without a Referer with 403. A deployment without internet access shows aircraft on an empty background.
+   attribution its tile usage policy requires, **through a caching proxy in `superhet-api`**
+   (`GET /api/v1/map/tiles/{z}/{x}/{y}.png`, same access as the map). Amended after the first
+   release: loading tiles in the browser failed on self-hosted and LAN origins (OSM answers 403
+   "Access blocked" or 400 for such a Referer, and a Referer workaround is not a policy-compliant
+   client). The proxy identifies itself (`Superhet/<version> (+repository URL)`), validates the
+   tile address, caches on disk (at least 7 days, size cap, LRU eviction; `SUPERHET_MAP_TILE_CACHE_DIR`,
+   `SUPERHET_MAP_TILE_CACHE_MAX_MB`), shares one fetch between concurrent requests, uses at most
+   two upstream connections and backs off after errors. The page CSP `img-src` stays `'self'`;
+   `SUPERHET_MAP_TILE_MODE=direct` brings back browser-direct loading (CSP names the tile origin,
+   tile images send the page origin as Referer with `strict-origin-when-cross-origin`) for tile
+   servers the operator runs. Consequence for privacy: the tile server sees the Superhet host, not
+   the viewers; the proxy is the only new outbound connection of `superhet-api` (needs the
+   `reqwest` crate with rustls/ring and CA certificates in the image). The proxy does not get
+   around blocks (no browser User-Agent, no forged Referer): a refusing tile server means another
+   `SUPERHET_MAP_TILE_URL`. OSM's policy allows light use, not a public high-traffic service;
+   an operator who needs more points `SUPERHET_MAP_TILE_URL` at a tile provider
+   (`docs/plugins-adsb.md`). A deployment without internet access shows aircraft on an empty
+   background (cached tiles keep working).
    Alternatives: MapLibre GL (vector tiles, needs a style and a vector source, heavier), a
    hand-drawn canvas without tiles (no geography).
 9. **Roles.** Starting and stopping are operator actions (`plugin-instances` routes). Status,

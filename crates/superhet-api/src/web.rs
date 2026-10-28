@@ -22,11 +22,12 @@ pub const DEFAULT_WEB_DIR: &str = "/usr/share/superhet/web";
 
 /// Same-origin only; `connect-src 'self'` covers the same-origin WebSockets. Styles need
 /// `'unsafe-inline'` because React sets `style` attributes; map tiles of the ADS-B view come from
-/// the tile server of `map` (OpenStreetMap unless `SUPERHET_MAP_TILE_URL` says otherwise, which
-/// replaces the origin in `img-src`, ADR-0017); the AudioWorklet module is a same-origin file
+/// the caching tile proxy of this server (`tiles`, no extra origin); only with
+/// `SUPERHET_MAP_TILE_MODE=direct` the tile server's origin (OpenStreetMap unless
+/// `SUPERHET_MAP_TILE_URL` says otherwise) replaces the one in `img-src`, ADR-0017; the AudioWorklet module is a same-origin file
 /// under `/assets/`.
 const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
-img-src 'self' data: blob: https://tile.openstreetmap.org; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; \
+img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; \
 base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
 
 /// The one extra origin the page may fetch from: the public-address lookup service, while the
@@ -44,8 +45,11 @@ pub fn set_lookup_origin(origin: Option<String>) {
 /// The CSP with the configured tile origin in `img-src` and the lookup origin added to
 /// `connect-src`, when there is one.
 fn csp_header() -> HeaderValue {
-    let tiles = crate::map::tile_origin();
-    let csp = CSP.replace(crate::map::DEFAULT_TILE_ORIGIN, &tiles);
+    // Proxy mode (default): tiles come from our own origin, `img-src` needs nothing extra.
+    let csp = match crate::map::tile_origin() {
+        Some(tiles) => CSP.replace("blob:; connect-src", &format!("blob: {tiles}; connect-src")),
+        None => CSP.to_owned(),
+    };
     let origin = LOOKUP_ORIGIN
         .read()
         .unwrap_or_else(PoisonError::into_inner)
@@ -219,6 +223,15 @@ mod tests {
     fn the_csp_img_src_follows_the_configured_tile_server() {
         crate::map::set_for_test(None);
         let csp = csp_header();
+        let csp = csp.to_str().unwrap_or_default();
+        assert!(csp.contains("img-src 'self' data: blob:;"), "{csp}");
+        assert!(!csp.contains("openstreetmap"), "{csp}");
+        let direct = crate::map::MapConfig {
+            mode: crate::map::TileMode::Direct,
+            ..Default::default()
+        };
+        crate::map::set_for_test(Some(direct.clone()));
+        let csp = csp_header();
         assert!(
             csp.to_str()
                 .unwrap_or_default()
@@ -226,7 +239,7 @@ mod tests {
         );
         let custom = crate::map::MapConfig {
             tile_url: "http://tiles.lan:8080/{z}/{x}/{y}.png".into(),
-            ..Default::default()
+            ..direct
         };
         crate::map::set_for_test(Some(custom));
         let csp = csp_header();

@@ -18,9 +18,17 @@ describe("parseMapConfig", () => {
       }),
     ).toEqual({
       tileUrl: "http://tiles.lan/{z}/{x}/{y}.png",
+      proxied: false,
       attribution: "Own",
       attributionUrl: "https://example.org",
     });
+  });
+
+  it("accepts the server's own tile proxy path, but no protocol-relative URL", () => {
+    const c = parseMapConfig({ tile_url: "/api/v1/map/tiles/{z}/{x}/{y}.png", proxied: true });
+    expect(c.tileUrl).toBe("/api/v1/map/tiles/{z}/{x}/{y}.png");
+    expect(c.proxied).toBe(true);
+    expect(parseMapConfig({ tile_url: "//evil.example/{z}/{x}/{y}.png" })).toEqual(DEFAULT_MAP);
   });
 
   it("falls back to OpenStreetMap for anything unusable", () => {
@@ -62,11 +70,17 @@ describe("loadMapConfig", () => {
 
 describe("attributionHtml", () => {
   it("escapes text and link", () => {
-    expect(attributionHtml({ tileUrl: "", attribution: "<i>x</i>", attributionUrl: null })).toBe(
-      "&#60;i&#62;x&#60;/i&#62;",
-    );
+    expect(
+      attributionHtml({
+        tileUrl: "",
+        proxied: false,
+        attribution: "<i>x</i>",
+        attributionUrl: null,
+      }),
+    ).toBe("&#60;i&#62;x&#60;/i&#62;");
     const html = attributionHtml({
       tileUrl: "",
+      proxied: false,
       attribution: "A",
       attributionUrl: 'https://e.org/?a="b"',
     });
@@ -75,9 +89,14 @@ describe("attributionHtml", () => {
   });
 
   it("is empty without a text", () => {
-    expect(attributionHtml({ tileUrl: "", attribution: "", attributionUrl: "https://e.org" })).toBe(
-      "",
-    );
+    expect(
+      attributionHtml({
+        tileUrl: "",
+        proxied: false,
+        attribution: "",
+        attributionUrl: "https://e.org",
+      }),
+    ).toBe("");
   });
 });
 

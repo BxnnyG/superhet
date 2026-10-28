@@ -107,6 +107,7 @@ SUPERHET_LISTEN="127.0.0.1:$((port + 1))" \
 pids+=($!)
 
 SUPERHET_LISTEN="127.0.0.1:$port" \
+    SUPERHET_MAP_TILE_MODE=direct \
     SUPERHET_SETUP_TOKEN="${E2E_SETUP_TOKEN:-e2e-setup-token-0123456789}" \
     SUPERHET_COOKIE_SECURE=false \
     SUPERHET_WEB_DIR="$web" \

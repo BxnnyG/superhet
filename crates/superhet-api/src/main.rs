@@ -21,6 +21,7 @@ mod profiles;
 mod registry;
 mod settings;
 mod state_ws;
+mod tiles;
 mod view;
 mod web;
 mod ws;

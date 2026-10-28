@@ -58,25 +58,43 @@ to start):
   60 s it is gone from map and table.
 - **Dark theme:** the tiles are darkened with a CSS filter in the dark theme.
 
-Tiles come from `https://tile.openstreetmap.org` (the only external origin the page may load
-images from). The browser of everybody who opens the map contacts OpenStreetMap; keep this in
-mind for a public instance and read
-[OSM's tile usage policy](https://operations.osmfoundation.org/policies/tiles/) before exposing
-the map to many viewers. Without internet access the aircraft are drawn on an empty background;
-when the tile server refuses or cannot be reached, the map says so in a banner instead of leaving
-a grid of broken tiles.
+**Tiles come through a caching proxy.** The browser never talks to the tile server: the map loads
+`GET /api/v1/map/tiles/{z}/{x}/{y}.png` from `superhet-api` (same access as the map: everybody who
+may see decoders), which fetches from `https://tile.openstreetmap.org` (or the server of
+`SUPERHET_MAP_TILE_URL`) with the honest User-Agent `Superhet/<version> (+https://github.com/BxnnyG/superhet)`.
+Why: OSM rejects browsers on self-hosted and LAN origins (HTTP 403 "Access blocked", 400 for a
+Referer such as `http://127.0.0.1:8073/`), and its
+[tile usage policy](https://operations.osmfoundation.org/policies/tiles/) wants one identifiable
+client, a cache and at most two connections, not every viewer's browser. The proxy therefore
 
-**Tile requests carry a Referer.** The page itself sends no Referer to other sites
-(`Referrer-Policy: same-origin`), but OpenStreetMap blocks tile requests without one (HTTP 403,
-"Access blocked - app is not following the tile usage policy"). The map therefore sets
-`referrerpolicy="strict-origin-when-cross-origin"` on its tile images only: the tile server learns
-the origin (scheme, host, port) of this Superhet, never a path.
+- validates the address (zoom 0-19, x and y inside the pyramid, `.png` only; anything else is a 400),
+- caches tiles on disk for at least seven days (longer if the server's `max-age` says so) and
+  serves a stale copy when the tile server cannot be reached,
+- shares one upstream fetch between concurrent requests for the same tile,
+- runs at most two upstream requests at a time and leaves a tile server alone for 30 s after an
+  error (2 min after a 403/429),
+- evicts the least recently used tiles when the cache exceeds its cap.
+
+Settings of `superhet-api`: `SUPERHET_MAP_TILE_CACHE_DIR` (default `/data/tiles`, a volume in
+`compose.yaml`), `SUPERHET_MAP_TILE_CACHE_MAX_MB` (default 512), `SUPERHET_MAP_TILE_MODE`
+(`proxy`, the default, or `direct`). The page CSP needs no extra `img-src` origin in proxy mode.
+The tile server sees the address of the Superhet server, not of the viewers; viewers' browsers
+only talk to Superhet. Without internet access (and an empty cache) the aircraft are drawn on an
+empty background; when the tile server refuses or cannot be reached, the map says so in a banner
+instead of leaving a grid of broken tiles. The server does not work around a block: if a tile
+server refuses the User-Agent above, use another tile server.
+
+**Direct mode** (`SUPERHET_MAP_TILE_MODE=direct`) restores the old behaviour: the browser fetches
+tiles from the tile server itself, the CSP `img-src` names that origin, and the map sets
+`referrerpolicy="strict-origin-when-cross-origin"` on its tile images (the tile server then learns
+the origin of this Superhet, never a path). Every viewer's IP address reaches the tile server and
+OSM may block browsers on LAN origins; use it only for a tile server you run yourself.
 
 **Another tile server.** Set `SUPERHET_MAP_TILE_URL` on `superhet-api` to a `{z}/{x}/{y}` template
 (`http(s)` with a fixed host; `{s}` subdomains are not supported), optionally
-`SUPERHET_MAP_ATTRIBUTION` (plain text) and `SUPERHET_MAP_ATTRIBUTION_URL`. The page CSP
-`img-src` then names that origin instead of OpenStreetMap's. A bad value is logged and the
-OpenStreetMap default stays. The browser reads the source from `GET /api/v1/map-config`
+`SUPERHET_MAP_ATTRIBUTION` (plain text) and `SUPERHET_MAP_ATTRIBUTION_URL`. The proxy fetches
+from that server (in direct mode the page CSP `img-src` names its origin). A bad value is logged
+and the OpenStreetMap default stays. The browser reads the source from `GET /api/v1/map-config`
 (everybody who may see decoders).
 
 ### Status document (`GET .../status`, `status`)
