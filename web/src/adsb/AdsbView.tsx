@@ -15,7 +15,7 @@ import {
   cn,
 } from "../ui";
 import { StateBadge } from "../plugins/parts";
-import { loadMapConfig, type MapConfig } from "./mapConfig";
+import { useMapConfig } from "../map/mapConfig";
 import {
   ALTITUDE_LEGEND,
   formatAge,
@@ -43,21 +43,6 @@ function useNow(intervalMs = 1000): number {
     return () => clearInterval(id);
   }, [intervalMs]);
   return now;
-}
-
-/** The tile source from the server; null until it answered (the map waits for it). */
-function useMapConfig(): MapConfig | null {
-  const [config, setConfig] = useState<MapConfig | null>(null);
-  useEffect(() => {
-    let live = true;
-    void loadMapConfig().then((c) => {
-      if (live) setConfig(c);
-    });
-    return () => {
-      live = false;
-    };
-  }, []);
-  return config;
 }
 
 const COLUMNS: readonly { key: SortKey; title: string; align?: "right" }[] = [
