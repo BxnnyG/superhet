@@ -61,10 +61,10 @@ FROM debian:bookworm-slim
 # plugin) needs zstd.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends librtlsdr0 libopus0 multimon-ng direwolf rtl-433 \
-        libfaad2 libfftw3-single3 libmp3lame0 libmpg123-0 libasound2 libairspy0 libsoapysdr0.8 libusb-1.0-0 libzstd1 \
+        libfaad2 libfftw3-single3 libmp3lame0 libmpg123-0 libasound2 libairspy0 libsoapysdr0.8 libusb-1.0-0 libzstd1 ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home --home-dir /home/superhet superhet \
-    && mkdir -p /data/plugins \
+    && mkdir -p /data/plugins /data/tiles \
     && chown -R superhet:superhet /data
 
 # welle-cli as built by Debian, with its licence text (GPL-2.0-or-later; source: apt-get source welle.io).

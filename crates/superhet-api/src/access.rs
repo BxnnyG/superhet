@@ -204,8 +204,9 @@ pub const RULES: &[Rule] = &[
         GuestDecoder,
     ),
     rule("POST", "/api/v1/plugin-instances/{id}/control", Operator),
-    // Where the ADS-B map loads its tiles from.
+    // Where the ADS-B map loads its tiles from, and the caching proxy that serves them.
     rule("GET", "/api/v1/map-config", GuestDecoder),
+    rule("GET", "/api/v1/map/tiles/{z}/{x}/{y}", GuestDecoder),
     rule(
         "POST",
         "/api/v1/plugin-instances/{id}/reconfigure",

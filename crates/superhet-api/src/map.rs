@@ -1,12 +1,16 @@
 //! Map tile source of the ADS-B view (ADR-0017). The default is OpenStreetMap's public tile
 //! server; operators can point it at another server with `SUPERHET_MAP_TILE_URL` (a
 //! `{z}/{x}/{y}` template), `SUPERHET_MAP_ATTRIBUTION` (plain text) and
-//! `SUPERHET_MAP_ATTRIBUTION_URL`. The CSP `img-src` follows the tile origin (`web::csp_header`),
-//! the browser reads the source from `GET /api/v1/map-config`.
+//! `SUPERHET_MAP_ATTRIBUTION_URL`. The browser reads the source from `GET /api/v1/map-config`.
+//!
+//! `SUPERHET_MAP_TILE_MODE` picks how tiles reach the browser: `proxy` (default) serves them
+//! through this server's caching proxy (`tiles`), so the CSP needs no extra `img-src` origin;
+//! `direct` lets the browser fetch from the tile server itself and the CSP `img-src` follows the
+//! tile origin (`web::csp_header`).
 
-use std::sync::{PoisonError, RwLock};
+use std::sync::{Arc, PoisonError, RwLock};
 
-use axum::{Json, Router, routing::get};
+use axum::{Json, Router, http::StatusCode, routing::get};
 use serde::Serialize;
 
 /// OSM's standard tile server (its tile usage policy requires the attribution and a Referer).
@@ -16,11 +20,25 @@ pub const DEFAULT_TILE_ORIGIN: &str = "https://tile.openstreetmap.org";
 const DEFAULT_ATTRIBUTION: &str = "\u{a9} OpenStreetMap contributors";
 const DEFAULT_ATTRIBUTION_URL: &str = "https://www.openstreetmap.org/copyright";
 
-/// Where the map gets its tiles from, as sent to the browser.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// Tile URL the browser uses in proxy mode (same origin, behind the login).
+pub const PROXY_TILE_URL: &str = "/api/v1/map/tiles/{z}/{x}/{y}.png";
+
+/// How tiles reach the browser.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TileMode {
+    /// Through the caching proxy of this server (default).
+    #[default]
+    Proxy,
+    /// The browser asks the tile server itself.
+    Direct,
+}
+
+/// Where the map gets its tiles from.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MapConfig {
-    /// Tile URL template with `{z}`, `{x}` and `{y}`.
+    /// Upstream tile URL template with `{z}`, `{x}` and `{y}`.
     pub tile_url: String,
+    pub mode: TileMode,
     /// Plain-text attribution the tile provider asks for.
     pub attribution: String,
     /// Link of the attribution, if any (`http(s)` only).
@@ -31,6 +49,7 @@ impl Default for MapConfig {
     fn default() -> Self {
         Self {
             tile_url: DEFAULT_TILE_URL.to_owned(),
+            mode: TileMode::Proxy,
             attribution: DEFAULT_ATTRIBUTION.to_owned(),
             attribution_url: Some(DEFAULT_ATTRIBUTION_URL.to_owned()),
         }
@@ -48,10 +67,42 @@ pub fn current() -> MapConfig {
         .unwrap_or_default()
 }
 
-/// Origin (`scheme://host[:port]`) the CSP must allow in `img-src`.
-pub fn tile_origin() -> String {
+/// Origin (`scheme://host[:port]`) the CSP must allow in `img-src`; `None` when the proxy serves
+/// the tiles from our own origin.
+pub fn tile_origin() -> Option<String> {
+    let config = current();
+    if config.mode == TileMode::Proxy {
+        return None;
+    }
     // The stored URL was validated, so an origin always exists.
-    origin_of(&current().tile_url).unwrap_or_else(|| DEFAULT_TILE_ORIGIN.to_owned())
+    Some(origin_of(&config.tile_url).unwrap_or_else(|| DEFAULT_TILE_ORIGIN.to_owned()))
+}
+
+/// What `GET /api/v1/map-config` tells the browser.
+#[derive(Debug, Serialize)]
+struct Served {
+    /// Template the map loads tiles from: our proxy or, in direct mode, the tile server.
+    tile_url: String,
+    attribution: String,
+    attribution_url: Option<String>,
+    /// Tiles come through this server (the browser never contacts the tile provider).
+    proxied: bool,
+}
+
+impl From<MapConfig> for Served {
+    fn from(c: MapConfig) -> Self {
+        let proxied = c.mode == TileMode::Proxy;
+        Self {
+            tile_url: if proxied {
+                PROXY_TILE_URL.to_owned()
+            } else {
+                c.tile_url
+            },
+            attribution: c.attribution,
+            attribution_url: c.attribution_url,
+            proxied,
+        }
+    }
 }
 
 /// Read the `SUPERHET_MAP_*` variables. A bad value is logged and the default stays: a typo
@@ -68,6 +119,22 @@ pub fn init_from_env() {
         tracing::warn!(%err, "ignoring SUPERHET_MAP_*; using the OpenStreetMap default");
         MapConfig::default()
     });
+    let mut config = config;
+    config.mode = match std::env::var("SUPERHET_MAP_TILE_MODE")
+        .ok()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        None | Some("" | "proxy") => TileMode::Proxy,
+        Some("direct") => TileMode::Direct,
+        Some(other) => {
+            tracing::warn!(
+                mode = other,
+                "SUPERHET_MAP_TILE_MODE must be proxy or direct; using proxy"
+            );
+            TileMode::Proxy
+        }
+    };
     if config != MapConfig::default() {
         tracing::info!(tiles = %config.tile_url, "custom map tile source");
     }
@@ -126,18 +193,33 @@ fn from_values(
     }
     Ok(MapConfig {
         tile_url: tile_url.to_owned(),
+        mode: TileMode::Proxy,
         attribution,
         attribution_url,
     })
 }
 
-/// Routes, behind the access middleware.
+/// Routes, behind the access middleware. The tile route answers 404 in direct mode.
 pub fn router() -> Router {
-    Router::new().route("/api/v1/map-config", get(map_config))
+    let config = current();
+    let tiles = if config.mode == TileMode::Proxy {
+        let proxy = Arc::new(crate::tiles::TileProxy::from_env(&config.tile_url));
+        Router::new()
+            .route("/api/v1/map/tiles/{z}/{x}/{y}", get(crate::tiles::serve))
+            .with_state(proxy)
+    } else {
+        Router::new().route(
+            "/api/v1/map/tiles/{z}/{x}/{y}",
+            get(|| async { (StatusCode::NOT_FOUND, "tile proxy is disabled") }),
+        )
+    };
+    Router::new()
+        .route("/api/v1/map-config", get(map_config))
+        .merge(tiles)
 }
 
-async fn map_config() -> Json<MapConfig> {
-    Json(current())
+async fn map_config() -> Json<Served> {
+    Json(current().into())
 }
 
 #[cfg(test)]
@@ -169,6 +251,19 @@ mod tests {
             origin_of(&c.tile_url).as_deref(),
             Some("http://tiles.lan:8080")
         );
+    }
+
+    #[test]
+    fn the_browser_gets_the_proxy_url_unless_it_fetches_directly() {
+        let proxied = Served::from(MapConfig::default());
+        assert!(proxied.proxied);
+        assert_eq!(proxied.tile_url, PROXY_TILE_URL);
+        let direct = Served::from(MapConfig {
+            mode: TileMode::Direct,
+            ..MapConfig::default()
+        });
+        assert!(!direct.proxied);
+        assert_eq!(direct.tile_url, DEFAULT_TILE_URL);
     }
 
     #[test]

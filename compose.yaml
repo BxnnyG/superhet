@@ -83,6 +83,11 @@ services:
       SUPERHET_MAP_TILE_URL: ${SUPERHET_MAP_TILE_URL:-}
       SUPERHET_MAP_ATTRIBUTION: ${SUPERHET_MAP_ATTRIBUTION:-}
       SUPERHET_MAP_ATTRIBUTION_URL: ${SUPERHET_MAP_ATTRIBUTION_URL:-}
+      SUPERHET_MAP_TILE_MODE: ${SUPERHET_MAP_TILE_MODE:-proxy}
+      SUPERHET_MAP_TILE_CACHE_DIR: /data/tiles
+      SUPERHET_MAP_TILE_CACHE_MAX_MB: ${SUPERHET_MAP_TILE_CACHE_MAX_MB:-512}
+    volumes:
+      - tile-cache:/data/tiles
     depends_on:
       postgres: { condition: service_healthy }
       nats: { condition: service_healthy }
@@ -167,3 +172,4 @@ volumes:
   postgres-data:
   nats-data:
   plugin-data:
+  tile-cache:

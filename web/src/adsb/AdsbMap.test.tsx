@@ -51,6 +51,7 @@ describe("AdsbMap", () => {
     const layer = vi.spyOn(L, "tileLayer");
     const tiles = {
       tileUrl: "http://tiles.lan:8080/{z}/{x}/{y}.png",
+      proxied: false,
       attribution: "Own <b>tiles</b>",
       attributionUrl: null,
     };
