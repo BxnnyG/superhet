@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import { usePermissions } from "../auth/context";
 import { NOT_YOUR_VFO, canModifyVfo } from "../auth/permissions";
 import type { AudioController, AudioSnapshot } from "../audio/controller";
+import { DigitalModeControl } from "../digital/DigitalModeControl";
+import type { PluginStore } from "../plugins/store";
 import { Badge, Button, EmptyState, PauseIcon, TrashIcon, cn } from "../ui";
 import type { Vfo, VfoPatch } from "./api";
 import type { AutoSquelch } from "./autoSquelch";
@@ -32,6 +34,8 @@ interface Props {
   showDemodulator: boolean;
   /** Device sample rate, bounds the custom bandwidth. */
   sampleRateHz?: number | null;
+  /** Digital-mode picker (POCSAG, APRS, ISM, ...) in the demodulator block; omitted = no picker. */
+  digital?: { device: string; plugins: PluginStore };
   onUpdate: Update;
   onRemove: (id: number) => void;
 }
@@ -46,6 +50,7 @@ export function ReceiverPanel({
   locked,
   showDemodulator,
   sampleRateHz,
+  digital,
   onUpdate,
   onRemove,
 }: Props) {
@@ -84,6 +89,15 @@ export function ReceiverPanel({
       {showDemodulator && (
         <Block title="Demodulator" readOnly={readOnly}>
           <ModeSelect vfo={vfo} onUpdate={onUpdate} />
+          {digital !== undefined && (
+            <DigitalModeControl
+              vfo={vfo}
+              device={digital.device}
+              plugins={digital.plugins}
+              onUpdate={onUpdate}
+              fill
+            />
+          )}
           <BandwidthSelect
             vfo={vfo}
             onUpdate={onUpdate}

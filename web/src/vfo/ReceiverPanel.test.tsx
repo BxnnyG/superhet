@@ -1,6 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { AudioController, AudioSnapshot } from "../audio/controller";
+import { PluginStore } from "../plugins/store";
+import { aprs, fakePluginApi, pocsag } from "../plugins/testing";
 import { toasts } from "../ui";
 import type { Vfo, VfoPatch } from "./api";
 import { AutoSquelch } from "./autoSquelch";
@@ -239,4 +241,45 @@ it("marks stale RDS data when the signal is lost", () => {
   } as unknown as AudioSnapshot;
   setup([wfm()], 1, true, snapshot);
   expect(screen.getByText("signal lost")).toBeInTheDocument();
+});
+
+it("phone sheet: the Demodulator block offers the digital modes and starts one", async () => {
+  const fake = fakePluginApi([pocsag, aprs], []);
+  const store = new PluginStore(fake.api);
+  const onUpdate = vi.fn<Fns["onUpdate"]>();
+  render(
+    <ReceiverPanel
+      vfo={vfo(1)}
+      loaded
+      audio={audio}
+      audioSnap={audioSnap}
+      autoSquelch={autoSquelch}
+      locked={false}
+      showDemodulator
+      digital={{ device: "dev0", plugins: store }}
+      onUpdate={onUpdate}
+      onRemove={vi.fn()}
+    />,
+  );
+  store.start();
+  await act(() => new Promise<void>((r) => setTimeout(r, 0)));
+  const select = screen.getByRole("combobox", { name: "Digital mode" });
+  expect(select).toHaveClass("w-full");
+  expect(
+    within(select)
+      .getAllByRole("option")
+      .map((o) => o.textContent),
+  ).toEqual(["Digital…", "POCSAG", "APRS"]);
+  fireEvent.change(select, { target: { value: "aprs" } });
+  await act(() => new Promise<void>((r) => setTimeout(r, 0)));
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("switch"));
+  fireEvent.click(screen.getByRole("button", { name: "Start APRS" }));
+  await act(() => new Promise<void>((r) => setTimeout(r, 0)));
+  expect(fake.api.start).toHaveBeenCalled();
+  store.stop();
+});
+
+it("without the digital prop the Demodulator block has no digital picker", () => {
+  render(panel([vfo(1)], 1, makeFns()));
+  expect(screen.queryByRole("combobox", { name: "Digital mode" })).toBeNull();
 });

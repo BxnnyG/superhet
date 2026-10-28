@@ -131,6 +131,7 @@ function TabBody({ r, tab, phoneUp }: { r: Receiver; tab: InspectorTab; phoneUp:
           autoSquelch={r.autoSquelch}
           locked={r.locks.length > 0}
           showDemodulator={!phoneUp}
+          digital={{ device: r.device, plugins: r.plugins }}
           sampleRateHz={r.tuningSnap.state?.sampleRate}
           onUpdate={(id, patch) => r.vfoCtl.update(id, patch)}
           onRemove={(id) => r.vfoCtl.remove(id)}
