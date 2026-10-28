@@ -2,6 +2,8 @@
 
 import { vi } from "vitest";
 import type { AudioController } from "../audio/controller";
+import type { AdsbApi } from "../adsb/api";
+import { AdsbStore } from "../adsb/store";
 import type { DabApi } from "../dab/api";
 import { DabStore } from "../dab/store";
 import type { EventApi } from "../decoders/api";
@@ -78,6 +80,7 @@ export function fake(vfos: Vfo[], selectedId: number | null, locks: LockHolder[]
     // Never started: the snapshot stays empty.
     plugins: new PluginStore({} as PluginApi),
     dab: new DabStore("dev0", {} as DabApi, {} as EventApi),
+    adsb: new AdsbStore({} as AdsbApi),
     stepChannels: () => false,
   } as unknown as Receiver;
   return { r, fns };

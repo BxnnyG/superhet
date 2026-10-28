@@ -18,6 +18,8 @@ import { builtinBandPlan, matchBandPlan, suggestName } from "../bandplan/model";
 import { OverlayStore } from "../bandplan/settings";
 import { newInput, receiverState } from "../bookmarks/model";
 import { BookmarkStore } from "../bookmarks/store";
+import { ADSB_PLUGIN_ID } from "../adsb/model";
+import { AdsbStore } from "../adsb/store";
 import { DAB_PLUGIN_ID } from "../dab/model";
 import { DabStore } from "../dab/store";
 import { channelTarget, matchChannel, stepChannelBy } from "../channels/lookup";
@@ -118,6 +120,7 @@ export function useReceiver(device: string) {
   const pluginSnap = useSyncExternalStore(plugins.subscribe, plugins.getSnapshot);
   const dab = useMemo(() => new DabStore(device), [device]);
   const dabSnap = useSyncExternalStore(dab.subscribe, dab.getSnapshot);
+  const adsb = useMemo(() => new AdsbStore(), []);
   const bookmarks = useMemo(() => new BookmarkStore(), []);
   const bookmarkSnap = useSyncExternalStore(bookmarks.subscribe, bookmarks.getSnapshot);
 
@@ -259,9 +262,11 @@ export function useReceiver(device: string) {
     // Guests only get the decoder history while the policy shows it.
     if (canSeeDecoders) decoderEvents.start();
     if (canSeeDecoders) dab.start();
+    if (canSeeDecoders) adsb.start();
     if (canUsePlugins) plugins.start();
     return () => {
       dab.stop();
+      adsb.stop();
       plugins.stop();
       unbind();
       store.stop();
@@ -269,7 +274,18 @@ export function useReceiver(device: string) {
       audio.stop();
       decoderEvents.stop();
     };
-  }, [store, tuning, vfoCtl, audio, decoderEvents, canSeeDecoders, plugins, canUsePlugins, dab]);
+  }, [
+    store,
+    tuning,
+    vfoCtl,
+    audio,
+    decoderEvents,
+    canSeeDecoders,
+    plugins,
+    canUsePlugins,
+    dab,
+    adsb,
+  ]);
 
   // Bookmarks live on the server: read them at start and again once the state feed is up.
   const feedUp = feed.status === "connected";
@@ -322,6 +338,12 @@ export function useReceiver(device: string) {
   const claimId = locks.find((l) => l.kind === "claim")?.id;
   const followId = dabInstance ?? claimId ?? null;
   useEffect(() => dab.follow(followId), [dab, followId]);
+  // The same for ADS-B; each view ignores the other plugin's instance.
+  const adsbInstance = pluginSnap.instances.find(
+    (i) => i.pluginId === ADSB_PLUGIN_ID && i.device === device && i.state !== "stopped",
+  )?.id;
+  const adsbFollowId = adsbInstance ?? claimId ?? null;
+  useEffect(() => adsb.follow(adsbFollowId), [adsb, adsbFollowId]);
   const profileApi = useMemo(() => createProfileApi(), []);
   const currentDoc = useMemo<StateDoc | null>(
     () =>
@@ -424,6 +446,7 @@ export function useReceiver(device: string) {
     plugins,
     dab,
     dabSnap,
+    adsb,
     tuneTo,
     tuneNew,
     startBookmark,

@@ -11,6 +11,7 @@ const BAR_TABS: readonly InspectorTab[] = [
   "channels",
   "decoders",
   "dab",
+  "adsb",
   "display",
   "source",
 ];

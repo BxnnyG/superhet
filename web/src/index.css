@@ -243,3 +243,65 @@
     animation-duration: 0.01ms !important;
   }
 }
+
+/* ADS-B map (adsb/AdsbMap.tsx): Leaflet brings its own stylesheet; this fits it into the theme. */
+.adsb-map {
+  font-family: inherit;
+  background: var(--surface-1);
+}
+.adsb-map .adsb-icon {
+  background: none;
+  border: none;
+}
+.adsb-map .adsb-plane {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  transition: transform 400ms linear;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.5));
+}
+.adsb-map .adsb-ring {
+  position: absolute;
+  inset: -2px;
+  border-radius: 9999px;
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+}
+.adsb-map .adsb-label {
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: 500;
+  box-shadow: none;
+}
+.adsb-map .adsb-label::before {
+  display: none;
+}
+.adsb-map .leaflet-control-attribution {
+  background: color-mix(in srgb, var(--surface-1) 85%, transparent);
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+.adsb-map .leaflet-control-attribution a {
+  color: var(--accent);
+}
+.adsb-map .leaflet-bar a {
+  background: var(--surface-1);
+  color: var(--fg);
+  border-bottom-color: var(--border);
+}
+.adsb-map .leaflet-bar a:hover {
+  background: var(--surface-2);
+}
+:root[data-theme="dark"] .adsb-map .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9) saturate(0.7);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .adsb-map .leaflet-tile-pane {
+    filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9) saturate(0.7);
+  }
+}

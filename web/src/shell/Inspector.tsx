@@ -4,6 +4,7 @@ import { usePermissions } from "../auth/context";
 import { BandPlanPanel } from "../bandplan/BandPlanPanel";
 import { BookmarksPanel } from "../bookmarks/BookmarksPanel";
 import { ChannelsPanel } from "../channels/ChannelsPanel";
+import { AdsbPanel } from "../adsb/AdsbPanel";
 import { DabPanel } from "../dab/DabPanel";
 import { DecodersTab } from "../decoders/DecodersTab";
 import { ProfilesPanel } from "../profiles/ProfilesPanel";
@@ -27,7 +28,7 @@ interface Props {
 
 /**
  * Right-hand inspector with the tabs Receiver | Bookmarks | Decoders | Display | Source. Docked as
- * a 320 px column on wide screens (collapsible, `]`), a right sheet from 600 to 900 px and a
+ * a 352 px column on wide screens (collapsible, `]`), a right sheet from 600 to 900 px and a
  * bottom sheet below 600 px, where the tab bar at the bottom picks the tab. Each tab body scrolls
  * on its own; the page never does.
  */
@@ -63,7 +64,7 @@ export function Inspector({ r, inspector }: Props) {
         className={cn(
           "flex min-h-0 flex-col bg-surface-1",
           // Docked column.
-          "shell:static shell:z-auto shell:w-80 shell:shrink-0 shell:border-l shell:border-border",
+          "shell:static shell:z-auto shell:w-[22rem] shell:shrink-0 shell:border-l shell:border-border",
           // Right sheet (600-900 px).
           "max-shell:fixed max-shell:inset-y-0 max-shell:right-0 max-shell:z-40 max-shell:w-[23rem] max-shell:max-w-[92vw]",
           "max-shell:border-l max-shell:border-border max-shell:transition-[transform,visibility] max-shell:duration-150",
@@ -168,6 +169,8 @@ function TabBody({ r, tab, phoneUp }: { r: Receiver; tab: InspectorTab; phoneUp:
       );
     case "dab":
       return <DabPanel r={r} />;
+    case "adsb":
+      return <AdsbPanel r={r} />;
     case "display":
       return (
         <>

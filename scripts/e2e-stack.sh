@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Throwaway stack for the browser smoke tests (web/e2e): superhet-api + superhet-sdrd (file
 # backend with a noise capture) + superhet-worker + superhet-pluginhost on loopback test ports,
-# serving web/dist. The plugin host seeds the first-party plugins (plugins/pocsag, aprs, rtl433, dab;
+# serving web/dist. The plugin host seeds the first-party plugins (plugins/pocsag, aprs, rtl433, dab, adsb;
 # their tools are not needed until an instance starts) and gets a private plugin directory;
 # the plugin smoke test installs plugins/example-echo (python3) from its path.
 # Runs in the foreground until it gets a signal (Playwright's webServer does that), then stops
@@ -45,13 +45,26 @@ trap cleanup EXIT INT TERM
 
 # The bundled plugins as the image has them: copies of the first-party plugin directories.
 mkdir -p "$work/bundled" "$work/plugins"
-for name in pocsag aprs rtl433 dab; do cp -r "plugins/$name" "$work/bundled/$name"; done
+for name in pocsag aprs rtl433 dab adsb; do cp -r "plugins/$name" "$work/bundled/$name"; done
 
 # The DAB plugin runs the real adapter against a stand-in welle-cli (python3): blocks 5C and 6A
 # carry the "DR Deutschland" ensemble, a tone plays as audio, the slide is a tiny PNG.
 mkdir -p "$work/bin"
 # E2E_WELLE=/path/to/welle-cli (or a wrapper) swaps in a real decoder for manual checks.
 ln -s "${E2E_WELLE:-$(pwd)/crates/superhet-plugin-adapters/tests/dab/fake-welle-cli}" "$work/bin/welle-cli"
+# The ADS-B plugin the same way: a stand-in readsb (python3) that serves two recorded
+# aircraft.json files (E2E_READSB swaps in the real one). The file device here replays at
+# 2.048 MS/s and cannot be retuned to the 2.4 MS/s of ADS-B, so no IQ arrives and the stand-in
+# must not wait for it (the adapter test covers the IQ path).
+if [ -n "${E2E_READSB:-}" ]; then
+    ln -s "$E2E_READSB" "$work/bin/readsb"
+else
+    cat >"$work/bin/readsb" <<WRAP
+#!/bin/sh
+FAKE_READSB_NEEDS_IQ=0 exec python3 "$(pwd)/crates/superhet-plugin-adapters/tests/adsb/fake-readsb" "\$@"
+WRAP
+    chmod +x "$work/bin/readsb"
+fi
 
 # A stand-in for multimon-ng so the digital-mode scenario needs no decoder installed: it prints a
 # page per second (the inverted decoder, -i, prints different text) until its stdin is closed.

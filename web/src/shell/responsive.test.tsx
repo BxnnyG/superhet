@@ -53,6 +53,7 @@ it("phone width: a bottom tab bar opens the inspector sheet on a tab and moves m
     "Channels",
     "Decoders",
     "DAB",
+    "ADS-B",
     "Display",
     "Source",
   ]);
