@@ -1,0 +1,143 @@
+{
+  "$defs": {
+    "InstanceState": {
+      "description": "Lifecycle state of an instance.",
+      "oneOf": [
+        {
+          "const": "starting",
+          "description": "Process is being spawned.",
+          "type": "string"
+        },
+        {
+          "const": "running",
+          "description": "Process is up.",
+          "type": "string"
+        },
+        {
+          "const": "backoff",
+          "description": "Crashed; waiting before the next start.",
+          "type": "string"
+        },
+        {
+          "const": "error",
+          "description": "Too many crashes (5 in 5 minutes) or not startable; needs `restart`.",
+          "type": "string"
+        },
+        {
+          "const": "stopped",
+          "description": "Stopped on request.",
+          "type": "string"
+        }
+      ]
+    },
+    "MediaInfo": {
+      "description": "One stored media object.",
+      "properties": {
+        "key": {
+          "description": "Object key.",
+          "type": "string"
+        },
+        "mime": {
+          "description": "MIME type.",
+          "type": "string"
+        },
+        "revision": {
+          "description": "Counts the replacements of this key, starting at 1.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "size": {
+          "description": "Size in bytes.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "key",
+        "mime",
+        "size",
+        "revision"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Reply to `status`.",
+  "properties": {
+    "audio_vfo": {
+      "default": null,
+      "description": "Pseudo VFO id of the instance's audio (see [`InstanceInfo::audio_vfo`]).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "device": {
+      "default": null,
+      "description": "Device the instance is bound to.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "freq_hz": {
+      "default": null,
+      "description": "Centre frequency (Hz) the instance is on now.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "media": {
+      "default": [],
+      "description": "Receiver time of the object per key, so a client can tell whether a slide changed.",
+      "items": {
+        "$ref": "#/$defs/MediaInfo"
+      },
+      "type": "array"
+    },
+    "ok": {
+      "description": "Always true.",
+      "type": "boolean"
+    },
+    "plugin_id": {
+      "description": "Plugin the instance runs.",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/InstanceState",
+      "description": "Lifecycle state."
+    },
+    "status": {
+      "description": "The latest document the plugin sent, `null` before the first one."
+    },
+    "updated_unix_ms": {
+      "description": "Unix milliseconds at which the host received it (0 before the first one).",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "v": {
+      "description": "Contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "ok",
+    "plugin_id",
+    "state",
+    "status",
+    "updated_unix_ms"
+  ],
+  "title": "StatusReply",
+  "type": "object"
+}

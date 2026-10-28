@@ -4,8 +4,8 @@
 //! exits on its own, is killed from outside or stays silent past the manifest's heartbeat
 //! timeout counts as a crash. Crashes are remembered for [`Policy::window`]; reaching
 //! [`Policy::max_crashes`] inside the window puts the instance into
-//! [`InstanceState::Error`], where it stays until `restart`. Simple transport only; the framed
-//! transport, container and UI plugins are refused with [`StartError::Unsupported`].
+//! [`InstanceState::Error`], where it stays until `restart`. Both transports run (the framed one in
+//! `framed_session`); container and UI plugins are refused with [`StartError::Unsupported`].
 //!
 //! Input: an instance bound to a device and a VFO (or an exclusive plugin bound to a device) gets
 //! its samples through an [`Inputs`] provider, which the supervisor attaches for every process
@@ -14,6 +14,7 @@
 //! outlive it.
 
 use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -21,15 +22,19 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use superhet_bus::tap::{ClaimAcquire, TapFormat, TapKind, TapOpen};
-use superhet_plugin_protocol::ctl::{InstanceInfo, InstanceState};
+use superhet_plugin_protocol::ctl::{InstanceInfo, InstanceState, MediaInfo, audio_vfo_of};
 use superhet_plugin_protocol::event::{HostEvent, Line, MAX_EVENT_LINE};
 use superhet_plugin_protocol::manifest::{
     InputKind, PluginType, RuntimeKind, SampleFormat, Transport,
 };
 use superhet_plugin_protocol::{InstanceEnv, PROTOCOL_VERSION, Package};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
+use tokio::net::UnixListener;
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{Notify, broadcast, mpsc, watch};
+
+use crate::framed_session;
+use crate::outputs::{NoOutputs, Outputs};
 
 /// Environment variables passed through to plugins; everything else (NATS and database
 /// credentials in particular) is withheld.
@@ -114,6 +119,9 @@ pub struct Attachment {
     pub chunks: mpsc::Receiver<Vec<u8>>,
     /// Keeps the tap (and claim) alive.
     pub guard: Box<dyn Send>,
+    /// Moves the centre frequency of an exclusive claim (the new value is applied at once and
+    /// kept in every lease refresh); `None` when the provider cannot retune.
+    pub retune: Option<watch::Sender<u64>>,
 }
 
 /// Source of plugin input (the bus in production). `attach` must not block.
@@ -130,6 +138,20 @@ impl Inputs for NoInputs {
     fn attach(&self, _request: &InputRequest, _health: InputHealth) -> Option<Attachment> {
         None
     }
+}
+
+/// Largest `control` message (serialised bytes).
+const MAX_CONTROL: usize = 64 * 1024;
+
+/// What `status` returns.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatusSnapshot {
+    /// The plugin's latest status document, `null` before the first.
+    pub status: Value,
+    /// Unix milliseconds at which it arrived (0 before the first).
+    pub updated_unix_ms: u64,
+    /// Stored media objects.
+    pub media: Vec<MediaInfo>,
 }
 
 /// Parameters of a new instance.
@@ -162,15 +184,16 @@ pub enum StartError {
     NotFound,
 }
 
-struct Shared {
-    id: String,
-    package: Arc<Package>,
-    spec: StartSpec,
-    input: Option<InputRequest>,
-    input_dropped: Arc<AtomicU64>,
+pub(crate) struct Shared {
+    pub(crate) id: String,
+    pub(crate) package: Arc<Package>,
+    pub(crate) spec: StartSpec,
+    pub(crate) input: Option<InputRequest>,
+    pub(crate) input_dropped: Arc<AtomicU64>,
     info: Mutex<Mutable>,
-    events_ok: AtomicU64,
-    events_invalid: AtomicU64,
+    told: Mutex<Live>,
+    pub(crate) events_ok: AtomicU64,
+    pub(crate) events_invalid: AtomicU64,
     restarts: AtomicU32,
     reconfigures: AtomicU32,
     /// Liveness of the input, written by the feeder task.
@@ -262,14 +285,35 @@ fn mean_square(format: TapFormat, chunk: &[u8]) -> Option<f64> {
     Some(sum / f64::from(n))
 }
 
-struct Mutable {
+/// What a framed plugin has told the host (cleared when its session ends).
+#[derive(Default)]
+pub(crate) struct Live {
+    /// Encoded `control` payloads for the running session.
+    pub(crate) control: Option<mpsc::Sender<Vec<u8>>>,
+    /// Latest `status` document and the Unix ms it arrived.
+    pub(crate) status: Option<(serde_json::Value, u64)>,
+    /// Latest `media` objects by key.
+    pub(crate) media: HashMap<String, MediaObject>,
+    /// Centre frequency after a `tune`, if the plugin moved its window.
+    pub(crate) freq_hz: Option<u64>,
+}
+
+/// A stored `media` object.
+#[derive(Clone)]
+pub(crate) struct MediaObject {
+    pub(crate) mime: String,
+    pub(crate) bytes: Arc<Vec<u8>>,
+    pub(crate) revision: u64,
+}
+
+pub(crate) struct Mutable {
     config: Value,
     state: InstanceState,
     pid: Option<u32>,
     crashes_in_window: u32,
     retry_in: Option<Duration>,
     last_error: Option<String>,
-    input_error: Option<String>,
+    pub(crate) input_error: Option<String>,
     updated_unix_ms: u64,
 }
 
@@ -280,6 +324,33 @@ impl Shared {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// The instance configuration now (it can be replaced by `reconfigure`).
+    pub(crate) fn config(&self) -> Value {
+        self.lock().config.clone()
+    }
+
+    pub(crate) fn live(&self) -> MutexGuard<'_, Live> {
+        self.told
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The frequency the instance is on now (after a `tune`, else the start binding).
+    pub(crate) fn freq_hz(&self) -> Option<u64> {
+        self.live().freq_hz.or(self.spec.freq_hz)
+    }
+
+    /// Record a new centre frequency and announce it.
+    pub(crate) fn set_freq(&self, freq_hz: u64) {
+        self.live().freq_hz = Some(freq_hz);
+        self.update(|_| {});
+    }
+
+    /// Record an input problem (or its end) for the instance state.
+    pub(crate) fn set_input_error(&self, error: Option<String>) {
+        self.update(|m| m.input_error = error);
+    }
+
     fn snapshot(&self) -> InstanceInfo {
         let m = self.lock();
         InstanceInfo {
@@ -287,7 +358,7 @@ impl Shared {
             plugin_id: self.package.manifest.plugin.id.clone(),
             device: self.spec.device.clone(),
             vfo: self.spec.vfo,
-            freq_hz: self.spec.freq_hz,
+            freq_hz: self.freq_hz(),
             config: m.config.clone(),
             exclusive: self.package.manifest.is_exclusive(),
             state: m.state,
@@ -302,6 +373,9 @@ impl Shared {
             events_invalid: self.events_invalid.load(Ordering::Relaxed),
             input_dropped: self.input_dropped.load(Ordering::Relaxed),
             input_error: m.input_error.clone(),
+            audio_vfo: (self.package.manifest.output.audio.is_some()
+                && self.package.manifest.runtime.transport == Transport::Framed)
+                .then(|| audio_vfo_of(&self.id)),
             updated_unix_ms: m.updated_unix_ms,
             input_bytes: self.live.bytes.load(Ordering::Relaxed),
             input_level_db: self.live.level_db(),
@@ -313,7 +387,7 @@ impl Shared {
     }
 
     /// Change the mutable part and broadcast the new snapshot.
-    fn update(&self, change: impl FnOnce(&mut Mutable)) {
+    pub(crate) fn update(&self, change: impl FnOnce(&mut Mutable)) {
         {
             let mut m = self.lock();
             change(&mut m);
@@ -334,6 +408,7 @@ struct Inner {
     policy: Policy,
     sink: Arc<dyn EventSink>,
     inputs: Arc<dyn Inputs>,
+    outputs: Arc<dyn Outputs>,
     tx: broadcast::Sender<InstanceInfo>,
     instances: Mutex<HashMap<String, Entry>>,
 }
@@ -354,12 +429,25 @@ impl Supervisor {
     /// Create a supervisor that feeds instances from `inputs`.
     #[must_use]
     pub fn with_inputs(policy: Policy, sink: Arc<dyn EventSink>, inputs: Arc<dyn Inputs>) -> Self {
+        Self::with_io(policy, sink, inputs, Arc::new(NoOutputs))
+    }
+
+    /// Create a supervisor that feeds instances from `inputs` and sends their audio to
+    /// `outputs`.
+    #[must_use]
+    pub fn with_io(
+        policy: Policy,
+        sink: Arc<dyn EventSink>,
+        inputs: Arc<dyn Inputs>,
+        outputs: Arc<dyn Outputs>,
+    ) -> Self {
         let (tx, _) = broadcast::channel(256);
         Self {
             inner: Arc::new(Inner {
                 policy,
                 sink,
                 inputs,
+                outputs,
                 tx,
                 instances: Mutex::new(HashMap::new()),
             }),
@@ -432,6 +520,7 @@ impl Supervisor {
             spec,
             input,
             input_dropped: Arc::new(AtomicU64::new(0)),
+            told: Mutex::new(Live::default()),
             info: Mutex::new(Mutable {
                 config,
                 state: InstanceState::Starting,
@@ -465,6 +554,7 @@ impl Supervisor {
             self.inner.policy.clone(),
             Arc::clone(&self.inner.sink),
             Arc::clone(&self.inner.inputs),
+            Arc::clone(&self.inner.outputs),
             Arc::clone(&shared),
             stop_rx,
         ));
@@ -539,6 +629,72 @@ impl Supervisor {
         Ok(info)
     }
 
+    /// Send a JSON message to the framed session of an instance (a `control` frame).
+    ///
+    /// # Errors
+    /// [`StartError::NotFound`] for unknown ids, [`StartError::Invalid`] when the message is not
+    /// an object or too large, [`StartError::Conflict`] while the plugin has no session (not
+    /// started yet, crashed) or does not read its control queue.
+    pub fn control(&self, id: &str, message: &Value) -> Result<(), StartError> {
+        if !message.is_object() {
+            return Err(StartError::Invalid("message must be a JSON object".into()));
+        }
+        let payload =
+            serde_json::to_vec(message).map_err(|err| StartError::Invalid(err.to_string()))?;
+        if payload.len() > MAX_CONTROL {
+            return Err(StartError::Invalid("message is too large".into()));
+        }
+        let shared = self
+            .instances()
+            .get(id)
+            .map(|e| Arc::clone(&e.shared))
+            .ok_or(StartError::NotFound)?;
+        let sender = shared.live().control.clone();
+        let sender = sender.ok_or_else(|| {
+            StartError::Conflict("the plugin has no running framed session".into())
+        })?;
+        sender
+            .try_send(payload)
+            .map_err(|_| StartError::Conflict("the plugin does not take messages now".into()))
+    }
+
+    /// The latest `status` document of an instance and the stored media objects.
+    #[must_use]
+    pub fn status(&self, id: &str) -> Option<StatusSnapshot> {
+        let shared = self.instances().get(id).map(|e| Arc::clone(&e.shared))?;
+        let live = shared.live();
+        let (status, updated_unix_ms) = live.status.clone().unwrap_or((Value::Null, 0));
+        let mut media: Vec<MediaInfo> = live
+            .media
+            .iter()
+            .map(|(key, m)| MediaInfo {
+                key: key.clone(),
+                mime: m.mime.clone(),
+                size: m.bytes.len(),
+                revision: m.revision,
+            })
+            .collect();
+        media.sort_by(|a, b| a.key.cmp(&b.key));
+        Some(StatusSnapshot {
+            status,
+            updated_unix_ms,
+            media,
+        })
+    }
+
+    /// One stored media object: MIME type, revision and bytes.
+    #[must_use]
+    pub fn media(&self, id: &str, key: &str) -> Option<(String, u64, Arc<Vec<u8>>)> {
+        let shared = self.instances().get(id).map(|e| Arc::clone(&e.shared))?;
+        let live = shared.live();
+        let object = live.media.get(key)?;
+        Some((
+            object.mime.clone(),
+            object.revision,
+            Arc::clone(&object.bytes),
+        ))
+    }
+
     /// Replace the configuration of an instance and restart its process with it. The instance
     /// keeps its id, binding and counters; a running process is stopped like on `stop` (stdin
     /// closed, killed after the grace period) and started again, an instance in backoff or
@@ -593,11 +749,6 @@ fn check_runnable(package: &Package) -> Result<(), StartError> {
     if manifest.runtime.kind == RuntimeKind::Container {
         return Err(StartError::Unsupported(
             "container plugins are started through compose.plugins.yaml, not by the host".into(),
-        ));
-    }
-    if manifest.runtime.transport == Transport::Framed {
-        return Err(StartError::Unsupported(
-            "the framed transport is not implemented by this host yet".into(),
         ));
     }
     Ok(())
@@ -708,6 +859,7 @@ async fn run_instance(
     policy: Policy,
     sink: Arc<dyn EventSink>,
     inputs: Arc<dyn Inputs>,
+    outputs: Arc<dyn Outputs>,
     shared: Arc<Shared>,
     mut stop: watch::Receiver<bool>,
 ) {
@@ -718,8 +870,15 @@ async fn run_instance(
             m.pid = None;
             m.retry_in = None;
         });
-        let outcome = match spawn(&shared) {
-            Ok(child) => run_process(child, &policy, &sink, &inputs, &shared, &mut stop).await,
+        let ctx = Context {
+            policy: &policy,
+            sink: &sink,
+            inputs: &inputs,
+            outputs: &outputs,
+            shared: &shared,
+        };
+        let outcome = match start_process(&shared) {
+            Ok((child, socket)) => run_process(child, socket, &ctx, &mut stop).await,
             Err(err) => Outcome::Crashed(format!("spawn failed: {err}")),
         };
         let reason = match outcome {
@@ -805,7 +964,55 @@ enum Outcome {
     Crashed(String),
 }
 
-fn spawn(shared: &Shared) -> std::io::Result<Child> {
+/// What one process run needs besides the process.
+struct Context<'a> {
+    policy: &'a Policy,
+    sink: &'a Arc<dyn EventSink>,
+    inputs: &'a Arc<dyn Inputs>,
+    outputs: &'a Arc<dyn Outputs>,
+    shared: &'a Arc<Shared>,
+}
+
+/// The listening socket of a framed plugin; its directory is removed on drop.
+struct SocketDir {
+    dir: PathBuf,
+    listener: Option<UnixListener>,
+}
+
+impl SocketDir {
+    fn path(&self) -> PathBuf {
+        self.dir.join("plugin.sock")
+    }
+}
+
+impl Drop for SocketDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// Create the socket (framed plugins) and spawn the process.
+fn start_process(shared: &Shared) -> std::io::Result<(Child, Option<SocketDir>)> {
+    if shared.package.manifest.runtime.transport != Transport::Framed {
+        return spawn(shared, None).map(|child| (child, None));
+    }
+    use std::os::unix::fs::DirBuilderExt;
+    let dir = std::env::temp_dir().join(format!(
+        "superhet-plugin-{}-{}",
+        shared.id,
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    ));
+    std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
+    let mut socket = SocketDir {
+        dir,
+        listener: None,
+    };
+    socket.listener = Some(UnixListener::bind(socket.path())?);
+    let child = spawn(shared, Some(&socket.path()))?;
+    Ok((child, Some(socket)))
+}
+
+fn spawn(shared: &Shared, socket: Option<&std::path::Path>) -> std::io::Result<Child> {
     let package = &shared.package;
     let (program, args) = package
         .command()
@@ -817,7 +1024,7 @@ fn spawn(shared: &Shared) -> std::io::Result<Child> {
         plugin_dir: &package.dir,
         device: shared.spec.device.as_deref(),
         vfo: shared.spec.vfo,
-        freq_hz: shared.spec.freq_hz,
+        freq_hz: shared.freq_hz(),
         config: &config,
     };
     let mut command = Command::new(program);
@@ -831,6 +1038,7 @@ fn spawn(shared: &Shared) -> std::io::Result<Child> {
                 .filter_map(|name| std::env::var(name).ok().map(|value| (*name, value))),
         )
         .envs(env.vars())
+        .envs(socket.map(|path| (superhet_plugin_protocol::env::SOCKET, path.as_os_str())))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -928,14 +1136,33 @@ fn open_stdin(stdin: Option<ChildStdin>, inputs: &Arc<dyn Inputs>, shared: &Arc<
     }))
 }
 
+/// Wait for the framed session to end; never completes without one.
+async fn session_ended(session: &mut Option<tokio::task::JoinHandle<String>>) -> String {
+    match session.as_mut() {
+        Some(handle) => {
+            let reason = handle
+                .await
+                .unwrap_or_else(|err| format!("framed session task failed: {err}"));
+            *session = None;
+            reason
+        }
+        None => std::future::pending().await,
+    }
+}
+
 async fn run_process(
     mut child: Child,
-    policy: &Policy,
-    sink: &Arc<dyn EventSink>,
-    inputs: &Arc<dyn Inputs>,
-    shared: &Arc<Shared>,
+    mut socket: Option<SocketDir>,
+    ctx: &Context<'_>,
     stop: &mut watch::Receiver<bool>,
 ) -> Outcome {
+    let Context {
+        policy,
+        sink,
+        inputs,
+        outputs,
+        shared,
+    } = ctx;
     let pid = child.id();
     shared.update(|m| {
         m.state = InstanceState::Running;
@@ -944,8 +1171,30 @@ async fn run_process(
     });
     let started = Instant::now();
     let activity = Arc::new(AtomicU64::new(0));
-    // Held open so the plugin sees EOF only when the host wants it to end.
-    let mut stdin = Some(open_stdin(child.stdin.take(), inputs, shared));
+    // Held open so the plugin sees EOF only when the host wants it to end. A framed plugin gets
+    // its samples through the socket instead.
+    let framed = socket.is_some();
+    let mut stdin = Some(if framed {
+        Stdin::Idle(child.stdin.take())
+    } else {
+        open_stdin(child.stdin.take(), inputs, shared)
+    });
+    let mut session = socket
+        .as_mut()
+        .and_then(|socket| socket.listener.take())
+        .map(|listener| {
+            tokio::spawn(framed_session::run(
+                listener,
+                framed_session::Session {
+                    shared: Arc::clone(shared),
+                    sink: Arc::clone(sink),
+                    inputs: Arc::clone(inputs),
+                    outputs: Arc::clone(outputs),
+                    activity: Arc::clone(&activity),
+                    started,
+                },
+            ))
+        });
     let readers = [
         child.stdout.take().map(|out| {
             tokio::spawn(read_events(
@@ -975,6 +1224,10 @@ async fn run_process(
                     Ok(status) => format!("exited with {status}"),
                     Err(err) => format!("wait failed: {err}"),
                 });
+            }
+            reason = session_ended(&mut session) => {
+                let _ = child.kill().await;
+                break Outcome::Crashed(reason);
             }
             _ = stop.changed() => {
                 if let Some(stdin) = stdin.take() {
@@ -1007,6 +1260,11 @@ async fn run_process(
     if let Some(stdin) = stdin.take() {
         stdin.close().await;
     }
+    if let Some(session) = session.take() {
+        session.abort();
+        let _ = session.await;
+    }
+    drop(socket);
     if let Some(pid) = pid {
         kill_group(pid);
     }
@@ -1039,36 +1297,41 @@ async fn read_events(
                 .map_err(|err| err.to_string()),
             Err(()) => Err("line too long".to_owned()),
         };
-        match verdict {
-            Ok(Line::Heartbeat) => {}
-            Ok(Line::Event(event)) => {
-                shared.events_ok.fetch_add(1, Ordering::Relaxed);
-                shared.last_event_ms.store(unix_ms(), Ordering::Relaxed);
-                sink.emit(HostEvent {
-                    v: PROTOCOL_VERSION,
-                    plugin_id: shared.package.manifest.plugin.id.clone(),
-                    instance_id: shared.id.clone(),
-                    device: shared.spec.device.clone(),
-                    vfo: shared.spec.vfo,
-                    freq_hz: shared.spec.freq_hz,
-                    event_type: event.event_type,
-                    ts: event.ts,
-                    host_ts_ms: unix_ms(),
-                    data: event.data,
-                });
-            }
-            Err(reason) => {
-                let n = shared.events_invalid.fetch_add(1, Ordering::Relaxed) + 1;
-                // Log the first few and then every thousandth so a noisy plugin cannot flood.
-                if n <= 5 || n.is_multiple_of(1000) {
-                    tracing::warn!(
-                        instance = %shared.id,
-                        plugin = %shared.package.manifest.plugin.id,
-                        invalid_total = n,
-                        %reason,
-                        "dropped invalid event line"
-                    );
-                }
+        deliver(&shared, sink.as_ref(), verdict);
+    }
+}
+
+/// Count and forward the verdict on one event line (from `stdout` or an `event` frame).
+pub(crate) fn deliver(shared: &Shared, sink: &dyn EventSink, verdict: Result<Line, String>) {
+    match verdict {
+        Ok(Line::Heartbeat) => {}
+        Ok(Line::Event(event)) => {
+            shared.events_ok.fetch_add(1, Ordering::Relaxed);
+            shared.last_event_ms.store(unix_ms(), Ordering::Relaxed);
+            sink.emit(HostEvent {
+                v: PROTOCOL_VERSION,
+                plugin_id: shared.package.manifest.plugin.id.clone(),
+                instance_id: shared.id.clone(),
+                device: shared.spec.device.clone(),
+                vfo: shared.spec.vfo,
+                freq_hz: shared.freq_hz(),
+                event_type: event.event_type,
+                ts: event.ts,
+                host_ts_ms: unix_ms(),
+                data: event.data,
+            });
+        }
+        Err(reason) => {
+            let n = shared.events_invalid.fetch_add(1, Ordering::Relaxed) + 1;
+            // Log the first few and then every thousandth so a noisy plugin cannot flood.
+            if n <= 5 || n.is_multiple_of(1000) {
+                tracing::warn!(
+                    instance = %shared.id,
+                    plugin = %shared.package.manifest.plugin.id,
+                    invalid_total = n,
+                    %reason,
+                    "dropped invalid event line"
+                );
             }
         }
     }
@@ -1143,7 +1406,7 @@ impl<R: AsyncRead + Unpin> LineReader<R> {
     }
 }
 
-fn unix_ms() -> u64 {
+pub(crate) fn unix_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))

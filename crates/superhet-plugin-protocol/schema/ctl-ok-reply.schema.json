@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Reply to `control`.",
+  "properties": {
+    "ok": {
+      "description": "Always true.",
+      "type": "boolean"
+    },
+    "v": {
+      "description": "Contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "ok"
+  ],
+  "title": "OkReply",
+  "type": "object"
+}

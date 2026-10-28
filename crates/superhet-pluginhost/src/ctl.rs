@@ -16,9 +16,9 @@ use serde_json::Value;
 use superhet_bus::subjects;
 use superhet_plugin_protocol::PROTOCOL_VERSION;
 use superhet_plugin_protocol::ctl::{
-    ErrorReply, InstallRequest, InstanceRef, InstanceReply, InstancesReply, PluginInfo,
-    PluginReply, PluginsReply, ReconfigureRequest, RemoveRequest, RemovedReply, StartRequest, cmd,
-    code,
+    ControlRequest, ErrorReply, InstallRequest, InstanceRef, InstanceReply, InstancesReply,
+    MediaReplyHeader, MediaRequest, OkReply, PluginInfo, PluginReply, PluginsReply,
+    ReconfigureRequest, RemoveRequest, RemovedReply, StartRequest, StatusReply, cmd, code,
 };
 use superhet_plugin_protocol::event::HostEvent;
 use tokio::sync::mpsc;
@@ -86,6 +86,32 @@ fn start_error(err: &StartError) -> Value {
         StartError::NotFound => code::NOT_FOUND,
     };
     error(class, err.to_string())
+}
+
+/// Handle one request and encode the reply: JSON for every command, except that a successful
+/// `media` reply is `MediaReplyHeader` JSON, a newline and the object bytes.
+pub async fn handle_bytes(host: &Host, command: &str, payload: &[u8]) -> Vec<u8> {
+    if command != cmd::MEDIA {
+        return serde_json::to_vec(&handle(host, command, payload).await).unwrap_or_default();
+    }
+    let reply = match parse::<MediaRequest>(payload) {
+        Err(reply) => reply,
+        Ok(req) => match host.supervisor.media(&req.id, &req.key) {
+            Some((mime, revision, bytes)) => {
+                return MediaReplyHeader {
+                    v: PROTOCOL_VERSION,
+                    ok: true,
+                    key: req.key,
+                    mime,
+                    revision,
+                }
+                .encode(&bytes);
+            }
+            None if host.supervisor.get(&req.id).is_none() => start_error(&StartError::NotFound),
+            None => error(code::NOT_FOUND, "no such media object"),
+        },
+    };
+    serde_json::to_vec(&reply).unwrap_or_default()
 }
 
 /// Handle one request; the reply is always a JSON object with `ok`.
@@ -221,6 +247,39 @@ async fn handle_inner(host: &Host, command: &str, payload: &[u8]) -> Result<Valu
                 .map(instance)
                 .map_err(|err| start_error(&err))
         }
+        cmd::CONTROL => {
+            let req: ControlRequest = parse(payload)?;
+            host.supervisor
+                .control(&req.id, &req.message)
+                .map_err(|err| start_error(&err))?;
+            Ok(ok_json(&OkReply {
+                v: PROTOCOL_VERSION,
+                ok: true,
+            }))
+        }
+        cmd::STATUS => {
+            let req: InstanceRef = parse(payload)?;
+            let info = host
+                .supervisor
+                .get(&req.id)
+                .ok_or_else(|| start_error(&StartError::NotFound))?;
+            let snapshot = host
+                .supervisor
+                .status(&req.id)
+                .ok_or_else(|| start_error(&StartError::NotFound))?;
+            Ok(ok_json(&StatusReply {
+                v: PROTOCOL_VERSION,
+                ok: true,
+                plugin_id: info.plugin_id,
+                device: info.device,
+                state: info.state,
+                freq_hz: info.freq_hz,
+                audio_vfo: info.audio_vfo,
+                status: snapshot.status,
+                updated_unix_ms: snapshot.updated_unix_ms,
+                media: snapshot.media,
+            }))
+        }
         cmd::RECONFIGURE => {
             let req: ReconfigureRequest = parse(payload)?;
             let info = host
@@ -268,14 +327,38 @@ pub async fn serve(
         let client = client.clone();
         // One task per request: `stop` waits for the process and must not block other requests.
         tokio::spawn(async move {
-            let reply = handle(&host, &command, &msg.payload).await;
-            let body = serde_json::to_vec(&reply).unwrap_or_default();
+            let body = handle_bytes(&host, &command, &msg.payload).await;
             if let Err(err) = client.publish(reply_to, body.into()).await {
                 tracing::warn!(%err, "could not send control reply");
             }
         });
     }
     Ok(())
+}
+
+/// Store the new frequency of an instance whose plugin moved its window, so a restart of the
+/// host brings it back on the same block.
+pub async fn persist_retunes(supervisor: Supervisor, store: InstanceStore) {
+    if !store.is_persistent() {
+        return;
+    }
+    let mut rx = supervisor.subscribe();
+    let mut known: std::collections::HashMap<String, Option<u64>> =
+        std::collections::HashMap::new();
+    loop {
+        match rx.recv().await {
+            Ok(info) => {
+                let last = known.insert(info.id.clone(), info.freq_hz);
+                if let (Some(previous), Some(freq)) = (last, info.freq_hz)
+                    && previous != Some(freq)
+                {
+                    store.set_freq(&info.id, freq).await;
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+        }
+    }
 }
 
 /// Publish every instance state change on `sh.v1.plugin.state`.

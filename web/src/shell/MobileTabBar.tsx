@@ -10,6 +10,7 @@ const BAR_TABS: readonly InspectorTab[] = [
   "bookmarks",
   "channels",
   "decoders",
+  "dab",
   "display",
   "source",
 ];

@@ -12,6 +12,9 @@ this repository. The only code the project forbids shipping is the ETSI TETRA co
 | multimon-ng | 1.2.0 | GPL-2.0-or-later | plugin `org.superhet.decoder.pocsag` | https://github.com/EliasOenal/multimon-ng |
 | direwolf | 1.6 | GPL-2.0-or-later | plugin `org.superhet.decoder.aprs` | https://github.com/wb2osz/direwolf |
 | rtl-433 | 22.11 | GPL-2.0-or-later | plugin `org.superhet.decoder.rtl433` | https://github.com/merbanan/rtl_433 |
+| welle.io (only `/usr/bin/welle-cli`) | 2.4+ds-2 | GPL-2.0-or-later | plugin `org.superhet.decoder.dab` | https://github.com/AlbrechtL/welle.io |
+| libfaad2 (HE-AAC decoder of welle-cli) | 2.10 | GPL-2.0-or-later | welle-cli | https://github.com/knik0/faad2 |
+| libfftw3-single3, libmp3lame0, libmpg123-0, libasound2, libairspy0, libsoapysdr0.8, libusb-1.0-0 | - | GPL-2.0+ / LGPL-2+ / MIT / BSL / Boost (each per its copyright file) | welle-cli (dynamic libraries) | `apt-cache show <package>` |
 | librtlsdr0, libopus0 | - | GPL-2.0-or-later, BSD-3-Clause | sdrd (dynamic libraries) | `docs/licenses.md` |
 
 Their dependencies (ALSA, hamlib, gpsd client library, SoapySDR, OpenSSL, ...) come with them via
@@ -19,6 +22,8 @@ Their dependencies (ALSA, hamlib, gpsd client library, SoapySDR, OpenSSL, ...) c
 for every Debian package is available from the Debian archive (`apt-get source <package>`); the
 GPL obligations for redistributing the image are met by this and by the licence texts under
 `/usr/share/doc/<package>/copyright` inside the image.
+
+**DAB / welle-cli.** The Debian package `welle.io` also installs the Qt GUI (about 320 MB). The Dockerfile installs it in a build stage and copies only `welle-cli` and the package's copyright file into the runtime image; the libraries welle-cli needs come from their own Debian packages (about 7 MB in total). The binary is not modified or rebuilt; its source is `apt-get source welle.io`. The plugin decodes welle-cli's MP3 stream with the Rust crate `symphonia` (MPL-2.0, `crates/superhet-plugin-adapters`, linked into `superhet-plugin-adapter`). **Patents:** DAB+ audio is HE-AAC. Some AAC profiles are still covered by patents in some jurisdictions (the AAC-LC patents are expiring, SBR/PS are younger). faad2 is a GPL-licensed decoder without a patent licence; whoever redistributes the image or builds a binary for a jurisdiction where this matters should check; the plugin's install notice says so. MP2 (classic DAB) and MP3 (the hand-over format) are patent-free by now.
 
 Size: the three packages and their dependencies add about 27 MiB of installed files to the
 runtime image (measured on `debian:bookworm-slim` with librtlsdr0 and libopus0 present), i.e. the

@@ -1,0 +1,47 @@
+{
+ "receiver": {
+  "hardware": {
+   "name": "rtl_tcp_client (server: 127.0.0.1:41233)",
+   "gain": 0.0
+  },
+  "software": {
+   "name": "welle.io",
+   "version": "2.4+ds",
+   "fftwindowplacement": "EarliestPeakWithBinning",
+   "coarsecorrectorenabled": true,
+   "freqsyncmethod": "GetPhaseCorrelationOffset",
+   "lastchannelchange": 1790000000000
+  }
+ },
+ "ensemble": {
+  "label": {
+   "label": "                ",
+   "shortlabel": "",
+   "fig2label": "",
+   "fig2rfu": false,
+   "fig2charset": "Undefined"
+  },
+  "id": "0x0000",
+  "ecc": "0x00"
+ },
+ "services": [],
+ "utctime": {
+  "year": 0,
+  "month": 0,
+  "day": 0,
+  "hour": 0,
+  "minutes": 0,
+  "lto": 0.0
+ },
+ "messages": [],
+ "tii": [],
+ "cir_peaks": [],
+ "demodulator": {
+  "fic": {
+   "numcrcerrors": 0
+  },
+  "time_last_fct0_frame": 0,
+  "snr": 0.0,
+  "frequencycorrection": 0.0
+ }
+}

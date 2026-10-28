@@ -66,8 +66,8 @@ first real plugins (multimon-ng, direwolf, rtl_433, readsb, welle-cli) need all 
 - A `discriminator` plugin receives the VFO's demodulated NFM audio (de-emphasis and the audio
   band-pass applied), not the raw discriminator output; if a decoder needs the latter, a
   dedicated tap kind is a small addition.
-- The framed transport is still not implemented by the host; framed input (`samples` frames with
-  sequence numbers and tuning epochs) is the place to give plugins loss detection.
+- The framed transport was not implemented by this step; ADR-0016 adds it (framed input with
+  sequence numbers that jump over dropped chunks is the place plugins detect loss).
 - Plugin resource limits, container plugins and Git installs remain P3.
 - Existing `nats.conf` copies and the pluginhost's compose entry (database URL) must be updated;
   the installer's content-hashed config handles the former.

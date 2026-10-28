@@ -18,7 +18,8 @@ import { builtinBandPlan, matchBandPlan, suggestName } from "../bandplan/model";
 import { OverlayStore } from "../bandplan/settings";
 import { newInput, receiverState } from "../bookmarks/model";
 import { BookmarkStore } from "../bookmarks/store";
-import { DAB_PLUGIN_NOTICE, dabSampleRate } from "../channels/dab";
+import { DAB_PLUGIN_ID } from "../dab/model";
+import { DabStore } from "../dab/store";
 import { channelTarget, matchChannel, stepChannelBy } from "../channels/lookup";
 import { modeOf, type Plan, type PlanChannel } from "../channels/schema";
 import { ChannelStore } from "../channels/store";
@@ -31,7 +32,6 @@ import type { AnnotationTarget } from "../spectrum/annotations";
 import { formatFrequency } from "../spectrum/freq";
 import { LevelController, loadLevelSettings } from "../spectrum/levels";
 import type { SocketStatus } from "../spectrum/socket";
-import { SAMPLE_RATES } from "../spectrum/TuningControls";
 import { TuningController } from "../spectrum/tuning";
 import { toasts } from "../ui/toast";
 import { AutoSquelch } from "../vfo/autoSquelch";
@@ -115,6 +115,9 @@ export function useReceiver(device: string) {
   const [overlay] = useState(() => new OverlayStore());
   const decoderEvents = useMemo(() => new DecoderEventStore({ device }), [device]);
   const plugins = useMemo(() => new PluginStore(), []);
+  const pluginSnap = useSyncExternalStore(plugins.subscribe, plugins.getSnapshot);
+  const dab = useMemo(() => new DabStore(device), [device]);
+  const dabSnap = useSyncExternalStore(dab.subscribe, dab.getSnapshot);
   const bookmarks = useMemo(() => new BookmarkStore(), []);
   const bookmarkSnap = useSyncExternalStore(bookmarks.subscribe, bookmarks.getSnapshot);
 
@@ -186,16 +189,22 @@ export function useReceiver(device: string) {
         });
         return;
       }
-      const rate = dabSampleRate(tuning.getSnapshot().display?.sampleRate ?? null, SAMPLE_RATES);
-      tuning.request({ centerHz: channel.freqHz, sampleRate: rate });
-      toasts.push({
-        key: "dab-plugin",
-        tone: "info",
-        title: DAB_PLUGIN_NOTICE,
-        body: `Centre set to DAB block ${channel.number}.`,
-      });
+      // The DAB plugin takes the device: an instance that runs follows the click (new block),
+      // else the DAB tab asks for the takeover first.
+      if (dab.getSnapshot().instanceId !== null) {
+        dab.control({ cmd: "tune", channel: channel.number }).catch((e: unknown) =>
+          toasts.push({
+            key: "dab-tune",
+            tone: "warn",
+            title: "Could not tune DAB",
+            body: e instanceof Error ? e.message : String(e),
+          }),
+        );
+      } else {
+        dab.request({ channel: channel.number, freqHz: channel.freqHz });
+      }
     },
-    [canTune, tuning, tuneTo, tuneNew],
+    [canTune, dab, tuneTo, tuneNew],
   );
 
   // The < > buttons and the arrow keys: when the active VFO sits on a plan channel and channel
@@ -249,8 +258,10 @@ export function useReceiver(device: string) {
     audio.start();
     // Guests only get the decoder history while the policy shows it.
     if (canSeeDecoders) decoderEvents.start();
+    if (canSeeDecoders) dab.start();
     if (canUsePlugins) plugins.start();
     return () => {
+      dab.stop();
       plugins.stop();
       unbind();
       store.stop();
@@ -258,7 +269,7 @@ export function useReceiver(device: string) {
       audio.stop();
       decoderEvents.stop();
     };
-  }, [store, tuning, vfoCtl, audio, decoderEvents, canSeeDecoders, plugins, canUsePlugins]);
+  }, [store, tuning, vfoCtl, audio, decoderEvents, canSeeDecoders, plugins, canUsePlugins, dab]);
 
   // Bookmarks live on the server: read them at start and again once the state feed is up.
   const feedUp = feed.status === "connected";
@@ -280,10 +291,13 @@ export function useReceiver(device: string) {
     .map((v) => v.id)
     .join(",");
   const vfosLoaded = vfoSnap.loaded;
+  // The audio of a running DAB plugin is one more stream on the same socket (pseudo VFO id).
+  const dabAudioVfo = dabSnap.reply?.audioVfo ?? null;
   useEffect(() => {
     if (!vfosLoaded) return;
-    audio.setVfos(vfoIds === "" ? [] : vfoIds.split(",").map(Number));
-  }, [audio, vfoIds, vfosLoaded]);
+    const ids = vfoIds === "" ? [] : vfoIds.split(",").map(Number);
+    audio.setVfos(dabAudioVfo === null ? ids : [...ids, dabAudioVfo]);
+  }, [audio, vfoIds, vfosLoaded, dabAudioVfo]);
   useEffect(() => {
     audio.setActive(vfoSnap.selectedId);
   }, [audio, vfoSnap.selectedId]);
@@ -300,6 +314,14 @@ export function useReceiver(device: string) {
   }, [vfoCtl, firstVfoId, hasSelection]);
 
   const locks = tuningSnap.state?.locks ?? [];
+  // The DAB instance to follow: operators know it from the instance list, everybody else from the
+  // plugin's claim on the device (a `claim` holder is named by the instance id).
+  const dabInstance = pluginSnap.instances.find(
+    (i) => i.pluginId === DAB_PLUGIN_ID && i.device === device && i.state !== "stopped",
+  )?.id;
+  const claimId = locks.find((l) => l.kind === "claim")?.id;
+  const followId = dabInstance ?? claimId ?? null;
+  useEffect(() => dab.follow(followId), [dab, followId]);
   const profileApi = useMemo(() => createProfileApi(), []);
   const currentDoc = useMemo<StateDoc | null>(
     () =>
@@ -400,6 +422,8 @@ export function useReceiver(device: string) {
     stepChannels,
     decoderEvents,
     plugins,
+    dab,
+    dabSnap,
     tuneTo,
     tuneNew,
     startBookmark,

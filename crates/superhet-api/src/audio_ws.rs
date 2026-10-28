@@ -164,6 +164,13 @@ async fn may_listen(
     device: &str,
     wanted: &BTreeSet<u32>,
 ) -> Result<(), &'static str> {
+    // Plugin audio (a DAB service) is broadcast content of an exclusive instance, not somebody's
+    // VFO: every role may listen to it (starting the instance is operator-only).
+    let wanted: BTreeSet<u32> = wanted
+        .iter()
+        .copied()
+        .filter(|id| !superhet_bus::audio::is_plugin_vfo(*id))
+        .collect();
     if principal.sees_all_vfos() || wanted.is_empty() {
         return Ok(());
     }
@@ -175,7 +182,7 @@ async fn may_listen(
         .get("vfos")
         .and_then(serde_json::Value::as_array)
         .map_or(&[][..], Vec::as_slice);
-    for id in wanted {
+    for id in &wanted {
         let vfo = vfos
             .iter()
             .find(|v| v.get("id").and_then(serde_json::Value::as_u64) == Some(u64::from(*id)));

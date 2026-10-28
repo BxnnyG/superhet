@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`media`: address one stored object of an instance.",
+  "properties": {
+    "id": {
+      "description": "Instance id.",
+      "type": "string"
+    },
+    "key": {
+      "description": "Object key (`MediaHeader::valid_key`).",
+      "type": "string"
+    },
+    "v": {
+      "description": "Contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "id",
+    "key"
+  ],
+  "title": "MediaRequest",
+  "type": "object"
+}

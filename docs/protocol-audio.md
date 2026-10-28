@@ -59,6 +59,10 @@ an unknown codec or a channel count other than 1 or 2 must be discarded.
   The UI's "ST" lamp follows this flag.
 - Bandwidth: about 50 packets/s per VFO; a packet is 20-160 bytes at 24 kbit/s.
 
+## Plugin audio
+
+A framed plugin with `[output.audio]` (the DAB plugin, `docs/plugins-dab.md`) is published by the **plugin host** on the same subject family, `sh.v1.dev.<dev>.audio.<id>`, with `<id>` a pseudo VFO id: `1 << 30` (`superhet_bus::audio::PLUGIN_VFO_BASE`) plus a hash of the instance id, reported as `audio_vfo` in the instance state and the plugin status. Frames are ordinary `AudioFrame` v1 (stereo Opus, 96 kbit/s, flag bit 0 always set, `power_dbfs` the block power). The audio WebSocket lets every role subscribe to ids in that range without the owner check; frames only flow while the instance runs. Plugin ids are never VFO ids, the daemon's VFO ids stay below 64.
+
 ## RDS state
 
 A WFM VFO decodes RDS (IEC 62106) natively in the daemon (`superhet-dsp::rds`, no external

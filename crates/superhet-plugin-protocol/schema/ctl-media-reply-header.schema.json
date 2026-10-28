@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Header of a successful `media` reply. The reply payload is this JSON on one line, a newline\nand the object bytes; a failure is a plain [`ErrorReply`] without newline.",
+  "properties": {
+    "key": {
+      "description": "Object key.",
+      "type": "string"
+    },
+    "mime": {
+      "description": "MIME type.",
+      "type": "string"
+    },
+    "ok": {
+      "description": "Always true.",
+      "type": "boolean"
+    },
+    "revision": {
+      "description": "Revision of the key.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "v": {
+      "description": "Contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "ok",
+    "key",
+    "mime",
+    "revision"
+  ],
+  "title": "MediaReplyHeader",
+  "type": "object"
+}

@@ -9,6 +9,8 @@ First-party plugins live here. The contract (manifest, transports, supervision, 
 - `pocsag/`, `aprs/`, `rtl433/` – the first decoder plugins (multimon-ng, direwolf, rtl_433 behind
   `superhet-plugin-adapter`, `docs/plugins-decoders.md`). The image installs them on first start
   (`SUPERHET_BUNDLED_PLUGIN_DIR`, default `/usr/share/superhet/plugins`).
+- `dab/` – DAB / DAB+ (welle-cli behind `superhet-plugin-adapter dab`): the first exclusive, framed-transport
+  plugin with audio, status and slideshow output (`docs/plugins-dab.md`, ADR-0016).
 
 Install a plugin through the admin API (`POST /api/v1/plugins`, `docs/api-plugins.md`) or the host's `install` command; the host copies it to
 `$SUPERHET_PLUGIN_DIR/<id>/<version>` (default `/data/plugins`).

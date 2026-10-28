@@ -71,6 +71,16 @@ impl InstanceStore {
         }
     }
 
+    /// Remember that a running instance moved to another frequency (it keeps its row).
+    pub async fn set_freq(&self, id: &str, freq_hz: u64) {
+        let (Some(pool), Ok(freq)) = (&self.pool, i64::try_from(freq_hz)) else {
+            return;
+        };
+        if let Err(err) = plugin_instances::set_freq(pool, id, freq).await {
+            tracing::error!(%err, instance = id, "could not store the new frequency");
+        }
+    }
+
     /// Forget an instance.
     pub async fn forget(&self, id: &str) {
         let Some(pool) = &self.pool else { return };

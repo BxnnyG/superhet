@@ -27,8 +27,8 @@ describe("chooseTabMode", () => {
 
   it("a longer selected label needs more room than a short one", () => {
     // Bookmarks (9 chars) is wider than Source (6): a width that suits Source may not suit it.
-    const w = 270;
-    expect(chooseTabMode(w, LABELS, 5)).toBe("compact");
+    const w = 290;
+    expect(chooseTabMode(w, LABELS, 6)).toBe("compact");
     expect(chooseTabMode(w, LABELS, 1)).toBe("icons");
   });
 });

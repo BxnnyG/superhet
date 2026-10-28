@@ -49,6 +49,15 @@ pub fn router(state: DevicesState) -> Router {
             "/api/v1/plugin-instances/{id}/restart",
             post(restart_instance),
         )
+        .route("/api/v1/plugin-instances/{id}/status", get(instance_status))
+        .route(
+            "/api/v1/plugin-instances/{id}/media/{key}",
+            get(instance_media),
+        )
+        .route(
+            "/api/v1/plugin-instances/{id}/control",
+            post(instance_control).layer(limit),
+        )
         .route(
             "/api/v1/plugin-instances/{id}/reconfigure",
             post(reconfigure_instance).layer(limit),
@@ -363,6 +372,176 @@ async fn start_instance(
     }
 }
 
+/// `GET /api/v1/plugin-instances/{id}/status` – what the framed plugin reports about itself
+/// (service list, now playing, signal quality, ...), plus the instance's plugin id, device,
+/// frequency, state and audio stream, so a listener can tell what holds the device without
+/// being allowed to list instances.
+async fn instance_status(State(state): State<DevicesState>, Path(id): Path<String>) -> Response {
+    if let Err(response) = check_id(&id) {
+        return *response;
+    }
+    let client = match connected(state.nats.as_ref()) {
+        Ok(client) => client,
+        Err(err) => return err.into_response(),
+    };
+    match host_call(client, "status", json!({"id": id})).await {
+        Ok(value) => reply(StatusCode::OK, &value),
+        Err(response) => *response,
+    }
+}
+
+/// A media key as the plugin protocol defines it: 1..=64 characters of `[a-z0-9._-]`.
+fn valid_media_key(key: &str) -> bool {
+    (1..=64).contains(&key.len())
+        && key.bytes().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-')
+        })
+}
+
+/// Header of a successful `media` reply from the plugin host.
+struct MediaHead {
+    mime: String,
+    revision: u64,
+}
+
+/// Split a `media` reply: one line of JSON (`ok`, `mime`, `revision`), a newline, the bytes.
+/// `None` for a failure reply (plain JSON without newline) or garbage.
+fn split_media_reply(payload: &[u8]) -> Option<(MediaHead, &[u8])> {
+    let split = payload.iter().position(|&b| b == b'\n')?;
+    let header: Value = serde_json::from_slice(&payload[..split]).ok()?;
+    (header["ok"] == true).then_some(())?;
+    Some((
+        MediaHead {
+            mime: header["mime"].as_str()?.to_owned(),
+            revision: header["revision"].as_u64()?,
+        },
+        &payload[split + 1..],
+    ))
+}
+
+/// MIME types served as such; anything else is delivered as an opaque download.
+const SERVED_MIME: &[&str] = &["image/jpeg", "image/png", "image/gif", "image/webp"];
+
+/// `GET /api/v1/plugin-instances/{id}/media/{key}` – the latest binary object a plugin stored
+/// under `key` (a slideshow image). The bytes are plugin-supplied, so only image types are
+/// labelled as such and `nosniff` is set.
+async fn instance_media(
+    State(state): State<DevicesState>,
+    Path((id, key)): Path<(String, String)>,
+) -> Response {
+    let check = check_id(&id).and_then(|()| {
+        if valid_media_key(&key) {
+            Ok(())
+        } else {
+            Err(bad("invalid key"))
+        }
+    });
+    if let Err(response) = check {
+        return *response;
+    }
+    let client = match connected(state.nats.as_ref()) {
+        Ok(client) => client,
+        Err(err) => return err.into_response(),
+    };
+    let Ok(subject) = subjects::plugin_ctl("media") else {
+        return failure(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal",
+            "invalid command",
+        );
+    };
+    let payload = json!({"v": 1, "id": id, "key": key}).to_string();
+    let message = match tokio::time::timeout(
+        HOST_TIMEOUT,
+        client.request(subject, payload.into_bytes().into()),
+    )
+    .await
+    {
+        Ok(Ok(message)) => message,
+        Ok(Err(err)) if matches!(err.kind(), RequestErrorKind::NoResponders) => {
+            return failure(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "unavailable",
+                "the plugin host is not running",
+            );
+        }
+        Ok(Err(_)) => return failure(StatusCode::BAD_GATEWAY, "bus", "bus request failed"),
+        Err(_) => {
+            return failure(
+                StatusCode::GATEWAY_TIMEOUT,
+                "timeout",
+                "the plugin host did not answer in time",
+            );
+        }
+    };
+    let Some((header, bytes)) = split_media_reply(&message.payload) else {
+        // A failure reply is JSON with a `code`.
+        return match serde_json::from_slice::<Value>(&message.payload) {
+            Ok(value) => json(
+                status_of(value["code"].as_str().unwrap_or("")),
+                message.payload.clone(),
+            ),
+            Err(_) => failure(
+                StatusCode::BAD_GATEWAY,
+                "bus",
+                "malformed plugin host reply",
+            ),
+        };
+    };
+    let mime = if SERVED_MIME.contains(&header.mime.as_str()) {
+        header.mime.as_str()
+    } else {
+        "application/octet-stream"
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", mime)
+        .header("X-Content-Type-Options", "nosniff")
+        .header("Cache-Control", "private, no-cache")
+        .header("ETag", format!("\"{}\"", header.revision))
+        .body(Body::from(bytes.to_vec()))
+        .unwrap_or_else(|_| failure(StatusCode::INTERNAL_SERVER_ERROR, "internal", "response"))
+}
+
+/// `POST /api/v1/plugin-instances/{id}/control` – a JSON object for the plugin (select a DAB
+/// service, start a scan; the vocabulary is the plugin's) (operator).
+async fn instance_control(
+    State(state): State<DevicesState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let result = async {
+        guard_mutation(&state, &headers, true)?;
+        check_id(&id)?;
+        let message = object(&body)?;
+        let client = connected(state.nats.as_ref()).map_err(|e| Box::new(e.into_response()))?;
+        let result = host_call(
+            client,
+            "control",
+            json!({"id": id, "message": Value::Object(message.clone())}),
+        )
+        .await;
+        let outcome = outcome_of(&result);
+        audit(
+            &state,
+            &principal,
+            "plugin.control",
+            &id,
+            outcome,
+            json!({"message": Value::Object(message)}),
+        )
+        .await;
+        result
+    }
+    .await;
+    match result {
+        Ok(value) => reply(StatusCode::OK, &value),
+        Err(response) => *response,
+    }
+}
+
 /// `POST /api/v1/plugin-instances/{id}/stop` and `/restart` (operator).
 async fn stop_instance(
     state: State<DevicesState>,
@@ -555,11 +734,33 @@ mod tests {
             ),
             ("POST", "/api/v1/plugin-instances/i-1/stop", ""),
             ("POST", "/api/v1/plugin-instances/i-1/restart", ""),
+            ("GET", "/api/v1/plugin-instances/i-1/status", ""),
+            (
+                "POST",
+                "/api/v1/plugin-instances/i-1/control",
+                r#"{"select":"c224"}"#,
+            ),
         ] {
             let (status, reply) = call(method, path, body).await;
             assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{method} {path}");
             assert_eq!(reply["code"], "unavailable");
         }
+    }
+
+    #[test]
+    fn media_replies_and_keys_are_parsed_strictly() {
+        let mut ok =
+            br#"{"v":1,"ok":true,"key":"slide.a","mime":"image/png","revision":4}"#.to_vec();
+        ok.extend_from_slice(b"\n\x89PNG\n\x00");
+        let (head, bytes) = split_media_reply(&ok).expect("reply");
+        assert_eq!((head.mime.as_str(), head.revision), ("image/png", 4));
+        assert_eq!(bytes, b"\x89PNG\n\x00", "bytes may contain newlines");
+        let failure = br#"{"v":1,"ok":false,"code":"not_found","error":"no"}"#;
+        assert!(split_media_reply(failure).is_none());
+        assert!(split_media_reply(b"{\"ok\":true}\nx").is_none());
+        assert!(valid_media_key("slide.c224") && valid_media_key("a_b-1"));
+        assert!(!valid_media_key("") && !valid_media_key("../x") && !valid_media_key("A"));
+        assert!(!valid_media_key(&"a".repeat(65)));
     }
 
     #[test]

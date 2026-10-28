@@ -10,7 +10,7 @@
   "licence_note": "Broadcast. Reception only.",
   "mode": "dab",
   "bandwidth_hz": 1536000,
-  "note": "Block centre frequencies 5A-13F; each block is 1.536 MHz wide. Which ensembles transmit on which block depends on the region, so they are not listed here: a scan (DAB plugin, coming in P2) discovers them. Selecting a block moves the device centre, it does not open a VFO.",
+  "note": "Block centre frequencies 5A-13F; each block is 1.536 MHz wide. Which ensembles transmit on which block depends on the region, so they are not listed here: a scan with the DAB plugin (DAB tab) discovers them. Selecting a block starts the DAB plugin on it (it takes the whole device), it does not open a VFO.",
   "source": "ETSI EN 300 401 (DAB), Band III block table",
   "channels": [
     {

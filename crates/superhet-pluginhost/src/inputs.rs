@@ -49,12 +49,15 @@ impl Inputs for BusInputs {
             tx,
             Arc::clone(&health.dropped),
         ));
+        let (retune, centre) = watch::channel(request.claim.as_ref().map_or(0, |c| c.center_hz));
         let lease = tokio::spawn(keep_alive(
             self.client.clone(),
             request.clone(),
+            centre,
             health.status,
         ));
         Some(Attachment {
+            retune: request.claim.is_some().then_some(retune),
             chunks: rx,
             guard: Box::new(Guard {
                 client: self.client.clone(),
@@ -162,12 +165,43 @@ async fn release(client: &Client, request: &InputRequest) -> Result<(), String> 
     tap
 }
 
-async fn keep_alive(client: Client, request: InputRequest, status: watch::Sender<Option<String>>) {
+/// `request` with the claimed window moved to `centre_hz` (a plugin retuned itself).
+fn moved(request: &InputRequest, centre_hz: u64) -> InputRequest {
+    let mut moved = request.clone();
+    if let Some(claim) = moved.claim.as_mut() {
+        claim.center_hz = centre_hz;
+        moved.tap.center_hz = Some(centre_hz);
+    }
+    moved
+}
+
+async fn keep_alive(
+    client: Client,
+    request: InputRequest,
+    mut centre: watch::Receiver<u64>,
+    status: watch::Sender<Option<String>>,
+) {
     let mut tick = tokio::time::interval(LEASE_REFRESH);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Only a claim can be moved; for a plain tap the sender is dropped at once.
+    let mut movable = request.claim.is_some();
     loop {
-        tick.tick().await;
-        let error = refresh(&client, &request).await.err();
+        // A retune refreshes at once instead of waiting for the next lease tick.
+        tokio::select! {
+            _ = tick.tick() => {}
+            changed = centre.changed(), if movable => {
+                if changed.is_err() {
+                    movable = false;
+                    continue;
+                }
+            }
+        }
+        let current = if request.claim.is_some() {
+            moved(&request, *centre.borrow_and_update())
+        } else {
+            request.clone()
+        };
+        let error = refresh(&client, &current).await.err();
         if let Some(message) = &error {
             tracing::debug!(instance = %request.tap.id, %message, "plugin input not available");
         }

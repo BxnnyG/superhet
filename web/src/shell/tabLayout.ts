@@ -5,7 +5,7 @@ export type TabMode = "full" | "compact" | "icons";
 
 /** Approximate pixels of one 12 px semibold label character; icon (16) and padding/gap are fixed. */
 const CHAR_PX = 6.6;
-const ICON_TAB_PX = 34;
+const ICON_TAB_PX = 32;
 const LABEL_EXTRA_PX = 18;
 
 /** Width a tab needs for the given mode (rough: the strip also reacts to real overflow). */

@@ -71,6 +71,20 @@ pub async fn upsert(pool: &PgPool, new: &Record) -> Result<(), Error> {
     Ok(())
 }
 
+/// Change the stored frequency of an instance (a plugin moved its claimed window). Does nothing
+/// for an unknown id, so a late update cannot bring back an instance that was stopped.
+///
+/// # Errors
+/// Fails if the query fails.
+pub async fn set_freq(pool: &PgPool, id: &str, freq_hz: i64) -> Result<bool, Error> {
+    let done = sqlx::query("UPDATE superhet.plugin_instances SET freq_hz = $2 WHERE id = $1")
+        .bind(id)
+        .bind(freq_hz)
+        .execute(pool)
+        .await?;
+    Ok(done.rows_affected() > 0)
+}
+
 /// Forget an instance. Returns whether a row existed.
 ///
 /// # Errors

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DAB plugin events",
+  "description": "Validated against the complete event object (envelope included). Every event carries a human readable summary (the decoder history shows it).",
+  "oneOf": [
+    {
+      "properties": {
+        "type": { "const": "dab.ensemble" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "summary": { "type": "string" },
+            "channel": { "type": "string", "pattern": "^(5|6|7|8|9|10|11|12|13)[A-F]$" },
+            "freq_hz": { "type": "integer" },
+            "label": { "type": "string" },
+            "eid": { "type": "string" },
+            "ecc": { "type": "string" },
+            "services": { "type": "array" },
+            "snr": { "type": "number" },
+            "origin": { "enum": ["scan", "tune"] }
+          },
+          "required": ["summary", "channel", "freq_hz", "eid", "services", "origin"]
+        }
+      },
+      "required": ["type", "data"]
+    },
+    {
+      "properties": {
+        "type": { "const": "dab.dls" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "summary": { "type": "string" },
+            "text": { "type": "string", "minLength": 1 },
+            "sid": { "type": "string" },
+            "service": { "type": "string" }
+          },
+          "required": ["summary", "text", "sid", "service"]
+        }
+      },
+      "required": ["type", "data"]
+    },
+    {
+      "properties": {
+        "type": { "const": "dab.play" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "summary": { "type": "string" },
+            "sid": { "type": "string" },
+            "service": { "type": "string" },
+            "channel": { "type": "string" }
+          },
+          "required": ["summary", "sid", "service", "channel"]
+        }
+      },
+      "required": ["type", "data"]
+    },
+    {
+      "properties": {
+        "type": { "const": "dab.scan" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "summary": { "type": "string" },
+            "state": { "enum": ["started", "finished", "stopped"] },
+            "total": { "type": "integer" },
+            "found": { "type": "integer" }
+          },
+          "required": ["summary", "state", "total", "found"]
+        }
+      },
+      "required": ["type", "data"]
+    },
+    {
+      "properties": {
+        "type": { "const": "dab.error" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "summary": { "type": "string" },
+            "message": { "type": "string" }
+          },
+          "required": ["summary", "message"]
+        }
+      },
+      "required": ["type", "data"]
+    }
+  ]
+}

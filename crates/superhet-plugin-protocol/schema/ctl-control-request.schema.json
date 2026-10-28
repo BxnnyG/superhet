@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`control`: send a JSON message to a framed instance (plugin defined, for example a service\nselection). The plugin receives it as a `control` frame.",
+  "properties": {
+    "id": {
+      "description": "Instance id.",
+      "type": "string"
+    },
+    "message": {
+      "description": "The message (a JSON object, at most 64 KiB serialised)."
+    },
+    "v": {
+      "description": "Contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "id",
+    "message"
+  ],
+  "title": "ControlRequest",
+  "type": "object"
+}

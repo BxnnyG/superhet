@@ -12,6 +12,7 @@ use std::sync::Arc;
 use axum::{Router, routing::get};
 use superhet_pluginhost::ctl::{self, Host, QueueSink};
 use superhet_pluginhost::inputs::BusInputs;
+use superhet_pluginhost::outputs::BusOutputs;
 use superhet_pluginhost::registry::Registry;
 use superhet_pluginhost::store::InstanceStore;
 use superhet_pluginhost::supervisor::{NullSink, Policy, Supervisor};
@@ -66,10 +67,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (supervisor, tasks) = match nats {
         Some(client) => {
             let (sink, events) = QueueSink::new(EVENT_QUEUE);
-            let supervisor = Supervisor::with_inputs(
+            let supervisor = Supervisor::with_io(
                 Policy::default(),
                 Arc::new(sink),
                 Arc::new(BusInputs::new(client.clone())),
+                Arc::new(BusOutputs::new(client.clone())),
             );
             let host = Host {
                 registry: Arc::clone(&registry),
@@ -77,6 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 store,
             };
             let tasks = vec![
+                tokio::spawn(ctl::persist_retunes(supervisor.clone(), host.store.clone())),
                 tokio::spawn(ctl::ensure_events_stream(client.clone())),
                 tokio::spawn({
                     let host = host.clone();

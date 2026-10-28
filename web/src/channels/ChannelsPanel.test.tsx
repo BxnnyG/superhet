@@ -128,13 +128,11 @@ it("highlights the channel the VFO sits on and filters long channel lists", () =
   expect(screen.getByText("No such channel")).toBeInTheDocument();
 });
 
-it("DAB: explains the plugin and the centre change", () => {
+it("DAB: explains that a block starts the DAB plugin", () => {
   const { r, tuneChannel } = setup("DE");
   render(<ChannelsPanel r={r} />);
   fireEvent.click(screen.getByText("DAB / DAB+ Band III").closest("button")!);
-  expect(
-    screen.getByText(/DAB decoding needs the DAB plugin \(coming in P2\)/),
-  ).toBeInTheDocument();
+  expect(screen.getByText(/starts the DAB plugin on it \(DAB tab\)/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: /^DAB 5C,/ }), { altKey: true });
   // Alt never opens a VFO for a DAB block.
   expect(tuneChannel.mock.calls[0]?.[2]).toBe(false);

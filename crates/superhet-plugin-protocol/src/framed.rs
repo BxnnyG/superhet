@@ -14,6 +14,15 @@ pub const MAX_PAYLOAD: usize = 4 * 1024 * 1024;
 /// Bytes before the payload.
 pub const HEADER_LEN: usize = 5;
 
+/// Largest `status` document (bytes); larger ones are dropped by the host.
+pub const MAX_STATUS: usize = 256 * 1024;
+
+/// Largest `media` object (bytes, without the header); larger ones are dropped by the host.
+pub const MAX_MEDIA: usize = 256 * 1024;
+
+/// Most distinct media keys the host keeps per instance.
+pub const MAX_MEDIA_KEYS: usize = 16;
+
 /// What a frame carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -34,6 +43,15 @@ pub enum FrameKind {
     Log = 7,
     /// Either direction: liveness, empty payload.
     Heartbeat = 8,
+    /// Plugin to host: JSON object, the plugin's complete current state (replaces the previous
+    /// one; the host keeps the latest and serves it through the control API `status`).
+    Status = 9,
+    /// Plugin to host: [`MediaHeader`] + bytes of one binary object (a slideshow image); the
+    /// host keeps the latest per key and serves it through the control API `media`.
+    Media = 10,
+    /// Plugin to host: JSON [`TuneRequest`], retune the claimed window (exclusive plugins that
+    /// declare a centre frequency range).
+    Tune = 11,
 }
 
 impl FrameKind {
@@ -49,6 +67,9 @@ impl FrameKind {
             6 => Self::VoiceFrame,
             7 => Self::Log,
             8 => Self::Heartbeat,
+            9 => Self::Status,
+            10 => Self::Media,
+            11 => Self::Tune,
             _ => return None,
         })
     }
@@ -213,6 +234,70 @@ impl SamplesHeader {
     }
 }
 
+/// Payload of a `tune` frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TuneRequest {
+    /// New centre frequency (Hz); must lie inside the manifest's `device.center_hz_min..=max`.
+    pub freq_hz: u64,
+}
+
+/// Header of a `media` payload: `u8 key_len | key | u8 mime_len | mime | bytes`.
+///
+/// The key (`[a-z0-9._-]`, at most 64 characters) names the object (for example `slide.c224`);
+/// the host stores the latest bytes per key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediaHeader {
+    /// Object key.
+    pub key: String,
+    /// MIME type of the bytes (`image/jpeg`).
+    pub mime: String,
+}
+
+impl MediaHeader {
+    /// Whether `key` is acceptable (1..=64 characters of `[a-z0-9._-]`).
+    #[must_use]
+    pub fn valid_key(key: &str) -> bool {
+        (1..=64).contains(&key.len())
+            && key.bytes().all(|b| {
+                b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-')
+            })
+    }
+
+    /// Prepend the header to the object bytes; `None` when key or MIME type is too long.
+    #[must_use]
+    pub fn encode(&self, bytes: &[u8]) -> Option<Vec<u8>> {
+        let key_len = u8::try_from(self.key.len()).ok()?;
+        let mime_len = u8::try_from(self.mime.len()).ok()?;
+        let mut out = Vec::with_capacity(2 + self.key.len() + self.mime.len() + bytes.len());
+        out.push(key_len);
+        out.extend_from_slice(self.key.as_bytes());
+        out.push(mime_len);
+        out.extend_from_slice(self.mime.as_bytes());
+        out.extend_from_slice(bytes);
+        Some(out)
+    }
+
+    /// Split a payload into header and object bytes.
+    ///
+    /// # Errors
+    /// [`FrameError::Truncated`] when the payload is too short or key or MIME type are not UTF-8.
+    pub fn decode(payload: &[u8]) -> Result<(Self, &[u8]), FrameError> {
+        const WHAT: &str = "media";
+        let field = |from: usize| -> Result<(String, usize), FrameError> {
+            let len = usize::from(*payload.get(from).ok_or(FrameError::Truncated(WHAT))?);
+            let text = payload
+                .get(from + 1..from + 1 + len)
+                .and_then(|raw| std::str::from_utf8(raw).ok())
+                .ok_or(FrameError::Truncated(WHAT))?;
+            Ok((text.to_owned(), from + 1 + len))
+        };
+        let (key, next) = field(0)?;
+        let (mime, next) = field(next)?;
+        Ok((Self { key, mime }, &payload[next..]))
+    }
+}
+
 /// Header of a `voice_frame` payload: `u8 codec_len | codec | u64 call_id | u64 ts_ns | bytes`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VoiceFrameHeader {
@@ -324,5 +409,27 @@ mod tests {
         let (got, rest) = VoiceFrameHeader::decode(&payload).expect("decode");
         assert_eq!((got, rest), (voice, &[0xaau8, 0xbb][..]));
         assert!(VoiceFrameHeader::decode(&payload[..8]).is_err());
+    }
+
+    #[test]
+    fn media_header_round_trips() {
+        let head = MediaHeader {
+            key: "slide.c224".into(),
+            mime: "image/jpeg".into(),
+        };
+        let payload = head.encode(&[0xff, 0xd8]).expect("encode");
+        let (got, rest) = MediaHeader::decode(&payload).expect("decode");
+        assert_eq!((got, rest), (head, &[0xffu8, 0xd8][..]));
+        assert!(MediaHeader::decode(&payload[..5]).is_err());
+        assert!(MediaHeader::decode(&[]).is_err());
+        assert!(MediaHeader::valid_key("slide.c224") && !MediaHeader::valid_key("Slide"));
+        assert!(!MediaHeader::valid_key("") && !MediaHeader::valid_key(&"a".repeat(65)));
+    }
+
+    #[test]
+    fn new_kinds_decode() {
+        for kind in [FrameKind::Status, FrameKind::Media, FrameKind::Tune] {
+            assert_eq!(FrameKind::from_u8(kind as u8), Some(kind));
+        }
     }
 }

@@ -9,6 +9,7 @@ export const INSPECTOR_TABS = [
   "bookmarks",
   "channels",
   "decoders",
+  "dab",
   "display",
   "source",
 ] as const;
@@ -21,7 +22,8 @@ export function visibleTabs(perms: {
 }): readonly InspectorTab[] {
   return INSPECTOR_TABS.filter(
     (t) =>
-      (t !== "bookmarks" || perms.canReadBookmarks) && (t !== "decoders" || perms.canSeeDecoders),
+      (t !== "bookmarks" || perms.canReadBookmarks) &&
+      ((t !== "decoders" && t !== "dab") || perms.canSeeDecoders),
   );
 }
 
@@ -30,6 +32,7 @@ export const INSPECTOR_LABEL: Record<InspectorTab, string> = {
   bookmarks: "Bookmarks",
   channels: "Channels",
   decoders: "Decoders",
+  dab: "DAB",
   display: "Display",
   source: "Source",
 };

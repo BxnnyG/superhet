@@ -22,7 +22,7 @@ libc = "0.2"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-superhet-bus.workspace = true
+superhet-bus = { workspace = true, features = ["opus"] }
 superhet-db.workspace = true
 superhet-plugin-protocol.workspace = true
 thiserror.workspace = true

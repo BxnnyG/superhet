@@ -24,7 +24,6 @@ import {
   toasts,
   type BadgeTone,
 } from "../ui";
-import { DAB_PLUGIN_NOTICE } from "./dab";
 import { planFromFile } from "./import";
 import { activeRaster, rasterChannel, rasterCount, rasterName } from "./lookup";
 import {
@@ -364,9 +363,9 @@ function PlanView({
       )}
       {dab && (
         <Alert tone="info">
-          {DAB_PLUGIN_NOTICE}. Selecting a block moves the device centre to the block and widens the
-          sample rate to cover 1.536 MHz
-          {perms.isOperator ? "." : "; only operators and admins can do that."}
+          Selecting a block starts the DAB plugin on it (DAB tab): it takes the whole device and
+          pauses receivers outside the 1.536 MHz block until you stop it
+          {perms.isOperator ? "." : "; only operators and admins can start it."}
         </Alert>
       )}
 

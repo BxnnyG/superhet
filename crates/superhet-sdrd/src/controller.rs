@@ -175,7 +175,32 @@ impl Controller {
                 ));
             }
             held.deadline = Instant::now() + ttl;
-            return Ok(self.publish(&locks, &self.control.state()));
+            // The holder may move its window (a DAB scan walks the blocks): a refresh with
+            // another centre or rate retunes, the tuning from before the claim stays remembered.
+            let now = self.control.state();
+            let wanted_rate = request.sample_rate.unwrap_or(now.sample_rate);
+            if request.center_hz != now.center_hz || wanted_rate != now.sample_rate {
+                let tune = TuneRequest {
+                    center_hz: Some(request.center_hz),
+                    sample_rate: request.sample_rate,
+                    ..TuneRequest::default()
+                };
+                return match self.control.apply(&tune) {
+                    Ok(state) => {
+                        tracing::info!(
+                            claim = %request.id,
+                            center_hz = state.center_hz,
+                            "claimed window moved"
+                        );
+                        Ok(self.publish(&locks, &state))
+                    }
+                    Err(err) => {
+                        tracing::warn!(claim = %request.id, error = %err, "moving the claim failed");
+                        Err(err.into())
+                    }
+                };
+            }
+            return Ok(self.publish(&locks, &now));
         }
         if locks.is_locked() {
             return Err(locks.error("tuning"));
@@ -1031,6 +1056,11 @@ mod tests {
         c.claim_acquire(&claim("i-1", 120_000_000, None), ttl)
             .expect("refreshed");
         assert_eq!(state(&c)["tuning_epoch"], 1);
+        // The holder may move its window; releasing still returns to the tuning from before.
+        c.claim_acquire(&claim("i-1", 125_000_000, None), ttl)
+            .expect("moved");
+        assert_eq!(state(&c)["center_hz"], 125_000_000);
+        assert_eq!(state(&c)["locks"][0]["id"], "i-1");
 
         c.claim_release("i-1");
         let s = state(&c);

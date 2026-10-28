@@ -1,0 +1,43 @@
+# DAB / DAB+ digital radio, received with welle-cli (welle.io, a separate GPL-2.0-or-later
+# process). Exclusive: the plugin takes the whole device (one Band III block, 2.048 MS/s), so
+# VFOs outside the block are paused while it runs. Start it on a block (`freq_hz` of the start
+# request, e.g. 178352000 for 5C); scan, block and service changes go through `control`
+# messages (docs/plugins-dab.md). Config (optional):
+#   service = "D210"      # service id (hex) to play from the start
+
+[plugin]
+id = "org.superhet.decoder.dab"
+name = "DAB / DAB+"
+version = "0.1.0"
+protocol = 1
+license = "AGPL-3.0-only"
+type = "decoder"
+description = "DAB and DAB+ digital radio: ensemble scan, service list, station text, slideshow and audio"
+homepage = "https://github.com/BxnnyG/superhet"
+
+[runtime]
+kind = "process"
+transport = "framed"
+command = ["superhet-plugin-adapter", "dab"]
+heartbeat_timeout_s = 15
+
+[input]
+kind = "iq"
+sample_rate = 2048000
+format = "cu8"
+
+[device]
+exclusive = true
+center_hz_min = 174928000
+center_hz_max = 239200000
+sample_rate = 2048000
+
+[output]
+events_schema = "schema/events.json"
+
+[output.audio]
+sample_rate = 48000
+channels = 2
+
+[install]
+acknowledge = { text = "Runs welle-cli from welle.io (GPL-2.0-or-later) as a separate process. DAB+ audio is HE-AAC, decoded by faad2 (GPL-2.0); HE-AAC is covered by patents in some countries, check your jurisdiction before distributing builds. Receiving DAB broadcasts is legal in Germany. The plugin takes the whole device while it runs: VFOs outside the DAB block are paused. welle-cli opens a local web interface on a random port; the image confines it to 127.0.0.1 (LD_PRELOAD shim), so it is not reachable from the network even with host networking.", url = "https://github.com/AlbrechtL/welle.io" }

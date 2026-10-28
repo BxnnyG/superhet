@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Throwaway stack for the browser smoke tests (web/e2e): superhet-api + superhet-sdrd (file
 # backend with a noise capture) + superhet-worker + superhet-pluginhost on loopback test ports,
-# serving web/dist. The plugin host seeds the first-party plugins (plugins/pocsag, aprs, rtl433;
+# serving web/dist. The plugin host seeds the first-party plugins (plugins/pocsag, aprs, rtl433, dab;
 # their tools are not needed until an instance starts) and gets a private plugin directory;
 # the plugin smoke test installs plugins/example-echo (python3) from its path.
 # Runs in the foreground until it gets a signal (Playwright's webServer does that), then stops
@@ -26,7 +26,7 @@ if [ "$port" = 8073 ]; then
     echo "refusing to use port 8073 (a real instance)" >&2
     exit 1
 fi
-bins="${E2E_BIN_DIR:-target/debug}"
+bins="$(cd "${E2E_BIN_DIR:-target/debug}" && pwd)"
 web="${E2E_WEB_DIR:-web/dist}"
 for f in superhet-api superhet-sdrd superhet-worker superhet-pluginhost superhet-plugin-adapter; do
     [ -x "$bins/$f" ] || { echo "missing $bins/$f (cargo build -p $f)" >&2; exit 1; }
@@ -45,7 +45,13 @@ trap cleanup EXIT INT TERM
 
 # The bundled plugins as the image has them: copies of the first-party plugin directories.
 mkdir -p "$work/bundled" "$work/plugins"
-for name in pocsag aprs rtl433; do cp -r "plugins/$name" "$work/bundled/$name"; done
+for name in pocsag aprs rtl433 dab; do cp -r "plugins/$name" "$work/bundled/$name"; done
+
+# The DAB plugin runs the real adapter against a stand-in welle-cli (python3): blocks 5C and 6A
+# carry the "DR Deutschland" ensemble, a tone plays as audio, the slide is a tiny PNG.
+mkdir -p "$work/bin"
+# E2E_WELLE=/path/to/welle-cli (or a wrapper) swaps in a real decoder for manual checks.
+ln -s "${E2E_WELLE:-$(pwd)/crates/superhet-plugin-adapters/tests/dab/fake-welle-cli}" "$work/bin/welle-cli"
 
 # A stand-in for multimon-ng so the digital-mode scenario needs no decoder installed: it prints a
 # page per second (the inverted decoder, -i, prints different text) until its stdin is closed.
@@ -72,14 +78,18 @@ case "$bins" in /*) bin_abs="$bins" ;; *) bin_abs="$PWD/$bins" ;; esac
 export PATH="$bin_abs:$work/tools:$PATH"
 
 # 1 s of random cu8 samples at 2.048 MS/s: valid IQ, plays in a loop.
-head -c 4096000 /dev/urandom >"$work/noise.cu8"
+if [ -n "${E2E_IQ_FILE:-}" ]; then
+    ln -s "$E2E_IQ_FILE" "$work/noise.cu8"
+else
+    head -c 4096000 /dev/urandom >"$work/noise.cu8"
+fi
 
 export SUPERHET_NATS_URL
 export RUST_LOG="${RUST_LOG:-error}"
 
 SUPERHET_LISTEN="127.0.0.1:$((port + 1))" \
     SUPERHET_DEVICE_ID=dev0 \
-    SUPERHET_DEVICE="file:$work/noise.cu8?format=cu8&rate=2048000&freq=100000000&block=4096" \
+    SUPERHET_DEVICE="file:$work/noise.cu8?format=cu8&rate=2048000&freq=${E2E_IQ_FREQ:-100000000}&block=4096" \
     "$bins/superhet-sdrd" &
 pids+=($!)
 
@@ -102,6 +112,7 @@ pids+=($!)
 SUPERHET_LISTEN="127.0.0.1:$((port + 2))" \
     SUPERHET_PLUGIN_DIR="$work/plugins" \
     SUPERHET_BUNDLED_PLUGIN_DIR="$work/bundled" \
+    PATH="$work/bin:$bins:$PATH" \
     "$bins/superhet-pluginhost" &
 pids+=($!)
 

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Payload of a `tune` frame.",
+  "properties": {
+    "freq_hz": {
+      "description": "New centre frequency (Hz); must lie inside the manifest's `device.center_hz_min..=max`.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "freq_hz"
+  ],
+  "title": "TuneRequest",
+  "type": "object"
+}

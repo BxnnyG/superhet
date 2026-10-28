@@ -1,0 +1,244 @@
+{
+ "receiver": {
+  "hardware": {
+   "name": "rtl_tcp_client (server: 127.0.0.1:41233)",
+   "gain": 0.0
+  },
+  "software": {
+   "name": "welle.io",
+   "version": "2.4+ds",
+   "fftwindowplacement": "EarliestPeakWithBinning",
+   "coarsecorrectorenabled": true,
+   "freqsyncmethod": "GetPhaseCorrelationOffset",
+   "lastchannelchange": 1790000000000
+  }
+ },
+ "ensemble": {
+  "label": {
+   "label": "DR Deutschland  ",
+   "shortlabel": "DRDE",
+   "fig2label": "",
+   "fig2rfu": false,
+   "fig2charset": "Undefined"
+  },
+  "id": "0xd210",
+  "ecc": "0xe0"
+ },
+ "services": [
+  {
+   "sid": "0xd210",
+   "programType": 1,
+   "ptystring": "Information",
+   "language": 8,
+   "languagestring": "German",
+   "label": {
+    "label": "Deutschlandfunk ",
+    "shortlabel": "Deutschl",
+    "fig2label": "",
+    "fig2rfu": false,
+    "fig2charset": "Undefined"
+   },
+   "components": [
+    {
+     "componentnr": 0,
+     "primary": true,
+     "caflag": false,
+     "transportmode": "audio",
+     "label": {
+      "label": "                ",
+      "shortlabel": "",
+      "fig2label": "",
+      "fig2rfu": false,
+      "fig2charset": "Undefined"
+     },
+     "subchannel": {
+      "subchid": 0,
+      "bitrate": 72,
+      "cu": 54,
+      "sad": 0,
+      "protection": "EEP 3-A",
+      "language": 0,
+      "languagestring": "unknown"
+     },
+     "scid": null,
+     "ascty": "DAB+",
+     "dscty": null
+    }
+   ],
+   "channels": 2,
+   "samplerate": 48000,
+   "mode": "AAC",
+   "mot": {
+    "time": 1790000100,
+    "lastchange": 1790000000
+   },
+   "dls": {
+    "label": "Nachrichten: Bundestag debattiert",
+    "time": 1790000100,
+    "lastchange": 1790000000
+   },
+   "errorcounters": {
+    "frameerrors": 1,
+    "rserrors": 2,
+    "aacerrors": 0,
+    "time": 1790000100
+   },
+   "xpaderror": {
+    "haserror": false
+   },
+   "url_mp3": "/mp3/0xd210",
+   "audiolevel": {
+    "time": 1790000100,
+    "left": 1200,
+    "right": 1100
+   }
+  },
+  {
+   "sid": "0xd212",
+   "programType": 8,
+   "ptystring": "Culture",
+   "language": 8,
+   "languagestring": "German",
+   "label": {
+    "label": "DKultur         ",
+    "shortlabel": "DKultur",
+    "fig2label": "",
+    "fig2rfu": false,
+    "fig2charset": "Undefined"
+   },
+   "components": [
+    {
+     "componentnr": 1,
+     "primary": true,
+     "caflag": false,
+     "transportmode": "audio",
+     "label": {
+      "label": "                ",
+      "shortlabel": "",
+      "fig2label": "",
+      "fig2rfu": false,
+      "fig2charset": "Undefined"
+     },
+     "subchannel": {
+      "subchid": 1,
+      "bitrate": 128,
+      "cu": 54,
+      "sad": 0,
+      "protection": "UEP 3",
+      "language": 0,
+      "languagestring": "unknown"
+     },
+     "scid": null,
+     "ascty": "DAB",
+     "dscty": null
+    }
+   ],
+   "channels": 0,
+   "samplerate": 0,
+   "mode": "invalid",
+   "mot": {
+    "time": 0,
+    "lastchange": 0
+   },
+   "dls": {
+    "label": "",
+    "time": 0,
+    "lastchange": 0
+   },
+   "errorcounters": {
+    "frameerrors": 0,
+    "rserrors": 0,
+    "aacerrors": 0,
+    "time": 1790000100
+   },
+   "xpaderror": {
+    "haserror": false
+   },
+   "url_mp3": "/mp3/0xd212",
+   "audiolevel": null
+  },
+  {
+   "sid": "0xe0d2ff01",
+   "programType": 0,
+   "ptystring": "None",
+   "language": 8,
+   "languagestring": "German",
+   "label": {
+    "label": "Journaline      ",
+    "shortlabel": "Journali",
+    "fig2label": "",
+    "fig2rfu": false,
+    "fig2charset": "Undefined"
+   },
+   "components": [
+    {
+     "componentnr": 2,
+     "primary": true,
+     "caflag": false,
+     "transportmode": "packetdata",
+     "label": {
+      "label": "                ",
+      "shortlabel": "",
+      "fig2label": "",
+      "fig2rfu": false,
+      "fig2charset": "Undefined"
+     },
+     "subchannel": {
+      "subchid": 2,
+      "bitrate": 0,
+      "cu": 54,
+      "sad": 0,
+      "protection": "EEP 3-A",
+      "language": 0,
+      "languagestring": "unknown"
+     },
+     "scid": 7,
+     "ascty": null,
+     "dscty": null
+    }
+   ],
+   "channels": 0,
+   "samplerate": 0,
+   "mode": "invalid",
+   "mot": {
+    "time": 0,
+    "lastchange": 0
+   },
+   "dls": {
+    "label": "",
+    "time": 0,
+    "lastchange": 0
+   },
+   "errorcounters": {
+    "frameerrors": 0,
+    "rserrors": 0,
+    "aacerrors": 0,
+    "time": 1790000100
+   },
+   "xpaderror": {
+    "haserror": false
+   },
+   "url_mp3": null,
+   "audiolevel": null
+  }
+ ],
+ "utctime": {
+  "year": 2026,
+  "month": 10,
+  "day": 27,
+  "hour": 12,
+  "minutes": 3,
+  "lto": 2.0
+ },
+ "messages": [],
+ "tii": [],
+ "cir_peaks": [],
+ "demodulator": {
+  "fic": {
+   "numcrcerrors": 2
+  },
+  "time_last_fct0_frame": 1790000099000,
+  "snr": 14.5,
+  "frequencycorrection": -310.0
+ }
+}

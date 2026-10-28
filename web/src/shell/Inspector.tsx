@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { AudioControls } from "../audio/AudioControls";
 import { usePermissions } from "../auth/context";
 import { BandPlanPanel } from "../bandplan/BandPlanPanel";
 import { BookmarksPanel } from "../bookmarks/BookmarksPanel";
 import { ChannelsPanel } from "../channels/ChannelsPanel";
+import { DabPanel } from "../dab/DabPanel";
 import { DecodersTab } from "../decoders/DecodersTab";
 import { ProfilesPanel } from "../profiles/ProfilesPanel";
 import { DisplayControls } from "../spectrum/DisplayControls";
@@ -37,6 +38,13 @@ export function Inspector({ r, inspector }: Props) {
   // A tab the role cannot see (guests: bookmarks) falls back to the receiver.
   const tab: InspectorTab = tabs.includes(inspector.tab) ? inspector.tab : "receiver";
   const phoneUp = useMediaQuery(PHONE_QUERY);
+
+  // A DAB block picked in the channel plan opens the DAB tab, which asks for the takeover.
+  const pendingDab = useSyncExternalStore(r.dab.subscribe, r.dab.getSnapshot).pending;
+  const { show } = inspector;
+  useEffect(() => {
+    if (pendingDab !== null) show("dab");
+  }, [pendingDab, show]);
 
   // Docked and hidden: nothing is mounted, the spectrum takes the width.
   if (docked && !open) return null;
@@ -157,6 +165,8 @@ function TabBody({ r, tab, phoneUp }: { r: Receiver; tab: InspectorTab; phoneUp:
           onTune={r.tuneTo}
         />
       );
+    case "dab":
+      return <DabPanel r={r} />;
     case "display":
       return (
         <>

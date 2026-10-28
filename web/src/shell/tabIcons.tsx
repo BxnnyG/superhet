@@ -1,5 +1,13 @@
 import type { ReactNode } from "react";
-import { ActivityIcon, BookmarkIcon, ListIcon, SettingsIcon, SignalIcon, SlidersIcon } from "../ui";
+import {
+  ActivityIcon,
+  BookmarkIcon,
+  GlobeIcon,
+  ListIcon,
+  SettingsIcon,
+  SignalIcon,
+  SlidersIcon,
+} from "../ui";
 import type { InspectorTab } from "./inspector";
 
 /** Icon of each inspector tab (shared by the tab strip and the phone tab bar). */
@@ -13,6 +21,8 @@ export function tabIcon(tab: InspectorTab, size = 16): ReactNode {
       return <ListIcon size={size} />;
     case "decoders":
       return <ActivityIcon size={size} />;
+    case "dab":
+      return <GlobeIcon size={size} />;
     case "display":
       return <SlidersIcon size={size} />;
     case "source":

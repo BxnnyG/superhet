@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""Stand-in for welle-cli in the DAB adapter's integration test (tests/dab_plugin.rs).
+
+Understands the options the adapter passes (-c <block> -F rtl_tcp,<host>:<port> -w <port> -T),
+connects to the adapter's rtl_tcp server like the real tool, and serves the three web endpoints
+the adapter uses: /mux.json (fixtures captured in the shape of welle.io 2.4), /mp3/<sid> (a
+looping MP3 tone) and /slide/<sid> (a PNG). Blocks listed in FAKE_WELLE_BLOCKS carry the
+"DR Deutschland" ensemble once IQ has arrived; every other block looks empty.
+"""
+
+import http.server
+import os
+import socket
+import sys
+import threading
+import time
+
+here = os.path.dirname(os.path.realpath(__file__))
+args = sys.argv[1:]
+block = args[args.index("-c") + 1]
+web_port = int(args[args.index("-w") + 1])
+host, _, port = args[args.index("-F") + 1].split(",", 1)[1].rpartition(":")
+with_ensemble = os.environ.get("FAKE_WELLE_BLOCKS", "5C,6A").split(",")
+log_dir = os.environ.get("FAKE_WELLE_DIR", "")
+
+started = time.time()
+parent = os.getppid()
+
+
+def exit_with_parent():
+    # The test kills the adapter without a process group; do not outlive it.
+    while os.getppid() == parent:
+        time.sleep(0.2)
+    os._exit(0)
+
+
+threading.Thread(target=exit_with_parent, daemon=True).start()
+received = [0]
+
+
+def log(line):
+    if log_dir:
+        with open(os.path.join(log_dir, "welle.log"), "a") as f:
+            f.write(line + "\n")
+
+
+log(f"start {block}")
+
+
+def read_iq():
+    sock = socket.create_connection((host, int(port)))
+    header = b""
+    while len(header) < 12:
+        header += sock.recv(12 - len(header))
+    sock.sendall(bytes([1, 0, 0x0A, 0x9C, 0x40]))  # set frequency, ignored by the server
+    while True:
+        data = sock.recv(65536)
+        if not data:
+            return
+        received[0] += len(data)
+        if log_dir:
+            with open(os.path.join(log_dir, "iq-bytes"), "w") as f:
+                f.write(str(received[0]))
+
+
+threading.Thread(target=read_iq, daemon=True).start()
+
+
+def fixture(name):
+    with open(os.path.join(here, name), "rb") as f:
+        return f.read()
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.0"
+
+    def log_message(self, *args):
+        pass
+
+    def reply(self, body, mime):
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        locked = block in with_ensemble and received[0] > 0 and time.time() - started > 0.8
+        if self.path == "/mux.json":
+            self.reply(fixture("mux-locked.json" if locked else "mux-nosignal.json"), "application/json")
+        elif self.path.startswith("/slide/") and locked:
+            self.reply(b"\x89PNG\r\n\x1a\nfake-slide", "image/png")
+        elif self.path.startswith("/mp3/") and locked:
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/mpeg")
+            self.end_headers()
+            mp3 = fixture("tone-32k.mp3")
+            try:
+                while True:
+                    for i in range(0, len(mp3), 600):
+                        self.wfile.write(mp3[i : i + 600])
+                        self.wfile.flush()
+                        time.sleep(0.01)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+
+class Server(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+
+
+Server(("127.0.0.1", web_port), Handler).serve_forever()
