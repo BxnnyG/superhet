@@ -44,6 +44,20 @@
       ],
       "type": "object"
     },
+    "ConfigSection": {
+      "additionalProperties": false,
+      "description": "Instance configuration (`[config]`).",
+      "properties": {
+        "schema": {
+          "description": "JSON Schema (draft 2020-12) file, relative to the plugin directory, that the instance\nconfiguration must satisfy. The host checks it on `reconfigure` and answers a violation\nwith the offending field instead of restarting the plugin with a config it will refuse.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema"
+      ],
+      "type": "object"
+    },
     "Device": {
       "additionalProperties": false,
       "description": "Device claim (`[device]`).\n\nAn exclusive plugin takes the whole device: the host asks the daemon to retune to the claimed\ncentre and rate, pauses everything that does not fit and restores the previous state on\nrelease (ARCHITECTURE 3.4). Enforcement arrives with the claim command of the daemon; the\nmanifest already declares it so installs show it.",
@@ -233,6 +247,18 @@
           ],
           "default": null,
           "description": "Codec section."
+        },
+        "config": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConfigSection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Instance configuration."
         },
         "device": {
           "$ref": "#/$defs/Device",

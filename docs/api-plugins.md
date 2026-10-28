@@ -70,9 +70,13 @@ and starts again (`409` otherwise).
 (the complete new one, `null` or `{}` for the plugin's defaults) and restart the process with it.
 `200` with the `InstanceInfo`. The instance keeps its id, binding, counters and history; the
 decoder is down for the moment the process needs to restart, and the restart is not counted as a
-crash. A config the plugin refuses shows up as `last_error` (the plugin validates at start);
-reconfigure again to fix it, also from `error` or `backoff`. Other fields than `config` are `400`,
-unknown ids `404`.
+crash. A plugin whose manifest names a `[config] schema` (draft 2020-12) has the new config checked
+against it first: a violation is `400` `invalid` with `error` `invalid configuration: baud.1: 700 is
+not one of [512, 1200, 2400]` and `field` (`baud.1`, a dotted path, absent when the document as a
+whole is wrong; unknown keys are named too); nothing is applied and the instance keeps running with
+the old config. For plugins without a schema, and for rules a schema cannot express, a config the
+plugin refuses shows up as `last_error` (the plugin validates at start); reconfigure again to fix
+it, also from `error` or `backoff`. Other fields than `config` are `400`, unknown ids `404`.
 
 `InstanceInfo` has one more field for plugins with audio output: `audio_vfo`, the pseudo VFO id of the instance's audio stream on the audio WebSocket (`docs/protocol-audio.md`).
 

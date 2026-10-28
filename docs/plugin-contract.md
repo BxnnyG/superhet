@@ -64,6 +64,9 @@ events_schema = "schema/events.json" # JSON Schema (2020-12) for the whole event
 # audio = { sample_rate = 48000, channels = 1 }   # framed only
 # voice_frames = ["tetra-acelp"]                  # framed only
 
+# [config] schema = "schema/config.json"  JSON Schema (2020-12) of the instance config; the host
+#          checks it on `reconfigure` and answers a violation with 400 and the offending field
+
 # [codec]  frames = ["tetra-acelp"], pcm = { sample_rate = 8000, channels = 1 }   (codec plugins)
 # [lookup] keys = ["callsign"], cache_ttl_s = 3600, rate_limit_per_min = 60       (lookup plugins)
 # [ui]     widget = "ui/dist/widget.js"                                           (ui plugins)
@@ -74,7 +77,7 @@ acknowledge = { text = "licence / patent notice", url = "https://..." }
 ```
 
 Rules the host enforces (`Manifest::from_toml`): paths (`command[0]` when it contains `/`,
-`events_schema`, `widget`, build programs) stay inside the plugin directory (no absolute paths, no
+`events_schema`, `config.schema`, `widget`, build programs) stay inside the plugin directory (no absolute paths, no
 `..`); decoders and codecs need `[input]`; `iq` needs a complex format and `discriminator` /
 `audio` a real one; codec and lookup plugins and anything with audio or voice-frame output need the
 framed transport; `[codec]` / `[lookup]` / `[ui]` belong to their type only; ui plugins have no

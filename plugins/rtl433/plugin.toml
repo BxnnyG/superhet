@@ -27,5 +27,8 @@ bandwidth_hz = 250000
 [output]
 events_schema = "schema/events.json"
 
+[config]
+schema = "schema/config.json"
+
 [install]
 acknowledge = { text = "Runs rtl_433 (GPL-2.0-or-later) as a separate process. Neighbours' weather stations, tyre-pressure sensors and similar devices send identifiers that can be linked to a person or vehicle; decoded readings are kept in the decoder history until the retention period ends.", url = "https://github.com/merbanan/rtl_433" }

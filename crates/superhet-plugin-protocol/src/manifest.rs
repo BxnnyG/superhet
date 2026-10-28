@@ -242,6 +242,16 @@ pub struct UiSection {
     pub widget: String,
 }
 
+/// Instance configuration (`[config]`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigSection {
+    /// JSON Schema (draft 2020-12) file, relative to the plugin directory, that the instance
+    /// configuration must satisfy. The host checks it on `reconfigure` and answers a violation
+    /// with the offending field instead of restarting the plugin with a config it will refuse.
+    pub schema: String,
+}
+
 /// Notice the admin has to confirm before the plugin is installed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -283,6 +293,9 @@ pub struct Manifest {
     /// Outputs.
     #[serde(default)]
     pub output: Output,
+    /// Instance configuration.
+    #[serde(default)]
+    pub config: Option<ConfigSection>,
     /// Codec section.
     #[serde(default)]
     pub codec: Option<CodecSection>,
@@ -473,6 +486,14 @@ impl Manifest {
         {
             out.push(format!(
                 "output.events_schema {path:?} must be a relative path inside the plugin directory"
+            ));
+        }
+        if let Some(config) = &self.config
+            && !is_safe_relative(&config.schema)
+        {
+            out.push(format!(
+                "config.schema {:?} must be a relative path inside the plugin directory",
+                config.schema
             ));
         }
         if let Some(audio) = &self.output.audio

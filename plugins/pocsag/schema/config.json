@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "POCSAG / FLEX instance configuration",
+  "type": "object",
+  "properties": {
+    "baud": {
+      "description": "POCSAG baud rates to decode; absent decodes 512, 1200 and 2400.",
+      "type": "array",
+      "items": { "enum": [512, 1200, 2400] }
+    },
+    "flex": { "description": "Decode FLEX as well.", "type": "boolean" },
+    "invert": {
+      "description": "Signal polarity: true inverted, false normal, \"auto\" runs both.",
+      "oneOf": [{ "type": "boolean" }, { "const": "auto" }]
+    },
+    "charset": {
+      "description": "National character set of alphanumeric pages.",
+      "enum": ["US", "FR", "DE", "DK", "SE", "SI"]
+    }
+  },
+  "additionalProperties": false,
+  "if": { "required": ["baud"], "properties": { "baud": { "maxItems": 0 } } },
+  "then": { "properties": { "flex": { "const": true } } }
+}

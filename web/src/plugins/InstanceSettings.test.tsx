@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { ApiError } from "../spectrum/api";
 import { APPLY_DELAY_MS, InstanceSettings } from "./InstanceSettings";
 import { PluginStore } from "./store";
 import { APRS_ID, aprs, fakePluginApi, instance, pocsag } from "./testing";
@@ -61,6 +62,33 @@ it("shows the server's refusal", async () => {
   });
   await settle();
   expect(screen.getByRole("status")).toHaveTextContent("no such instance");
+});
+
+it("shows a refused value next to the setting it belongs to", async () => {
+  const { api } = setup();
+  api.reconfigure.mockRejectedValueOnce(
+    new ApiError(
+      'invalid configuration: charset: "XX" is not one of ["US"]',
+      400,
+      "invalid",
+      undefined,
+      "charset",
+    ),
+  );
+  fireEvent.change(screen.getByRole("combobox", { name: "National characters" }), {
+    target: { value: "DE" },
+  });
+  await settle();
+  expect(screen.getByTestId("setting-error-charset")).toHaveTextContent(
+    '"XX" is not one of ["US"]',
+  );
+  expect(screen.queryByTestId("setting-error-baud")).toBeNull();
+  expect(screen.getByRole("status")).toHaveTextContent("Not applied: invalid configuration");
+  // The next edit clears it.
+  fireEvent.change(screen.getByRole("combobox", { name: "National characters" }), {
+    target: { value: "FR" },
+  });
+  expect(screen.queryByTestId("setting-error-charset")).toBeNull();
 });
 
 it("rejects a bad protocol list on the client", async () => {
