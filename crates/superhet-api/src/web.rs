@@ -22,8 +22,9 @@ pub const DEFAULT_WEB_DIR: &str = "/usr/share/superhet/web";
 
 /// Same-origin only; `connect-src 'self'` covers the same-origin WebSockets. Styles need
 /// `'unsafe-inline'` because React sets `style` attributes; map tiles of the ADS-B view come from
-/// OpenStreetMap (`img-src`, ADR-0017); the AudioWorklet module is a
-/// same-origin file under `/assets/`.
+/// the tile server of `map` (OpenStreetMap unless `SUPERHET_MAP_TILE_URL` says otherwise, which
+/// replaces the origin in `img-src`, ADR-0017); the AudioWorklet module is a same-origin file
+/// under `/assets/`.
 const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
 img-src 'self' data: blob: https://tile.openstreetmap.org; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; \
 base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
@@ -40,25 +41,24 @@ pub fn set_lookup_origin(origin: Option<String>) {
         .unwrap_or_else(PoisonError::into_inner) = origin;
 }
 
-/// The CSP with the lookup origin added to `connect-src`, when there is one.
+/// The CSP with the configured tile origin in `img-src` and the lookup origin added to
+/// `connect-src`, when there is one.
 fn csp_header() -> HeaderValue {
+    let tiles = crate::map::tile_origin();
+    let csp = CSP.replace(crate::map::DEFAULT_TILE_ORIGIN, &tiles);
     let origin = LOOKUP_ORIGIN
         .read()
         .unwrap_or_else(PoisonError::into_inner)
         .clone();
-    origin
-        .and_then(|o| {
-            // The origin comes from a validated https URL; refuse anything that could end the
-            // directive or smuggle another one.
-            if o.contains([';', ',', '\'', '"', ' ']) {
-                return None;
-            }
-            HeaderValue::from_str(
-                &CSP.replace("connect-src 'self';", &format!("connect-src 'self' {o};")),
-            )
-            .ok()
-        })
-        .unwrap_or_else(|| HeaderValue::from_static(CSP))
+    let csp = match origin {
+        // The origin comes from a validated https URL; refuse anything that could end the
+        // directive or smuggle another one.
+        Some(o) if !o.contains([';', ',', '\'', '"', ' ']) => {
+            csp.replace("connect-src 'self';", &format!("connect-src 'self' {o};"))
+        }
+        _ => csp,
+    };
+    HeaderValue::from_str(&csp).unwrap_or_else(|_| HeaderValue::from_static(CSP))
 }
 
 #[derive(Clone)]
@@ -212,5 +212,30 @@ mod tests {
         set_lookup_origin(Some("https://x.example; script-src *".into()));
         assert_eq!(csp_header().to_str().unwrap_or_default(), CSP);
         set_lookup_origin(None);
+        the_csp_img_src_follows_the_configured_tile_server();
+    }
+
+    /// Part of the test above: both change process-wide values that `csp_header` reads.
+    fn the_csp_img_src_follows_the_configured_tile_server() {
+        crate::map::set_for_test(None);
+        let csp = csp_header();
+        assert!(
+            csp.to_str()
+                .unwrap_or_default()
+                .contains("https://tile.openstreetmap.org;")
+        );
+        let custom = crate::map::MapConfig {
+            tile_url: "http://tiles.lan:8080/{z}/{x}/{y}.png".into(),
+            ..Default::default()
+        };
+        crate::map::set_for_test(Some(custom));
+        let csp = csp_header();
+        let csp = csp.to_str().unwrap_or_default();
+        assert!(
+            csp.contains("img-src 'self' data: blob: http://tiles.lan:8080;"),
+            "{csp}"
+        );
+        assert!(!csp.contains("openstreetmap"), "{csp}");
+        crate::map::set_for_test(None);
     }
 }

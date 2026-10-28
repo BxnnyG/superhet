@@ -62,7 +62,22 @@ Tiles come from `https://tile.openstreetmap.org` (the only external origin the p
 images from). The browser of everybody who opens the map contacts OpenStreetMap; keep this in
 mind for a public instance and read
 [OSM's tile usage policy](https://operations.osmfoundation.org/policies/tiles/) before exposing
-the map to many viewers. Without internet access the aircraft are drawn on an empty background.
+the map to many viewers. Without internet access the aircraft are drawn on an empty background;
+when the tile server refuses or cannot be reached, the map says so in a banner instead of leaving
+a grid of broken tiles.
+
+**Tile requests carry a Referer.** The page itself sends no Referer to other sites
+(`Referrer-Policy: same-origin`), but OpenStreetMap blocks tile requests without one (HTTP 403,
+"Access blocked - app is not following the tile usage policy"). The map therefore sets
+`referrerpolicy="strict-origin-when-cross-origin"` on its tile images only: the tile server learns
+the origin (scheme, host, port) of this Superhet, never a path.
+
+**Another tile server.** Set `SUPERHET_MAP_TILE_URL` on `superhet-api` to a `{z}/{x}/{y}` template
+(`http(s)` with a fixed host; `{s}` subdomains are not supported), optionally
+`SUPERHET_MAP_ATTRIBUTION` (plain text) and `SUPERHET_MAP_ATTRIBUTION_URL`. The page CSP
+`img-src` then names that origin instead of OpenStreetMap's. A bad value is logged and the
+OpenStreetMap default stays. The browser reads the source from `GET /api/v1/map-config`
+(everybody who may see decoders).
 
 ### Status document (`GET .../status`, `status`)
 

@@ -204,6 +204,8 @@ pub const RULES: &[Rule] = &[
         GuestDecoder,
     ),
     rule("POST", "/api/v1/plugin-instances/{id}/control", Operator),
+    // Where the ADS-B map loads its tiles from.
+    rule("GET", "/api/v1/map-config", GuestDecoder),
     rule(
         "POST",
         "/api/v1/plugin-instances/{id}/reconfigure",
@@ -413,6 +415,7 @@ mod tests {
             include_str!("profiles.rs"),
             include_str!("bookmarks.rs"),
             include_str!("plugins.rs"),
+            include_str!("map.rs"),
             include_str!("channel_plans.rs"),
             include_str!("admin/mod.rs"),
         ];

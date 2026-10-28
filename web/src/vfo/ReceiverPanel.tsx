@@ -3,6 +3,7 @@ import { usePermissions } from "../auth/context";
 import { NOT_YOUR_VFO, canModifyVfo } from "../auth/permissions";
 import type { AudioController, AudioSnapshot } from "../audio/controller";
 import { DigitalModeControl } from "../digital/DigitalModeControl";
+import { claimBadge, claimHint, type ClaimOwner } from "../plugins/claim";
 import type { PluginStore } from "../plugins/store";
 import { Badge, Button, EmptyState, PauseIcon, TrashIcon, cn } from "../ui";
 import type { Vfo, VfoPatch } from "./api";
@@ -30,6 +31,10 @@ interface Props {
   audioSnap: AudioSnapshot;
   autoSquelch: AutoSquelch;
   locked: boolean;
+  /** The plugin that owns the device while it runs; a paused VFO then says so. */
+  claim?: ClaimOwner | null;
+  /** Device centre, for the claim's tooltip. */
+  centreHz?: number | null;
   /** Also show mode, bandwidth and squelch (phones: the tuning strip only has the frequency). */
   showDemodulator: boolean;
   /** Device sample rate, bounds the custom bandwidth. */
@@ -48,6 +53,8 @@ export function ReceiverPanel({
   audioSnap,
   autoSquelch,
   locked,
+  claim,
+  centreHz,
   showDemodulator,
   sampleRateHz,
   digital,
@@ -78,12 +85,18 @@ export function ReceiverPanel({
           <span className="text-sm font-medium">VFO {vfo.id}</span>
           <Badge tone="accent">{MODE_LABEL[vfo.mode]}</Badge>
           {readOnly && <Badge title={NOT_YOUR_VFO}>read-only</Badge>}
-          {vfo.status === "paused" && (
-            <Badge tone="warn" title={locked ? VFO_PAUSED_HINT : VFO_PAUSED_FREE_HINT}>
-              <PauseIcon size={10} />
-              paused
-            </Badge>
-          )}
+          {vfo.status === "paused" &&
+            (claim != null ? (
+              <Badge tone="warn" title={claimHint(claim, centreHz ?? null, vfo.freqHz)}>
+                <PauseIcon size={10} />
+                {claimBadge(claim)}
+              </Badge>
+            ) : (
+              <Badge tone="warn" title={locked ? VFO_PAUSED_HINT : VFO_PAUSED_FREE_HINT}>
+                <PauseIcon size={10} />
+                paused
+              </Badge>
+            ))}
         </div>
       </Block>
       {showDemodulator && (

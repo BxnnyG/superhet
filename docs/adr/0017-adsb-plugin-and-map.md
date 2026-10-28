@@ -74,8 +74,10 @@ This ADR records how ADS-B uses them and where it differs from DAB (ADR-0016).
    `img-src` (never `script-src` / `connect-src`). Consequence for privacy: a viewer who opens the
    map sends tile requests (their IP address and the tile area) to the OpenStreetMap Foundation;
    the install notice says so. OSM's policy allows light use, not a public high-traffic service;
-   an operator who needs more points a reverse proxy at a tile provider (a configurable tile URL
-   is future work). A deployment without internet access shows aircraft on an empty background.
+   an operator who needs more points `SUPERHET_MAP_TILE_URL` at a tile provider (`img-src` follows
+   it; `docs/plugins-adsb.md`). Tile images send the page origin as Referer
+   (`referrerpolicy="strict-origin-when-cross-origin"`, the page policy stays `same-origin`)
+   because OSM answers requests without a Referer with 403. A deployment without internet access shows aircraft on an empty background.
    Alternatives: MapLibre GL (vector tiles, needs a style and a vector source, heavier), a
    hand-drawn canvas without tiles (no geography).
 9. **Roles.** Starting and stopping are operator actions (`plugin-instances` routes). Status,

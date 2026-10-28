@@ -1,17 +1,25 @@
 // The aircraft map: Leaflet (BSD-2-Clause, exact version pinned in package.json) on OpenStreetMap
-// tiles. Imperative on purpose: Leaflet owns its DOM, React only hands it the current picture.
+// tiles (or the server the admin configured, adsb/mapConfig.ts). Imperative on purpose: Leaflet
+// owns its DOM, React only hands it the current picture.
 // The positions and fading come from `Tracked` (adsb/model.ts); trails are kept here, in the
 // browser, for as long as an aircraft stays on the picture.
 
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Alert } from "../ui";
+import { attributionHtml, tileHost, TileWatch, type MapConfig } from "./mapConfig";
 import { altitudeColor, label, type Tracked } from "./model";
 
-/** OSM's standard tile server; the attribution below is required by its tile usage policy. */
-export const TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-export const TILE_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors';
+/**
+ * Tile requests carry the page's origin as Referer. The page itself sends none cross-origin
+ * (`Referrer-Policy: same-origin`), but OpenStreetMap's tile usage policy blocks requests
+ * without a valid Referer (HTTP 403, "Access blocked"). Scoped to the tile images only.
+ */
+export const TILE_REFERRER_POLICY = "strict-origin-when-cross-origin";
+
+/** Shown instead of the browser's broken-image icon when a tile fails (1x1, transparent). */
+const BLANK_TILE = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 
 /** Positions kept per aircraft for its trail. */
 const TRAIL_POINTS = 40;
@@ -30,6 +38,8 @@ interface Props {
   onSelect: (icao: string | null) => void;
   /** Increment to fit the map to everything on it. */
   fitSignal: number;
+  /** Where the tiles come from. */
+  tiles: MapConfig;
 }
 
 const PLANE =
@@ -49,12 +59,13 @@ function iconFor(a: Tracked, selected: boolean): { key: string; icon: L.DivIcon 
   return { key, icon };
 }
 
-export function AdsbMap({ aircraft, receiver, selected, onSelect, fitSignal }: Props) {
+export function AdsbMap({ aircraft, receiver, selected, onSelect, fitSignal, tiles }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const entries = useRef(new Map<string, Entry>());
   const station = useRef<L.CircleMarker | null>(null);
   const fitted = useRef(false);
+  const [tileProblem, setTileProblem] = useState(false);
   const onSelectRef = useRef(onSelect);
   useEffect(() => {
     onSelectRef.current = onSelect;
@@ -65,7 +76,6 @@ export function AdsbMap({ aircraft, receiver, selected, onSelect, fitSignal }: P
     const el = host.current;
     if (el === null) return;
     const m = L.map(el, { center: [50, 10], zoom: 5, worldCopyJump: true });
-    L.tileLayer(TILE_URL, { maxZoom: 19, attribution: TILE_ATTRIBUTION }).addTo(m);
     m.on("click", () => onSelectRef.current(null));
     map.current = m;
     const current = entries.current;
@@ -77,6 +87,30 @@ export function AdsbMap({ aircraft, receiver, selected, onSelect, fitSignal }: P
       fitted.current = false;
     };
   }, []);
+
+  // The tile layer: a different source replaces it.
+  useEffect(() => {
+    const m = map.current;
+    if (m === null) return;
+    const watch = new TileWatch();
+    const layer = L.tileLayer(tiles.tileUrl, {
+      maxZoom: 19,
+      attribution: attributionHtml(tiles),
+      referrerPolicy: TILE_REFERRER_POLICY,
+      errorTileUrl: BLANK_TILE,
+    });
+    layer.on("tileload", () => {
+      watch.loaded();
+      setTileProblem(false);
+    });
+    layer.on("tileerror", () => {
+      if (watch.failure()) setTileProblem(true);
+    });
+    layer.addTo(m);
+    return () => {
+      layer.remove();
+    };
+  }, [tiles]);
 
   // The station marker.
   useEffect(() => {
@@ -174,12 +208,24 @@ export function AdsbMap({ aircraft, receiver, selected, onSelect, fitSignal }: P
   }, [selected]);
 
   return (
-    <div
-      ref={host}
-      role="application"
-      aria-label="Aircraft map"
-      className="adsb-map size-full bg-surface-1"
-    />
+    <div className="relative size-full">
+      <div
+        ref={host}
+        role="application"
+        aria-label="Aircraft map"
+        className="adsb-map size-full bg-surface-1"
+      />
+      {tileProblem && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-[1000] p-3">
+          <Alert tone="warn" className="pointer-events-auto mx-auto max-w-lg">
+            The map background could not be loaded from {tileHost(tiles.tileUrl)}. The tile server
+            may refuse this server (OpenStreetMap blocks clients that break its tile usage policy)
+            or it is not reachable. Aircraft are still shown. An administrator can set{" "}
+            <code>SUPERHET_MAP_TILE_URL</code> to another tile server.
+          </Alert>
+        </div>
+      )}
+    </div>
   );
 }
 
