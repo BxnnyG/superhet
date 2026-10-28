@@ -29,7 +29,7 @@ use superhet_plugin_protocol::manifest::{
 use superhet_plugin_protocol::{InstanceEnv, PROTOCOL_VERSION, Package};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::{broadcast, mpsc, watch};
+use tokio::sync::{Notify, broadcast, mpsc, watch};
 
 /// Environment variables passed through to plugins; everything else (NATS and database
 /// credentials in particular) is withheld.
@@ -172,10 +172,98 @@ struct Shared {
     events_ok: AtomicU64,
     events_invalid: AtomicU64,
     restarts: AtomicU32,
+    reconfigures: AtomicU32,
+    /// Liveness of the input, written by the feeder task.
+    live: Arc<InputLive>,
+    last_event_ms: AtomicU64,
+    created_ms: u64,
+    /// Wakes the supervising task when the configuration was replaced.
+    reload: Notify,
     tx: broadcast::Sender<InstanceInfo>,
 }
 
+/// What the feeder reports about the input of one instance.
+#[derive(Debug)]
+struct InputLive {
+    bytes: AtomicU64,
+    last_ms: AtomicU64,
+    /// Bits of the smoothed mean square (f64); [`NO_LEVEL`] before the first chunk.
+    mean_square: AtomicU64,
+}
+
+const NO_LEVEL: u64 = u64::MAX;
+
+impl InputLive {
+    fn new() -> Self {
+        Self {
+            bytes: AtomicU64::new(0),
+            last_ms: AtomicU64::new(0),
+            mean_square: AtomicU64::new(NO_LEVEL),
+        }
+    }
+
+    fn record(&self, format: TapFormat, chunk: &[u8]) {
+        self.bytes.fetch_add(chunk.len() as u64, Ordering::Relaxed);
+        self.last_ms.store(unix_ms(), Ordering::Relaxed);
+        let Some(ms) = mean_square(format, chunk) else {
+            return;
+        };
+        let previous = self.mean_square.load(Ordering::Relaxed);
+        let smoothed = if previous == NO_LEVEL {
+            ms
+        } else {
+            0.8f64.mul_add(f64::from_bits(previous), 0.2 * ms)
+        };
+        self.mean_square
+            .store(smoothed.to_bits(), Ordering::Relaxed);
+    }
+
+    fn level_db(&self) -> Option<f32> {
+        let bits = self.mean_square.load(Ordering::Relaxed);
+        if bits == NO_LEVEL {
+            return None;
+        }
+        let ms = f64::from_bits(bits);
+        // Floor at -120 dBFS so silence is a number, not minus infinity.
+        #[allow(clippy::cast_possible_truncation)]
+        Some((10.0 * ms.max(1e-12).log10()) as f32)
+    }
+}
+
+/// Mean square of the samples in `chunk` relative to full scale (1.0 = full scale), looking at
+/// no more than about 2048 samples.
+fn mean_square(format: TapFormat, chunk: &[u8]) -> Option<f64> {
+    let (width, read): (usize, fn(&[u8]) -> f64) = match format {
+        TapFormat::S16le | TapFormat::Cs16 => (2, |b| {
+            let v = f64::from(i16::from_le_bytes([b[0], b[1]])) / 32768.0;
+            v * v
+        }),
+        TapFormat::Cu8 => (1, |b| {
+            let v = (f64::from(b[0]) - 127.5) / 127.5;
+            v * v
+        }),
+        TapFormat::Cf32 | TapFormat::F32le => (4, |b| {
+            let v = f64::from(f32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+            if v.is_finite() { v * v } else { 0.0 }
+        }),
+    };
+    let count = chunk.len() / width;
+    if count == 0 {
+        return None;
+    }
+    let step = (count / 2048).max(1);
+    let (mut sum, mut n) = (0.0, 0u32);
+    let mut i = 0;
+    while i < count {
+        sum += read(&chunk[i * width..]);
+        n += 1;
+        i += step;
+    }
+    Some(sum / f64::from(n))
+}
+
 struct Mutable {
+    config: Value,
     state: InstanceState,
     pid: Option<u32>,
     crashes_in_window: u32,
@@ -200,7 +288,7 @@ impl Shared {
             device: self.spec.device.clone(),
             vfo: self.spec.vfo,
             freq_hz: self.spec.freq_hz,
-            config: self.spec.config.clone(),
+            config: m.config.clone(),
             exclusive: self.package.manifest.is_exclusive(),
             state: m.state,
             pid: m.pid,
@@ -215,6 +303,12 @@ impl Shared {
             input_dropped: self.input_dropped.load(Ordering::Relaxed),
             input_error: m.input_error.clone(),
             updated_unix_ms: m.updated_unix_ms,
+            input_bytes: self.live.bytes.load(Ordering::Relaxed),
+            input_level_db: self.live.level_db(),
+            last_input_unix_ms: Some(self.live.last_ms.load(Ordering::Relaxed)).filter(|t| *t > 0),
+            last_event_unix_ms: Some(self.last_event_ms.load(Ordering::Relaxed)).filter(|t| *t > 0),
+            created_unix_ms: self.created_ms,
+            reconfigures: self.reconfigures.load(Ordering::Relaxed),
         }
     }
 
@@ -331,6 +425,7 @@ impl Supervisor {
                 other.shared.id
             )));
         }
+        let config = spec.config.clone();
         let shared = Arc::new(Shared {
             id: id.clone(),
             package,
@@ -338,6 +433,7 @@ impl Supervisor {
             input,
             input_dropped: Arc::new(AtomicU64::new(0)),
             info: Mutex::new(Mutable {
+                config,
                 state: InstanceState::Starting,
                 pid: None,
                 crashes_in_window: 0,
@@ -349,6 +445,11 @@ impl Supervisor {
             events_ok: AtomicU64::new(0),
             events_invalid: AtomicU64::new(0),
             restarts: AtomicU32::new(0),
+            reconfigures: AtomicU32::new(0),
+            live: Arc::new(InputLive::new()),
+            last_event_ms: AtomicU64::new(0),
+            created_ms: unix_ms(),
+            reload: Notify::new(),
             tx: self.inner.tx.clone(),
         });
         let info = shared.snapshot();
@@ -436,6 +537,41 @@ impl Supervisor {
         let info = fresh.shared.snapshot();
         *entry = fresh;
         Ok(info)
+    }
+
+    /// Replace the configuration of an instance and restart its process with it. The instance
+    /// keeps its id, binding and counters; a running process is stopped like on `stop` (stdin
+    /// closed, killed after the grace period) and started again, an instance in backoff or
+    /// `error` starts at once with a clean crash history.
+    ///
+    /// # Errors
+    /// [`StartError::NotFound`] for unknown ids, [`StartError::Invalid`] when `config` is
+    /// neither `null` nor an object.
+    pub fn reconfigure(&self, id: &str, config: Value) -> Result<InstanceInfo, StartError> {
+        if !(config.is_null() || config.is_object()) {
+            return Err(StartError::Invalid("config must be an object".into()));
+        }
+        let mut instances = self.instances();
+        let entry = instances.get_mut(id).ok_or(StartError::NotFound)?;
+        let shared = Arc::clone(&entry.shared);
+        let was_error = shared.snapshot().state == InstanceState::Error;
+        shared.reconfigures.fetch_add(1, Ordering::Relaxed);
+        shared.update(|m| {
+            m.config = config;
+            if was_error {
+                m.state = InstanceState::Starting;
+                m.crashes_in_window = 0;
+                m.retry_in = None;
+            }
+        });
+        if was_error {
+            let fresh = self.spawn_task(shared);
+            let info = fresh.shared.snapshot();
+            *entry = fresh;
+            return Ok(info);
+        }
+        shared.reload.notify_one();
+        Ok(shared.snapshot())
     }
 
     /// Stop every instance (host shutdown).
@@ -587,6 +723,15 @@ async fn run_instance(
             Err(err) => Outcome::Crashed(format!("spawn failed: {err}")),
         };
         let reason = match outcome {
+            Outcome::Reload => {
+                // A new configuration is not a crash: start again at once, history cleared.
+                crashes.clear();
+                shared.update(|m| {
+                    m.crashes_in_window = 0;
+                    m.last_error = None;
+                });
+                continue;
+            }
             Outcome::Stopped => {
                 shared.update(|m| {
                     m.state = InstanceState::Stopped;
@@ -634,6 +779,13 @@ async fn run_instance(
         });
         tokio::select! {
             () = tokio::time::sleep(delay) => {}
+            () = shared.reload.notified() => {
+                crashes.clear();
+                shared.update(|m| {
+                    m.crashes_in_window = 0;
+                    m.last_error = None;
+                });
+            }
             _ = stop.changed() => {
                 shared.update(|m| {
                     m.state = InstanceState::Stopped;
@@ -648,6 +800,8 @@ async fn run_instance(
 
 enum Outcome {
     Stopped,
+    /// Stopped to start again with a new configuration.
+    Reload,
     Crashed(String),
 }
 
@@ -656,6 +810,7 @@ fn spawn(shared: &Shared) -> std::io::Result<Child> {
     let (program, args) = package
         .command()
         .ok_or_else(|| std::io::Error::other("manifest has no runtime.command"))?;
+    let config = shared.lock().config.clone();
     let env = InstanceEnv {
         plugin_id: &package.manifest.plugin.id,
         instance_id: &shared.id,
@@ -663,7 +818,7 @@ fn spawn(shared: &Shared) -> std::io::Result<Child> {
         device: shared.spec.device.as_deref(),
         vfo: shared.spec.vfo,
         freq_hz: shared.spec.freq_hz,
-        config: &shared.spec.config,
+        config: &config,
     };
     let mut command = Command::new(program);
     command
@@ -723,8 +878,14 @@ impl Stdin {
 }
 
 /// Write the attachment's chunks to the plugin until either side ends.
-async fn feed_stdin(mut stdin: ChildStdin, mut attachment: Attachment) {
+async fn feed_stdin(
+    mut stdin: ChildStdin,
+    mut attachment: Attachment,
+    live: Arc<InputLive>,
+    format: TapFormat,
+) {
     while let Some(chunk) = attachment.chunks.recv().await {
+        live.record(format, &chunk);
         if stdin.write_all(&chunk).await.is_err() {
             break;
         }
@@ -750,6 +911,7 @@ fn open_stdin(stdin: Option<ChildStdin>, inputs: &Arc<dyn Inputs>, shared: &Arc<
     let Some(attachment) = inputs.attach(request, health) else {
         return Stdin::Idle(Some(pipe));
     };
+    let format = request.tap.format;
     let shared = Arc::clone(shared);
     Stdin::Feeding(tokio::spawn(async move {
         let watcher = {
@@ -761,7 +923,7 @@ fn open_stdin(stdin: Option<ChildStdin>, inputs: &Arc<dyn Inputs>, shared: &Arc<
                 }
             })
         };
-        feed_stdin(pipe, attachment).await;
+        feed_stdin(pipe, attachment, Arc::clone(&shared.live), format).await;
         watcher.abort();
     }))
 }
@@ -823,6 +985,15 @@ async fn run_process(
                 }
                 break Outcome::Stopped;
             }
+            () = shared.reload.notified() => {
+                if let Some(stdin) = stdin.take() {
+                    stdin.close().await;
+                }
+                if tokio::time::timeout(policy.stop_grace, child.wait()).await.is_err() {
+                    let _ = child.kill().await;
+                }
+                break Outcome::Reload;
+            }
             _ = watchdog.tick(), if timeout.is_some() => {
                 let quiet = started.elapsed().saturating_sub(Duration::from_millis(activity.load(Ordering::Relaxed)));
                 if let Some(limit) = timeout && quiet > limit {
@@ -872,6 +1043,7 @@ async fn read_events(
             Ok(Line::Heartbeat) => {}
             Ok(Line::Event(event)) => {
                 shared.events_ok.fetch_add(1, Ordering::Relaxed);
+                shared.last_event_ms.store(unix_ms(), Ordering::Relaxed);
                 sink.emit(HostEvent {
                     v: PROTOCOL_VERSION,
                     plugin_id: shared.package.manifest.plugin.id.clone(),
@@ -998,5 +1170,28 @@ mod tests {
     fn default_policy_is_five_crashes_in_five_minutes() {
         let policy = Policy::default();
         assert_eq!((policy.max_crashes, policy.window.as_secs()), (5, 300));
+    }
+
+    #[test]
+    fn input_level_follows_the_signal() {
+        let live = InputLive::new();
+        assert_eq!(live.level_db(), None);
+        // Full-scale square wave: 0 dBFS.
+        let loud: Vec<u8> = (0..1000)
+            .flat_map(|i| {
+                if i % 2 == 0 { i16::MAX } else { i16::MIN }
+                    .to_le_bytes()
+                    .to_vec()
+            })
+            .collect();
+        live.record(TapFormat::S16le, &loud);
+        assert!(live.level_db().is_some_and(|db| db > -0.1));
+        assert_eq!(live.bytes.load(Ordering::Relaxed), 2000);
+        // Silence in cu8 is a mid-scale value (about -48 dBFS); the level decays towards it.
+        let quiet = vec![128u8; 4000];
+        for _ in 0..80 {
+            live.record(TapFormat::Cu8, &quiet);
+        }
+        assert!(live.level_db().is_some_and(|db| db < -40.0));
     }
 }

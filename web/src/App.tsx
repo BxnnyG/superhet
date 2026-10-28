@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { BookmarkEditorHost } from "./bookmarks/BookmarkEditor";
 import { PaletteHost } from "./palette/PaletteHost";
 import { EDIT_FREQUENCY_EVENT, emitAppEvent } from "./shell/appEvents";
+import { DigitalDock } from "./digital/DigitalDock";
 import { Inspector } from "./shell/Inspector";
 import { useInspector } from "./shell/inspector";
 import { MobileTabBar } from "./shell/MobileTabBar";
@@ -99,6 +100,12 @@ export function App({ device = "dev0" }: Props) {
               />
             </div>
           </div>
+          <DigitalDock
+            plugins={r.plugins}
+            device={r.device}
+            vfos={r.vfoSnap.vfos}
+            selectedId={r.selected?.id ?? null}
+          />
         </main>
         <Inspector r={r} inspector={inspector} />
       </div>

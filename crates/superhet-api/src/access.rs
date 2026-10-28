@@ -195,6 +195,11 @@ pub const RULES: &[Rule] = &[
     rule("GET", "/api/v1/plugin-instances/{id}", Operator),
     rule("POST", "/api/v1/plugin-instances/{id}/stop", Operator),
     rule("POST", "/api/v1/plugin-instances/{id}/restart", Operator),
+    rule(
+        "POST",
+        "/api/v1/plugin-instances/{id}/reconfigure",
+        Operator,
+    ),
     // Profiles.
     rule("GET", "/api/v1/profiles", Operator),
     rule("POST", "/api/v1/profiles", Operator),

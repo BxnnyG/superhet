@@ -5,7 +5,10 @@
 use std::process::ExitCode;
 
 use serde_json::Value;
-use superhet_plugin_adapters::{aprs, pager, rtl433, run::run};
+use superhet_plugin_adapters::{
+    aprs, pager, rtl433,
+    run::{run, run_many},
+};
 
 fn config() -> Result<Value, String> {
     match std::env::var("SUPERHET_CONFIG") {
@@ -21,7 +24,11 @@ fn start(mode: &str) -> Result<ExitCode, String> {
     match mode {
         "pocsag" => {
             let config = pager::PagerConfig::from_json(&config)?;
-            Ok(run("multimon-ng", &config.args(), pager::parse_line))
+            Ok(run_many(
+                "multimon-ng",
+                &config.arg_sets(),
+                pager::parse_line,
+            ))
         }
         "aprs" => {
             aprs::check_config(&config)?;

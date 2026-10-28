@@ -1,6 +1,6 @@
 # POCSAG (512/1200/2400 baud) and FLEX pagers, decoded by multimon-ng (a separate GPL-2.0 process).
 # Bind it to an NFM VFO on the paging channel (12.5 kHz); config keys (all optional):
-#   baud = [512, 1200, 2400], flex = true, invert = false, charset = "US|FR|DE|DK|SE|SI"
+#   baud = [512, 1200, 2400], flex = true, invert = "auto" | true | false, charset = "US|FR|DE|DK|SE|SI"
 
 [plugin]
 id = "org.superhet.decoder.pocsag"

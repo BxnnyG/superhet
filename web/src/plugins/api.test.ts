@@ -52,6 +52,15 @@ describe("parsing", () => {
       inputDropped: 0,
     });
     expect(parseInstance(instanceRaw({ state: "weird" })).state).toBe("error");
+    // Liveness counters; hosts that do not send them read as zero / unknown.
+    expect(parseInstance(instanceRaw())).toMatchObject({
+      inputBytes: 441_000,
+      inputLevelDb: -32.5,
+      lastEventMs: 1_700_000_000_000,
+      reconfigures: 0,
+    });
+    const old = parseInstance({ ...instanceRaw(), input_bytes: undefined, input_level_db: null });
+    expect(old).toMatchObject({ inputBytes: 0, inputLevelDb: null });
     expect(parseInstance(instanceRaw({ vfo: null, device: null })).vfo).toBeNull();
     expect(() => parseInstance({})).toThrow(ApiError);
   });
@@ -105,6 +114,17 @@ describe("client", () => {
     expect(sent(f, 1)).toMatchObject({ url: "/api/v1/plugin-instances/i-1/stop", method: "POST" });
     await api.restart("i-1");
     expect(sent(f, 2).url).toBe("/api/v1/plugin-instances/i-1/restart");
+  });
+
+  it("reconfigures an instance with the complete new config", async () => {
+    const { api, f } = client(reply(200, { instance: instanceRaw({ config: { invert: true } }) }));
+    const updated = await api.reconfigure("i-1", { invert: true });
+    expect(updated.config).toEqual({ invert: true });
+    expect(sent(f)).toMatchObject({
+      url: "/api/v1/plugin-instances/i-1/reconfigure",
+      method: "POST",
+      body: { config: { invert: true } },
+    });
   });
 
   it("surfaces the server's message and code", async () => {
