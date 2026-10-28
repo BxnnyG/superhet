@@ -113,7 +113,8 @@ every VFO change and every retune (status follows the tuning). VFOs live in the 
 and in this document, and survive a daemon restart through the restore snapshot (above).
 
 `window` is the usable window (85 % of the sample rate around the centre, ARCHITECTURE 3); the
-lower edge can be negative for very low centres. `locks` lists the lock holders (empty = tuning
+lower edge can be negative for very low centres. `claim` (only while a plugin holds the device exclusively) names the instance and the tuning to
+return to (`id`, `previous_center_hz`, `previous_sample_rate`); `locks` lists the lock holders (empty = tuning
 is free), see "Tuning lock".
 
 `gain` is `null` for devices without gain control (file replay); `gains_db` lists the selectable

@@ -308,10 +308,24 @@ struct StateWire<'a> {
     gains_db: &'a [f32],
     vfos: Vec<VfoWire<'a>>,
     locks: &'a [Holder],
+    /// The exclusive claim and the tuning to go back to; a restarted daemon restores it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    claim: Option<ClaimWire<'a>>,
     window: WindowWire,
     overload: OverloadWire,
     /// IQ blocks dropped since start because a stage lagged (device to DSP, DSP to VFO).
     dropped_blocks: u64,
+}
+
+/// The exclusive claim in the state document: who holds it and what to restore on release.
+#[derive(Serialize)]
+pub struct ClaimWire<'a> {
+    /// Plugin instance holding the claim.
+    pub id: &'a str,
+    /// Centre frequency from before the claim (Hz).
+    pub previous_center_hz: u64,
+    /// Sample rate from before the claim (Hz).
+    pub previous_sample_rate: u32,
 }
 
 /// ADC overload as seen over the last few seconds.
@@ -336,6 +350,7 @@ pub fn state_json(
     state: &DeviceState,
     vfos: &[Vfo],
     locks: &[Holder],
+    claim: Option<ClaimWire<'_>>,
     overload: (f64, bool),
     dropped_blocks: u64,
 ) -> String {
@@ -366,6 +381,7 @@ pub fn state_json(
         gains_db: &state.gains_db,
         vfos: vfos.iter().map(|v| v.wire(tuning)).collect(),
         locks,
+        claim,
         overload: OverloadWire {
             active: overload.1,
             clipped_percent: overload.0,
@@ -582,6 +598,7 @@ mod tests {
             &state,
             &[],
             &[Holder::user_since(7)],
+            None,
             (7.3, true),
             5,
         );
@@ -614,7 +631,8 @@ mod tests {
             ..state
         };
         let value: serde_json::Value =
-            serde_json::from_str(&state_json("f", &file, &[], &[], (0.0, false), 0)).expect("json");
+            serde_json::from_str(&state_json("f", &file, &[], &[], None, (0.0, false), 0))
+                .expect("json");
         assert!(value.get("tuner").is_none());
         assert!(value["gain"].is_null());
 
