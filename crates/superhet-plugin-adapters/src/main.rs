@@ -1,4 +1,4 @@
-//! `superhet-plugin-adapter <pocsag|aprs|rtl433|dab>`: runs the external decoder for one of the
+//! `superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb>`: runs the external decoder for one of the
 //! first-party plugins (see the library docs). Samples arrive on stdin, events leave on stdout,
 //! the instance configuration is read from `SUPERHET_CONFIG`.
 
@@ -6,7 +6,7 @@ use std::process::ExitCode;
 
 use serde_json::Value;
 use superhet_plugin_adapters::{
-    aprs, dab, pager, rtl433,
+    adsb, aprs, dab, pager, rtl433,
     run::{run, run_many},
 };
 
@@ -55,15 +55,20 @@ fn start(mode: &str) -> Result<ExitCode, String> {
                 .and_then(|v| v.parse::<u64>().ok());
             Ok(dab::run("welle-cli", &config, &socket, freq))
         }
+        "adsb" => {
+            let socket = std::env::var("SUPERHET_SOCKET")
+                .map_err(|_| "SUPERHET_SOCKET is not set (framed plugin)".to_owned())?;
+            Ok(adsb::run("readsb", &config, &socket))
+        }
         other => Err(format!(
-            "unknown mode {other:?} (pocsag, aprs, rtl433, dab)"
+            "unknown mode {other:?} (pocsag, aprs, rtl433, dab, adsb)"
         )),
     }
 }
 
 fn main() -> ExitCode {
     let Some(mode) = std::env::args().nth(1) else {
-        eprintln!("usage: superhet-plugin-adapter <pocsag|aprs|rtl433|dab>");
+        eprintln!("usage: superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb>");
         return ExitCode::from(2);
     };
     match start(&mode) {

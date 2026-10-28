@@ -1,0 +1,39 @@
+# ADS-B aircraft tracking on 1090 MHz, decoded by readsb (wiedehopf's dump1090 fork, a separate
+# GPL-3.0-or-later process). Exclusive: the plugin takes the whole device at 1090 MHz and 2.4 MS/s
+# (the only rate readsb decodes), so VFOs outside that window are paused while it runs. Start it
+# with no frequency (the claim fixes 1090 MHz). Config (all optional):
+#   lat = 51.0, lon = 7.0   # receiver position: helps readsb decode positions and marks the
+#                           # station on the map (visible to everybody who sees decoders)
+#   event_interval_s = 60   # shortest time between two history events of one aircraft (5..86400)
+
+[plugin]
+id = "org.superhet.decoder.adsb"
+name = "ADS-B aircraft"
+version = "0.1.0"
+protocol = 1
+license = "AGPL-3.0-only"
+type = "decoder"
+description = "ADS-B / Mode S aircraft on 1090 MHz: live map and table, positions, callsigns, altitude, speed"
+homepage = "https://github.com/BxnnyG/superhet"
+
+[runtime]
+kind = "process"
+transport = "framed"
+command = ["superhet-plugin-adapter", "adsb"]
+heartbeat_timeout_s = 15
+
+[input]
+kind = "iq"
+sample_rate = 2400000
+format = "cu8"
+
+[device]
+exclusive = true
+center_hz = 1090000000
+sample_rate = 2400000
+
+[output]
+events_schema = "schema/events.json"
+
+[install]
+acknowledge = { text = "Runs readsb (GPL-3.0-or-later) as a separate process. The plugin takes the whole device while it runs: VFOs outside 1090 MHz (2.4 MS/s) are paused and nobody can retune. Receiving ADS-B is legal in most countries (Germany included), but aircraft identities and positions are broadcast data of third parties: decoded aircraft are kept in the decoder history until the retention period ends, and the live map is visible to everybody who may see decoders. The map loads tiles from tile.openstreetmap.org (the viewer's browser contacts OpenStreetMap). Reception needs an antenna for 1090 MHz; a bandpass filter and LNA help a lot.", url = "https://github.com/wiedehopf/readsb" }

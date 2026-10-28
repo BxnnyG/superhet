@@ -12,5 +12,9 @@ First-party plugins live here. The contract (manifest, transports, supervision, 
 - `dab/` – DAB / DAB+ (welle-cli behind `superhet-plugin-adapter dab`): the first exclusive, framed-transport
   plugin with audio, status and slideshow output (`docs/plugins-dab.md`, ADR-0016).
 
+- `adsb/` – ADS-B aircraft on 1090 MHz (readsb behind `superhet-plugin-adapter adsb`): exclusive,
+  framed transport, live picture as the status document, rationed events (`docs/plugins-adsb.md`,
+  ADR-0017).
+
 Install a plugin through the admin API (`POST /api/v1/plugins`, `docs/api-plugins.md`) or the host's `install` command; the host copies it to
 `$SUPERHET_PLUGIN_DIR/<id>/<version>` (default `/data/plugins`).

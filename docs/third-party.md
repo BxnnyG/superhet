@@ -13,6 +13,8 @@ this repository. The only code the project forbids shipping is the ETSI TETRA co
 | direwolf | 1.6 | GPL-2.0-or-later | plugin `org.superhet.decoder.aprs` | https://github.com/wb2osz/direwolf |
 | rtl-433 | 22.11 | GPL-2.0-or-later | plugin `org.superhet.decoder.rtl433` | https://github.com/merbanan/rtl_433 |
 | welle.io (only `/usr/bin/welle-cli`) | 2.4+ds-2 | GPL-2.0-or-later | plugin `org.superhet.decoder.dab` | https://github.com/AlbrechtL/welle.io |
+| readsb (wiedehopf; built in the Dockerfile, not a Debian package) | 3.16.20 | GPL-3.0-or-later | plugin `org.superhet.decoder.adsb` | https://github.com/wiedehopf/readsb |
+| libzstd1 | - | BSD-3-Clause / GPL-2.0 (dual) | readsb (dynamic library) | `apt-cache show libzstd1` |
 | libfaad2 (HE-AAC decoder of welle-cli) | 2.10 | GPL-2.0-or-later | welle-cli | https://github.com/knik0/faad2 |
 | libfftw3-single3, libmp3lame0, libmpg123-0, libasound2, libairspy0, libsoapysdr0.8, libusb-1.0-0 | - | GPL-2.0+ / LGPL-2+ / MIT / BSL / Boost (each per its copyright file) | welle-cli (dynamic libraries) | `apt-cache show <package>` |
 | librtlsdr0, libopus0 | - | GPL-2.0-or-later, BSD-3-Clause | sdrd (dynamic libraries) | `docs/licenses.md` |
@@ -24,6 +26,10 @@ GPL obligations for redistributing the image are met by this and by the licence 
 `/usr/share/doc/<package>/copyright` inside the image.
 
 **DAB / welle-cli.** The Debian package `welle.io` also installs the Qt GUI (about 320 MB). The Dockerfile installs it in a build stage and copies only `welle-cli` and the package's copyright file into the runtime image; the libraries welle-cli needs come from their own Debian packages (about 7 MB in total). The binary is not modified or rebuilt; its source is `apt-get source welle.io`. The plugin decodes welle-cli's MP3 stream with the Rust crate `symphonia` (MPL-2.0, `crates/superhet-plugin-adapters`, linked into `superhet-plugin-adapter`). **Patents:** DAB+ audio is HE-AAC. Some AAC profiles are still covered by patents in some jurisdictions (the AAC-LC patents are expiring, SBR/PS are younger). faad2 is a GPL-licensed decoder without a patent licence; whoever redistributes the image or builds a binary for a jurisdiction where this matters should check; the plugin's install notice says so. MP2 (classic DAB) and MP3 (the hand-over format) are patent-free by now.
+
+**ADS-B / readsb.** Debian bookworm has no readsb package. The Dockerfile compiles it in a build stage from the upstream commit of tag v3.16.20 (`READSB_COMMIT`), without ncurses and without SDR libraries (`make readsb DISABLE_INTERACTIVE=yes`), strips it and copies only `/usr/bin/readsb` and the upstream `COPYING` (as `/usr/share/doc/readsb/copyright`) into the runtime image. It is not modified; its source is the pinned upstream commit of https://github.com/wiedehopf/readsb. It runs as a separate process, reads IQ on stdin and opens no network port (ADR-0017).
+
+**Leaflet (web UI).** The ADS-B map uses Leaflet 1.9.4 (BSD-2-Clause, https://leafletjs.com) from npm, bundled into the web build, version pinned in `web/package.json`. Map tiles are loaded by the viewer's browser from OpenStreetMap (`https://tile.openstreetmap.org`, data (c) OpenStreetMap contributors, ODbL; tile usage policy https://operations.osmfoundation.org/policies/tiles/); the attribution is shown on the map.
 
 Size: the three packages and their dependencies add about 27 MiB of installed files to the
 runtime image (measured on `debian:bookworm-slim` with librtlsdr0 and libopus0 present), i.e. the

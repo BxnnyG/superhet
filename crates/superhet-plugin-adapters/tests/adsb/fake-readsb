@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""Stand-in for readsb in the ADS-B adapter's integration test (tests/adsb_plugin.rs).
+
+Understands the options the adapter passes (--write-json <dir>, --lat/--lon, ...), counts the
+IQ bytes arriving on stdin, and writes aircraft.json (the files next to this script, in the
+format of readsb 3.16) into the directory like the real tool does: first aircraft-1.json, then
+aircraft-2.json once IQ has arrived (or after two ticks without waiting for IQ when
+FAKE_READSB_NEEDS_IQ=0: the browser test's file device cannot run at 2.4 MS/s). The arguments and
+the byte count go to <dir>/fake-readsb.log. FAKE_READSB_EXIT_AFTER_MS makes it die with status 3
+after that long.
+"""
+
+import json
+import os
+import sys
+import threading
+import time
+
+here = os.path.dirname(os.path.realpath(__file__))
+args = sys.argv[1:]
+out_dir = args[args.index("--write-json") + 1]
+exit_after = os.environ.get("FAKE_READSB_EXIT_AFTER_MS")
+needs_iq = os.environ.get("FAKE_READSB_NEEDS_IQ", "1") != "0"
+received = 0
+
+
+def drain_stdin():
+    global received
+    while True:
+        chunk = os.read(0, 65536)
+        if not chunk:
+            # The adapter closed stdin: like readsb at the end of its input.
+            os._exit(0)
+        received += len(chunk)
+
+
+threading.Thread(target=drain_stdin, daemon=True).start()
+started = time.time()
+step = 0
+while True:
+    if exit_after and (time.time() - started) * 1000 >= int(exit_after):
+        sys.exit(3)
+    name = "aircraft-2.json" if (received > 0 or not needs_iq) and step >= 2 else "aircraft-1.json"
+    with open(os.path.join(here, name)) as src:
+        text = src.read()
+    tmp = os.path.join(out_dir, "aircraft.json.tmp")
+    with open(tmp, "w") as dst:
+        dst.write(text)
+    os.rename(tmp, os.path.join(out_dir, "aircraft.json"))
+    with open(os.path.join(out_dir, "fake-readsb.log"), "w") as log:
+        json.dump({"args": args, "received": received}, log)
+    step += 1
+    time.sleep(0.2)

@@ -15,7 +15,9 @@ External components run as **separate processes** (plugins) or are **dynamically
 | multimon-ng | POCSAG/FLEX plugin | GPL-2.0 | runtime image (Debian package, separate process, `docs/third-party.md`) | – |
 | direwolf | APRS plugin | GPL-2.0 | runtime image (Debian package, separate process, `docs/third-party.md`) | – |
 | rtl_433 | ISM plugin | GPL-2.0 | runtime image (Debian package, separate process, `docs/third-party.md`) | – |
-| readsb (wiedehopf) | ADS-B plugin | GPL-3.0 (+ BSD parts) | plugin image | – |
+| readsb (wiedehopf) | ADS-B plugin | GPL-3.0 (+ BSD parts) | runtime image (built from a pinned upstream commit in the Dockerfile, separate process, `docs/third-party.md`) | – |
+| Leaflet | ADS-B map (web UI) | BSD-2-Clause | npm, bundled into the web build | – |
+| OpenStreetMap tiles | ADS-B map | ODbL (data), tile usage policy | loaded by the viewer's browser, attribution on the map | – |
 | AIS-catcher | AIS plugin | GPL-3.0 | plugin image | – |
 | acarsdec (f00b4r0 fork) | ACARS plugin | GPL-2.0 | plugin image | original TLeconte repo archived |
 | dumpvdl2 | VDL2 plugin | GPL-3.0 | plugin image | – |

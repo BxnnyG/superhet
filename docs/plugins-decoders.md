@@ -11,6 +11,7 @@ the host feeds, `docs/plugin-contract.md`) and turns what the tool prints into c
 | `org.superhet.decoder.pocsag` | multimon-ng | `discriminator`, `s16le` 22 050 Hz (bind to an NFM VFO, 12.5 kHz) | `pocsag.message`, `flex.message` |
 | `org.superhet.decoder.aprs` | direwolf | `discriminator`, `s16le` 22 050 Hz (NFM VFO) | `aprs.packet` |
 | `org.superhet.decoder.rtl433` | rtl_433 | `iq`, `cu8` 250 kHz (VFO bandwidth about 250 kHz) | `rtl433.reading` |
+| `org.superhet.decoder.adsb` | readsb | exclusive, `iq` `cu8` 2.4 MS/s at 1090 MHz, framed transport, live map | `adsb.aircraft`, `adsb.error` (own page: `docs/plugins-adsb.md`) |
 | `org.superhet.decoder.dab` | welle-cli | exclusive, `iq` `cu8` 2.048 MS/s, framed transport, audio out | `dab.ensemble`, `dab.dls`, `dab.play`, `dab.scan`, `dab.error` (own page: `docs/plugins-dab.md`) |
 
 All events land in the decoder history (`source` = plugin id, `kind` = event type, `value` = the

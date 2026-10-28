@@ -102,6 +102,10 @@ server's message.
 
 The tab "DAB" (operators, admins; everybody who sees the decoder history, read-only) belongs to the bundled DAB plugin. Idle: block picker and **Start DAB...**, which opens a takeover confirmation (the plugin takes the whole device, other receivers are paused, nobody can retune until it is stopped). Running: state and signal badges (SNR), the ensemble on the block, a block picker with **Tune** and **Scan all blocks**, the ensembles found (live scan results plus the history of `dab.ensemble` events, click to tune), the service list with a play button per service (operators), "Now playing" with the station text (DLS) and the slideshow image, **Enable audio** (browsers need a click) and a Listen switch for the DAB stream. A scan shows its progress with **Stop scan**. Clicking a DAB block in the channel plan opens this tab with the confirmation (or tunes the running instance). The panel follows the instance named by the plugin's claim on the device, so listeners find it without listing instances.
 
+## ADS-B tab (`docs/plugins-adsb.md`)
+
+The tab "ADS-B" (same visibility as the DAB tab) belongs to the bundled ADS-B plugin. Idle: **Start ADS-B...** opens the takeover confirmation with an optional receiver position (kept in the browser for the next start). Running: aircraft, aircraft with a position and messages per second, and **Open map and table**, which opens a full-window overlay (`web/src/adsb/`): a Leaflet map on OpenStreetMap tiles next to a sortable, filterable table, aircraft fading out after 60 s without a message. The overlay opens by itself after a start and closes with its button or Esc. The inspector column is 352 px wide (it had 320 px before the eighth tab).
+
 ## Events
 
 The log shows plugin events next to the built-in detectors (`source` = plugin id, `kind` = event
@@ -125,8 +129,8 @@ event types, otherwise the built-in kinds. The CSV export applies the same filte
 ## Not done
 
 - No live push of instance state: the UI polls every 3 s (1.5 s while an output panel is open).
-- No DAB / ADS-B entry in the Digital select yet (those plugins do not exist); the table in
-  `web/src/digital/modes.ts` is where they go.
+- No DAB / ADS-B entry in the Digital select (both are exclusive and have tabs of their own); the
+  table in `web/src/digital/modes.ts` is where a non-exclusive digital mode goes.
 - The Digital select is part of the tuning strip and therefore not on phones (the strip's
   demodulator controls are hidden there); phones start decoders from the Decoders tab.
 - The manifest should carry a config schema so the form can be generated; until then
