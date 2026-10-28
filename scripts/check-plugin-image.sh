@@ -52,4 +52,16 @@ else
     echo "FAIL welle-cli web interface listens on: ${listening:-nothing}"
     fail=1
 fi
+# ADS-B: the plugin wraps readsb (compiled in the Dockerfile). Feed it the same way the adapter
+# does (IQ on stdin, aircraft.json in a directory) with a synthetic frame and look for the
+# aircraft. Needs python3 on the host.
+adsb="$(python3 -I scripts/gen-adsb-iq.py 2 | docker run --rm -i --entrypoint sh "$image" -c \
+    'd=$(mktemp -d); (cat; sleep 3) | readsb --device-type ifile --ifile - --iformat UC8 --devel=ifile_no_synthetic --quiet --write-json "$d" >/dev/null 2>&1; cat "$d/aircraft.json"' |
+    jq -r '.aircraft[] | select(.hex == "4840d6") | .flight' 2>/dev/null || true)"
+if [ "$adsb" = "KLM1023 " ]; then
+    echo "ok   readsb decodes a synthetic ADS-B frame"
+else
+    echo "FAIL readsb did not decode the synthetic ADS-B frame (got: ${adsb:-nothing})"
+    fail=1
+fi
 exit "$fail"

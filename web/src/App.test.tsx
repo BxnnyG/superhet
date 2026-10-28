@@ -31,6 +31,7 @@ it("the inspector tabs reach every former sidebar section", () => {
     "Channels",
     "Decoders",
     "DAB",
+    "ADS-B",
     "Display",
     "Source",
   ]);

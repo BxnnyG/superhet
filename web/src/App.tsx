@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
+import { AdsbView } from "./adsb/AdsbView";
 import { BookmarkEditorHost } from "./bookmarks/BookmarkEditor";
 import { PaletteHost } from "./palette/PaletteHost";
 import { EDIT_FREQUENCY_EVENT, emitAppEvent } from "./shell/appEvents";
@@ -36,6 +37,8 @@ export function App({ device = "dev0" }: Props) {
   const openPalette = useCallback(() => setPaletteOpen(true), []);
   const closePalette = useCallback(() => setPaletteOpen(false), []);
   const togglePalette = useCallback(() => setPaletteOpen((o) => !o), []);
+
+  const adsbOpen = useSyncExternalStore(r.adsb.subscribe, r.adsb.getSnapshot).viewOpen;
 
   const shortcutCtx: ShortcutContext = {
     vfoCtl: r.vfoCtl,
@@ -111,6 +114,7 @@ export function App({ device = "dev0" }: Props) {
       </div>
       <MobileTabBar inspector={inspector} />
       <StatusBar audio={r.audio} metrics={r.metrics} />
+      {adsbOpen && <AdsbView r={r} />}
       <BookmarkEditorHost store={r.bookmarks} />
       {paletteOpen && (
         <PaletteHost r={r} inspector={inspector} shortcutCtx={shortcutCtx} onClose={closePalette} />

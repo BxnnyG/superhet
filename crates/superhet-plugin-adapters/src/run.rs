@@ -56,20 +56,24 @@ pub fn run(program: &str, args: &[String], mut map: impl FnMut(&str) -> Option<V
     }
     match child.wait() {
         Ok(status) if status.success() => ExitCode::SUCCESS,
-        Ok(status) => {
-            eprintln!("{program} ended with {status}");
-            ExitCode::from(
-                status
-                    .code()
-                    .and_then(|c| u8::try_from(c).ok())
-                    .unwrap_or(1),
-            )
-        }
+        Ok(status) => exit_code_of(status, program),
         Err(err) => {
             eprintln!("waiting for {program}: {err}");
             ExitCode::FAILURE
         }
     }
+}
+
+/// The adapter's exit code for a tool that ended with `status` (its own code, else 1).
+#[must_use]
+pub fn exit_code_of(status: std::process::ExitStatus, program: &str) -> ExitCode {
+    eprintln!("{program} ended with {status}");
+    ExitCode::from(
+        status
+            .code()
+            .and_then(|c| u8::try_from(c).ok())
+            .unwrap_or(1),
+    )
 }
 
 /// Like [`run`], with several instances of the tool on the same input (each argument list starts

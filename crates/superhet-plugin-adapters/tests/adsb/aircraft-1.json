@@ -1,0 +1,9 @@
+{ "now" : 1792000000.123, "messages" : 4821,
+  "aircraft" : [
+    {"hex":"3c6444","type":"adsb_icao","flight":"DLH123  ","alt_baro":35000,"alt_geom":35525,"gs":451.3,"track":123.46,"baro_rate":-64,"squawk":"1000","category":"A3","lat":51.123449,"lon":6.98765,"nic":8,"seen_pos":0.4,"messages":812,"seen":0.2,"rssi":-12.34},
+    {"hex":"4CA7B2","type":"adsb_icao","messages":14,"seen":3.1,"rssi":-21.4},
+    {"hex":"406a3d","type":"adsb_icao","flight":"EZY45K  ","alt_baro":"ground","gs":12.0,"track":270.0,"lat":50.86569,"lon":7.14221,"seen_pos":1.0,"messages":233,"seen":0.5,"rssi":-8.0},
+    {"hex":"~a0b1c2","type":"tisb_other","alt_baro":4200,"lat":51.5,"seen_pos":2.0,"messages":3,"seen":2.0,"rssi":-30.1},
+    {"hex":"zzzzzz","messages":1,"seen":1.0}
+  ]
+}

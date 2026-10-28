@@ -12,8 +12,9 @@ describe("chooseTabMode", () => {
     expect(chooseTabMode(900, LABELS, 0)).toBe("full");
   });
 
-  it("the desktop inspector column (about 300 px) shows the selected label only", () => {
-    expect(chooseTabMode(300, LABELS, 0)).toBe("compact");
+  it("the desktop inspector column (about 350 px) shows the selected label only", () => {
+    // Every tab, the longest labels (Bookmarks, Decoders) selected included.
+    for (let i = 0; i < LABELS.length; i++) expect(chooseTabMode(350, LABELS, i)).toBe("compact");
   });
 
   it("narrow sheets fall back to icons", () => {
@@ -27,8 +28,8 @@ describe("chooseTabMode", () => {
 
   it("a longer selected label needs more room than a short one", () => {
     // Bookmarks (9 chars) is wider than Source (6): a width that suits Source may not suit it.
-    const w = 290;
-    expect(chooseTabMode(w, LABELS, 6)).toBe("compact");
+    const w = 320;
+    expect(chooseTabMode(w, LABELS, 7)).toBe("compact");
     expect(chooseTabMode(w, LABELS, 1)).toBe("icons");
   });
 });
@@ -67,7 +68,7 @@ describe("TabStrip", () => {
   }
 
   it("collapses unselected tabs to icons with a tooltip when narrow, names stay accessible", () => {
-    width(300);
+    width(350);
     strip("decoders");
     const list = screen.getByRole("tablist", { name: "Inspector" });
     expect(list).toHaveAttribute("data-mode", "compact");

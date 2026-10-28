@@ -33,15 +33,35 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends welle.io \
     && rm -rf /var/lib/apt/lists/*
 
-# ---- Stage 4: runtime ----
+# ---- Stage 4: readsb built from source ----
+# The ADS-B plugin wraps readsb (wiedehopf's dump1090 fork, GPL-3.0-or-later; ADR-0017). Debian
+# bookworm does not package it, so it is compiled here from a pinned upstream commit (tag
+# v3.16.20) and only the binary and its licence reach the runtime stage. Nothing is vendored into
+# the repository. No SDR libraries: the plugin feeds IQ on stdin (`--device-type ifile`).
+FROM debian:bookworm-slim AS readsb
+ARG READSB_COMMIT=dadfa3307a1951b7ef687cfe3fd66cdb708a4f6f
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential git ca-certificates \
+        libzstd-dev zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src/readsb
+RUN git init -q . \
+    && git fetch -q --depth 1 https://github.com/wiedehopf/readsb "$READSB_COMMIT" \
+    && git checkout -q FETCH_HEAD \
+    && make -j"$(nproc)" readsb DISABLE_INTERACTIVE=yes OPTIMIZE="-O2" \
+    && strip readsb \
+    && ./readsb --version
+
+# ---- Stage 5: runtime ----
 FROM debian:bookworm-slim
 # multimon-ng, direwolf and rtl-433 are the external decoders of the first-party plugins
 # (plugins/): separate GPL-2.0 processes started by the plugin host through
 # superhet-plugin-adapter; about 27 MiB (docs/third-party.md). welle-cli (DAB plugin) needs the
-# libraries on the second line: about 7 MiB together with the binary copied below.
+# libraries on the second line: about 7 MiB together with the binary copied below; readsb (ADS-B
+# plugin) needs zstd.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends librtlsdr0 libopus0 multimon-ng direwolf rtl-433 \
-        libfaad2 libfftw3-single3 libmp3lame0 libmpg123-0 libasound2 libairspy0 libsoapysdr0.8 libusb-1.0-0 \
+        libfaad2 libfftw3-single3 libmp3lame0 libmpg123-0 libasound2 libairspy0 libsoapysdr0.8 libusb-1.0-0 libzstd1 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home --home-dir /home/superhet superhet \
     && mkdir -p /data/plugins \
@@ -50,6 +70,10 @@ RUN apt-get update \
 # welle-cli as built by Debian, with its licence text (GPL-2.0-or-later; source: apt-get source welle.io).
 COPY --from=welle /usr/bin/welle-cli /usr/bin/welle-cli
 COPY --from=welle /usr/share/doc/welle.io/copyright /usr/share/doc/welle.io/copyright
+
+# readsb as compiled above, with its licence text (GPL-3.0-or-later).
+COPY --from=readsb /src/readsb/readsb /usr/bin/readsb
+COPY --from=readsb /src/readsb/COPYING /usr/share/doc/readsb/copyright
 
 COPY --from=rust /usr/local/lib/libsuperhet-loopback-bind.so /usr/local/lib/superhet/libsuperhet-loopback-bind.so
 
@@ -62,6 +86,7 @@ COPY plugins/pocsag /usr/share/superhet/plugins/pocsag
 COPY plugins/aprs /usr/share/superhet/plugins/aprs
 COPY plugins/rtl433 /usr/share/superhet/plugins/rtl433
 COPY plugins/dab /usr/share/superhet/plugins/dab
+COPY plugins/adsb /usr/share/superhet/plugins/adsb
 # The API does not serve the frontend yet; the build output is shipped for later use.
 COPY --from=web /src/web/dist /usr/share/superhet/web
 

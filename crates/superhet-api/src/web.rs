@@ -21,10 +21,11 @@ use tower_http::services::{ServeDir, ServeFile};
 pub const DEFAULT_WEB_DIR: &str = "/usr/share/superhet/web";
 
 /// Same-origin only; `connect-src 'self'` covers the same-origin WebSockets. Styles need
-/// `'unsafe-inline'` because React sets `style` attributes; the AudioWorklet module is a
+/// `'unsafe-inline'` because React sets `style` attributes; map tiles of the ADS-B view come from
+/// OpenStreetMap (`img-src`, ADR-0017); the AudioWorklet module is a
 /// same-origin file under `/assets/`.
 const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
-img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; \
+img-src 'self' data: blob: https://tile.openstreetmap.org; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; \
 base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
 
 /// The one extra origin the page may fetch from: the public-address lookup service, while the

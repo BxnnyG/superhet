@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ADS-B plugin events",
+  "description": "Validated against the complete event object (envelope included). Every event carries a human readable summary (the decoder history shows it). Fields of an aircraft that were not received are absent.",
+  "oneOf": [
+    {
+      "properties": {
+        "type": { "const": "adsb.aircraft" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "summary": { "type": "string" },
+            "icao": { "type": "string", "pattern": "^~?[0-9a-f]{6}$" },
+            "callsign": { "type": "string", "minLength": 1, "maxLength": 8 },
+            "alt_ft": { "type": "integer" },
+            "on_ground": { "const": true },
+            "speed_kt": { "type": "number", "minimum": 0 },
+            "track_deg": { "type": "number", "minimum": 0, "maximum": 360 },
+            "vrate_fpm": { "type": "integer" },
+            "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+            "lon": { "type": "number", "minimum": -180, "maximum": 180 },
+            "rssi": { "type": "number" },
+            "squawk": { "type": "string" },
+            "category": { "type": "string" }
+          },
+          "required": ["summary", "icao"],
+          "dependentRequired": { "lat": ["lon"], "lon": ["lat"] }
+        }
+      },
+      "required": ["type", "data"]
+    },
+    {
+      "properties": {
+        "type": { "const": "adsb.error" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "summary": { "type": "string" },
+            "message": { "type": "string" }
+          },
+          "required": ["summary", "message"]
+        }
+      },
+      "required": ["type", "data"]
+    }
+  ]
+}
