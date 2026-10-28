@@ -86,6 +86,9 @@ fn unix_ms() -> u64 {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct LockSet {
     holders: Vec<Holder>,
+    /// Centre and rate from before the exclusive claim, published so a restarted daemon can
+    /// keep restoring them.
+    claim_previous: Option<(u64, u32)>,
 }
 
 impl LockSet {
@@ -100,6 +103,18 @@ impl LockSet {
         }
         self.holders.push(holder);
         true
+    }
+
+    /// Remember the tuning from before the exclusive claim (`None` once it is released).
+    pub fn set_claim_previous(&mut self, previous: Option<(u64, u32)>) {
+        self.claim_previous = previous;
+    }
+
+    /// The exclusive claim holder and the tuning from before it.
+    #[must_use]
+    pub fn claim(&self) -> Option<(&str, (u64, u32))> {
+        let holder = self.holders.iter().find(|h| h.kind == HolderKind::Claim)?;
+        Some((&holder.id, self.claim_previous?))
     }
 
     /// Remove a holder. Returns whether it was present.

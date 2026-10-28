@@ -93,7 +93,7 @@ temperature; compare runs on the same machine only.
 Prometheus text format (0.0.4). Only CPU-independent counters and gauges are exposed; host CPU
 and memory belong to node-exporter or cAdvisor.
 
-**Where.** `superhet-sdrd` (port 8074) and `superhet-worker` (8076) serve `/metrics` next to
+**Where.** `superhet-sdrd` (port 8074), `superhet-pluginhost` (8075) and `superhet-worker` (8076) serve `/metrics` next to
 `/healthz`. Those ports are not published by the compose files, so they are reachable only from
 inside the compose network (put Prometheus on it, or `docker compose exec`). They carry no
 authentication, like `/healthz`. `superhet-api` does **not** serve `/metrics` on 8073 (the
@@ -107,7 +107,7 @@ Example scrape config for a Prometheus container on the compose network:
     scrape_configs:
       - job_name: superhet
         static_configs:
-          - targets: ["superhet-sdrd:8074", "superhet-worker:8076", "superhet-api:8077"]
+          - targets: ["superhet-sdrd:8074", "superhet-pluginhost:8075", "superhet-worker:8076", "superhet-api:8077"]
 
 **Metrics.**
 
@@ -125,13 +125,22 @@ Example scrape config for a Prometheus container on the compose network:
 | `superhet_api_ws_clients{endpoint}` | gauge | connected WebSocket clients: `spectrum`, `audio`, `state`, `events` |
 | `superhet_api_spectrum_frames_missed_total` | counter | spectrum frames slow clients missed |
 | `superhet_api_audio_frames_dropped_total` | counter | audio frames dropped for slow clients |
+| `superhet_pluginhost_instances{state}` | gauge | plugin instances by state: `starting`, `running`, `backoff`, `error`, `stopped` |
+| `superhet_pluginhost_claim_held{instance,device}` | gauge | per exclusive instance: 1 while it is running and its device claim is served, 0 otherwise (e.g. device taken) |
+| `superhet_pluginhost_last_event_age_seconds{instance,plugin}` | gauge | seconds since the instance's last valid event (absent until the first one) |
+| `superhet_pluginhost_crashes_total` | counter | plugin processes that ended unexpectedly |
+| `superhet_pluginhost_restarts_total` | counter | automatic starts after a crash |
+| `superhet_pluginhost_tap_frames_total` / `_tap_bytes_total` | counter | sample chunks and bytes delivered to plugins from the daemons |
+| `superhet_pluginhost_tap_dropped_frames_total` | counter | chunks dropped because a plugin read its input too slowly |
 | `superhet_worker_decoder_events_inserted_total{kind}` | counter | decoder history events stored |
 | `superhet_worker_decoder_event_insert_errors_total` | counter | decoder events that could not be stored |
 | `superhet_worker_decoder_events_pruned_total` | counter | decoder events removed by the retention job |
 
 Useful alerts: `rate(superhet_sdrd_dropped_blocks_total[5m]) > 0` (the receiver cannot keep up),
 `superhet_sdrd_adc_overload == 1` for several minutes (lower the gain),
-`rate(superhet_worker_decoder_event_insert_errors_total[5m]) > 0` (database problem).
+`rate(superhet_worker_decoder_event_insert_errors_total[5m]) > 0` (database problem),
+`rate(superhet_pluginhost_crashes_total[10m]) > 0` or `superhet_pluginhost_instances{state="error"} > 0` (a plugin keeps failing),
+`superhet_pluginhost_claim_held == 0` for a running exclusive plugin (it lost its device).
 Counters reset when the process restarts. The same dropped-block total is part of the device
 state document (`dropped_blocks`) and shows up in the UI (Source settings, and a "Dropping" chip
 on the centre pill for a minute after it grew).

@@ -230,6 +230,7 @@ impl InputLive {
 
     fn record(&self, format: TapFormat, chunk: &[u8]) {
         self.bytes.fetch_add(chunk.len() as u64, Ordering::Relaxed);
+        crate::metrics::input_chunk(chunk.len());
         self.last_ms.store(unix_ms(), Ordering::Relaxed);
         let Some(ms) = mean_square(format, chunk) else {
             return;
@@ -909,6 +910,7 @@ async fn run_instance(
         };
         let now = Instant::now();
         crashes.push_back(now);
+        crate::metrics::crashed();
         while crashes
             .front()
             .is_some_and(|t| now.duration_since(*t) > policy.window)
@@ -961,6 +963,7 @@ async fn run_instance(
             }
         }
         shared.restarts.fetch_add(1, Ordering::Relaxed);
+        crate::metrics::restarted();
     }
 }
 

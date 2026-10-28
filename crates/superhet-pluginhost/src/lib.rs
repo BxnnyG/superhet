@@ -5,6 +5,7 @@
 pub mod ctl;
 mod framed_session;
 pub mod inputs;
+pub mod metrics;
 pub mod outputs;
 pub mod registry;
 pub mod store;

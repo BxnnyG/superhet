@@ -125,3 +125,89 @@ async fn bus_inputs_refresh_the_tap_and_move_the_claim() {
     drop(attachment);
     responder.abort();
 }
+
+/// A daemon that acknowledges every control request until the returned task is aborted.
+fn daemon(client: &async_nats::Client, device: &str) -> tokio::task::JoinHandle<()> {
+    let client = client.clone();
+    let device = device.to_owned();
+    tokio::spawn(async move {
+        let mut all = client
+            .subscribe(format!("sh.v1.dev.{device}.ctl.>"))
+            .await
+            .expect("sub");
+        while let Some(message) = all.next().await {
+            if let Some(reply) = message.reply {
+                let _ = client
+                    .publish(reply, json!({"v": 1, "ok": true}).to_string().into())
+                    .await;
+            }
+        }
+    })
+}
+
+#[tokio::test]
+async fn a_claim_is_acquired_again_after_the_daemon_restarted() {
+    let Some(client) = connect().await else {
+        eprintln!("SUPERHET_TEST_NATS_URL not set, skipping");
+        return;
+    };
+    let device = format!("restart{}", std::process::id());
+    let mut claims = client
+        .subscribe(format!("sh.v1.dev.{device}.ctl.claim.acquire"))
+        .await
+        .expect("sub");
+    let first_daemon = daemon(&client, &device);
+    client.flush().await.expect("flush");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let request = InputRequest {
+        device: device.clone(),
+        tap: tap("i-dab", TapKind::Window, Some(227_360_000)),
+        claim: Some(ClaimAcquire {
+            v: VERSION,
+            id: "i-dab".into(),
+            center_hz: 227_360_000,
+            sample_rate: Some(2_048_000),
+        }),
+    };
+    let status = tokio::sync::watch::channel(None).0;
+    let mut watcher = status.subscribe();
+    let attachment = BusInputs::new(client.clone())
+        .attach(
+            &request,
+            InputHealth {
+                dropped: Arc::new(AtomicU64::new(0)),
+                status,
+            },
+        )
+        .expect("attach");
+    let acquire = tokio::time::timeout(Duration::from_secs(10), claims.next())
+        .await
+        .expect("first claim")
+        .expect("message");
+    let first_body = acquire.payload.to_vec();
+
+    // The daemon goes away: the host notices but keeps the plugin running.
+    first_daemon.abort();
+    let _ = first_daemon.await;
+    tokio::time::timeout(Duration::from_secs(10), watcher.wait_for(Option::is_some))
+        .await
+        .expect("the host reports the missing daemon")
+        .expect("status");
+
+    // A restarted daemon knows nothing; the next lease refresh claims the device again with
+    // the same parameters and the input is healthy once more.
+    let second_daemon = daemon(&client, &device);
+    client.flush().await.expect("flush");
+    let again = tokio::time::timeout(Duration::from_secs(12), claims.next())
+        .await
+        .expect("the claim is acquired again after the restart")
+        .expect("message");
+    assert_eq!(again.payload.to_vec(), first_body, "same claim parameters");
+    tokio::time::timeout(Duration::from_secs(5), watcher.wait_for(Option::is_none))
+        .await
+        .expect("the input recovers")
+        .expect("status");
+    drop(attachment);
+    second_daemon.abort();
+}

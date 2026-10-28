@@ -123,8 +123,12 @@ Mechanics, per process start of an instance:
   adds a lock holder `{kind:"claim", id:<instance>}` (so nothing retunes; VFOs outside the new
   window are paused by the usual rules), and goes back to the remembered tuning on `claim.release`
   or lease expiry. One claim per device; a user lock or another claim answers `locked` /
-  `conflict`. Limit: the state snapshot a restarting daemon restores is written while the claim is
-  held, so a daemon restart during a claim keeps the claimed tuning.
+  `conflict`. The state document carries `claim: {id, previous_center_hz, previous_sample_rate}`
+  while a claim is held. A restarting daemon restores it from the snapshot (claimed tuning, claim
+  lock, remembered previous tuning, a fresh 15 s lease); the host's next refresh (within 4 s) is
+  an idempotent re-acquire of the same instance, so releasing it later still returns to the tuning
+  from before the claim. If the host does not come back, the lease expires and the old tuning is
+  restored.
 - **Backpressure** never stalls the receiver or the bus: the daemon drops chunks when its publisher
   queue is full or the bus is down (`superhet_sdrd_dropped_frames_total{stream="tap"}` on
   `/metrics`), the host drops chunks when the plugin reads `stdin` too slowly (`input_dropped` in

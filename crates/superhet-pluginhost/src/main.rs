@@ -1,4 +1,5 @@
-//! Superhet plugin host (supervises out-of-process plugins). Port 8075 by default (health only).
+//! Superhet plugin host (supervises out-of-process plugins). Port 8075 by default (`/healthz`,
+//! `/metrics`).
 //!
 //! Plugins live in `SUPERHET_PLUGIN_DIR` (default `/data/plugins`). The control API is served on
 //! the bus (`sh.v1.plugin.ctl.<cmd>`, `docs/plugin-contract.md`); plugins shipped with the image
@@ -9,6 +10,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use axum::extract::State;
 use axum::{Router, routing::get};
 use superhet_pluginhost::ctl::{self, Host, QueueSink};
 use superhet_pluginhost::inputs::BusInputs;
@@ -27,8 +29,23 @@ const DEFAULT_BUNDLED_DIR: &str = "/usr/share/superhet/plugins";
 /// Events buffered between the supervisor and the bus publisher.
 const EVENT_QUEUE: usize = 4096;
 
-fn app() -> Router {
-    Router::new().route("/healthz", get(healthz))
+fn app(supervisor: Supervisor) -> Router {
+    Router::new()
+        .route("/healthz", get(healthz))
+        .route("/metrics", get(metrics_text))
+        .with_state(supervisor)
+}
+
+/// Prometheus text exposition. This port is internal (not published by the compose files) and
+/// carries no authentication.
+async fn metrics_text(State(supervisor): State<Supervisor>) -> impl axum::response::IntoResponse {
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            superhet_bus::metrics::CONTENT_TYPE,
+        )],
+        superhet_pluginhost::metrics::render_now(&supervisor.list()),
+    )
 }
 
 async fn healthz() -> &'static str {
@@ -111,7 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = listen.parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "superhet-pluginhost listening");
-    axum::serve(listener, app())
+    axum::serve(listener, app(supervisor.clone()))
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     supervisor.shutdown().await;
@@ -150,7 +167,7 @@ mod tests {
 
     #[tokio::test]
     async fn healthz_returns_ok() {
-        let response = app()
+        let response = app(Supervisor::new(Policy::default(), Arc::new(NullSink)))
             .oneshot(
                 Request::builder()
                     .uri("/healthz")
@@ -167,5 +184,36 @@ mod tests {
             .expect("body")
             .to_bytes();
         assert_eq!(&body[..], b"ok");
+    }
+
+    #[tokio::test]
+    async fn metrics_are_served_as_prometheus_text() {
+        let response = app(Supervisor::new(Policy::default(), Arc::new(NullSink)))
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("infallible");
+        assert!(response.status().is_success());
+        assert_eq!(
+            response.headers()["content-type"],
+            superhet_bus::metrics::CONTENT_TYPE
+        );
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes();
+        let text = String::from_utf8_lossy(&body);
+        assert!(
+            text.contains("# TYPE superhet_pluginhost_instances gauge"),
+            "{text}"
+        );
+        assert!(text.contains("superhet_pluginhost_instances{state=\"running\"} 0"));
+        assert!(text.contains("# TYPE superhet_pluginhost_tap_frames_total counter"));
     }
 }

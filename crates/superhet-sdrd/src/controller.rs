@@ -11,12 +11,13 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use superhet_bus::profile::{self, ProfileData};
-use superhet_bus::tap::ClaimAcquire;
+use superhet_bus::tap::{self, ClaimAcquire};
 use superhet_device::{DeviceControl, DeviceState, Gain, TuneRequest};
 use tokio::sync::watch;
 
 use crate::control::{
-    CtlError, ErrorCode, LockRequest, Retune, VERSION, error_reply, ok_reply, state_json, vfo_reply,
+    ClaimWire, CtlError, ErrorCode, LockRequest, Retune, VERSION, error_reply, ok_reply,
+    state_json, vfo_reply,
 };
 use crate::lock::{Holder, HolderKind, LockSet};
 use crate::overload::OverloadStatus;
@@ -220,6 +221,7 @@ impl Controller {
                     "device claimed"
                 );
                 locks.acquire(Holder::claim(&request.id));
+                locks.set_claim_previous(Some((before.center_hz, before.sample_rate)));
                 *claim = Some(Claim {
                     id: request.id.clone(),
                     deadline: Instant::now() + ttl,
@@ -269,6 +271,7 @@ impl Controller {
             return;
         };
         locks.release(HolderKind::Claim, id);
+        locks.set_claim_previous(None);
         let back = TuneRequest {
             center_hz: Some(held.previous.0),
             sample_rate: Some(held.previous.1),
@@ -294,6 +297,11 @@ impl Controller {
             device_state,
             &vfos,
             locks.holders(),
+            locks.claim().map(|(id, previous)| ClaimWire {
+                id,
+                previous_center_hz: previous.0,
+                previous_sample_rate: previous.1,
+            }),
             self.overload.get(),
             crate::metrics::global().device_dropped_blocks()
                 + crate::metrics::global().vfo_dropped_blocks(),
@@ -654,6 +662,29 @@ impl Controller {
             };
             holder.since_ms = since_ms;
             locks.acquire(holder);
+        }
+        // An exclusive claim of the earlier run: keep the device locked on the claimed tuning
+        // until the plugin host refreshes the lease (or it runs out) and remember the tuning
+        // from before the claim, so releasing it still goes back there.
+        if let Some(id) = doc["claim"]["id"]
+            .as_str()
+            .filter(|id| tap::is_valid_id(id))
+            && let (Some(center), Some(rate)) = (
+                doc["claim"]["previous_center_hz"].as_u64(),
+                doc["claim"]["previous_sample_rate"]
+                    .as_u64()
+                    .and_then(|r| u32::try_from(r).ok()),
+            )
+            && !locks.is_locked()
+        {
+            locks.acquire(Holder::claim(id));
+            locks.set_claim_previous(Some((center, rate)));
+            *self.claim_slot() = Some(Claim {
+                id: id.to_owned(),
+                deadline: Instant::now() + tap::LEASE_TTL,
+                previous: (center, rate),
+            });
+            tracing::info!(claim = %id, "exclusive claim restored; waiting for its lease refresh");
         }
         tracing::info!(
             center_hz = applied.center_hz,
@@ -1106,6 +1137,57 @@ mod tests {
             ErrorCode::Invalid
         );
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_claim_survives_a_daemon_restart_and_still_restores_the_old_tuning() {
+        let (control, _device, path) = file_device("claim-restart-a");
+        let c = controller(control);
+        let ttl = Duration::from_secs(60);
+        c.claim_acquire(&claim("i-1", 120_000_000, None), ttl)
+            .expect("claimed");
+        let saved = state(&c);
+        assert_eq!(saved["claim"]["id"], "i-1");
+        assert_eq!(saved["claim"]["previous_center_hz"], 100_000_000);
+
+        // The daemon restarts: a new controller on a device that starts at the configured
+        // tuning restores the snapshot, claim included.
+        let (control, _device2, path2) = file_device("claim-restart-b");
+        let fresh = controller(control);
+        fresh.restore(&saved).expect("restore");
+        let s = state(&fresh);
+        assert_eq!(s["center_hz"], 120_000_000);
+        assert_eq!(s["locks"][0]["kind"], "claim");
+        assert_eq!(s["claim"]["previous_center_hz"], 100_000_000);
+        let err = tune(&fresh, &center(101_000_000)).expect_err("still claimed");
+        assert_eq!(err.code, ErrorCode::Locked);
+
+        // The host re-acquires with the same parameters: idempotent, nothing retunes, and the
+        // tuning from before the claim is still the one remembered.
+        let epoch = s["tuning_epoch"].clone();
+        fresh
+            .claim_acquire(&claim("i-1", 120_000_000, None), ttl)
+            .expect("re-acquired");
+        let s = state(&fresh);
+        assert_eq!(s["tuning_epoch"], epoch);
+        assert_eq!(s["locks"].as_array().map(Vec::len), Some(1));
+        assert_eq!(s["claim"]["previous_center_hz"], 100_000_000);
+        fresh.claim_release("i-1");
+        let s = state(&fresh);
+        assert_eq!(s["center_hz"], 100_000_000);
+        assert!(s.get("claim").is_none());
+        assert_eq!(s["locks"].as_array().map(Vec::len), Some(0));
+
+        // A restored claim nobody refreshes expires and gives the device back.
+        let (control, _device3, path3) = file_device("claim-restart-c");
+        let orphan = controller(control);
+        orphan.restore(&saved).expect("restore");
+        assert_eq!(state(&orphan)["center_hz"], 120_000_000);
+        assert!(orphan.claim_expire(Instant::now() + Duration::from_secs(60)));
+        assert_eq!(state(&orphan)["center_hz"], 100_000_000);
+        for p in [path, path2, path3] {
+            let _ = std::fs::remove_file(p);
+        }
     }
 
     /// A state with everything set to non-default values.

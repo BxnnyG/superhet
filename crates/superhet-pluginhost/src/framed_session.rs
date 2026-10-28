@@ -442,6 +442,7 @@ async fn write_loop(
                     tuning_epoch: epoch.load(Ordering::Relaxed),
                 };
                 seq += 1;
+                crate::metrics::input_chunk(chunk.len());
                 send(&mut write, FrameKind::Samples, &header.encode(&chunk)).await
             }
             Some(message) = control.recv() => send(&mut write, FrameKind::Control, &message).await,
