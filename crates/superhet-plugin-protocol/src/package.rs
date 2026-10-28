@@ -4,10 +4,11 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+use crate::config::ConfigValidator;
 use crate::event::EventValidator;
 use crate::manifest::{MANIFEST_FILE, Manifest, ManifestError};
 
-/// Largest `events_schema` file read (bytes).
+/// Largest `events_schema` / `config.schema` file read (bytes).
 const MAX_SCHEMA_BYTES: u64 = 1024 * 1024;
 
 /// A plugin directory could not be loaded.
@@ -27,6 +28,9 @@ pub enum PackageError {
     /// `events_schema` is unreadable or not a JSON Schema.
     #[error("events_schema: {0}")]
     Schema(String),
+    /// `config.schema` is unreadable or not a JSON Schema.
+    #[error("config.schema: {0}")]
+    ConfigSchema(String),
 }
 
 /// A loaded plugin directory.
@@ -38,6 +42,8 @@ pub struct Package {
     pub manifest: Manifest,
     /// Event checker built from `output.events_schema`.
     pub validator: EventValidator,
+    /// Configuration checker built from `config.schema`; `None` when the manifest names none.
+    pub config_validator: Option<ConfigValidator>,
 }
 
 impl Package {
@@ -53,17 +59,26 @@ impl Package {
         let manifest_path = dir.join(MANIFEST_FILE);
         let text = std::fs::read_to_string(&manifest_path).map_err(io(&manifest_path))?;
         let manifest = Manifest::from_toml(&text)?;
+        let read_schema = |rel: &str, wrap: fn(String) -> PackageError| {
+            let path = dir.join(rel);
+            let meta = std::fs::metadata(&path).map_err(io(&path))?;
+            if meta.len() > MAX_SCHEMA_BYTES {
+                return Err(wrap(format!("{rel} is larger than 1 MiB")));
+            }
+            let raw = std::fs::read_to_string(&path).map_err(io(&path))?;
+            serde_json::from_str::<Value>(&raw).map_err(|err| wrap(format!("{rel}: {err}")))
+        };
         let schema = match &manifest.output.events_schema {
-            Some(rel) => {
-                let path = dir.join(rel);
-                let meta = std::fs::metadata(&path).map_err(io(&path))?;
-                if meta.len() > MAX_SCHEMA_BYTES {
-                    return Err(PackageError::Schema(format!("{rel} is larger than 1 MiB")));
-                }
-                let raw = std::fs::read_to_string(&path).map_err(io(&path))?;
-                let doc: Value = serde_json::from_str(&raw)
-                    .map_err(|err| PackageError::Schema(format!("{rel}: {err}")))?;
-                Some(doc)
+            Some(rel) => Some(read_schema(rel, PackageError::Schema)?),
+            None => None,
+        };
+        let config_validator = match &manifest.config {
+            Some(section) => {
+                let doc = read_schema(&section.schema, PackageError::ConfigSchema)?;
+                Some(
+                    ConfigValidator::new(&doc)
+                        .map_err(|err| PackageError::ConfigSchema(err.to_string()))?,
+                )
             }
             None => None,
         };
@@ -73,6 +88,7 @@ impl Package {
             dir: dir.to_path_buf(),
             manifest,
             validator,
+            config_validator,
         })
     }
 

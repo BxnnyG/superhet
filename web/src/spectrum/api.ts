@@ -72,6 +72,8 @@ export class ApiError extends Error {
     readonly code?: string,
     /** Lock holders of a `locked` (409) rejection. */
     readonly holders?: LockHolder[],
+    /** The request field a refused value belongs to (`baud.1`), when the server names one. */
+    readonly field?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -219,6 +221,7 @@ export function httpError(res: Response, body: unknown): ApiError {
       res.status,
       typeof body.code === "string" ? body.code : undefined,
       parseHolders(body.holders),
+      typeof body.field === "string" && body.field !== "" ? body.field : undefined,
     );
   }
   return new ApiError(`HTTP ${res.status}`, res.status);

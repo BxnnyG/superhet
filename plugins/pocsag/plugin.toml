@@ -26,5 +26,8 @@ bandwidth_hz = 12500
 [output]
 events_schema = "schema/events.json"
 
+[config]
+schema = "schema/config.json"
+
 [install]
 acknowledge = { text = "Runs multimon-ng (GPL-2.0-or-later) as a separate process. Pager messages are private communications in many countries: receiving or storing the content of pages that are not addressed to you may be restricted or forbidden (in Germany, for example, by the secrecy of telecommunications). Decoded messages are kept in the decoder history until the retention period ends. Use this only where you are allowed to.", url = "https://github.com/EliasOenal/multimon-ng" }

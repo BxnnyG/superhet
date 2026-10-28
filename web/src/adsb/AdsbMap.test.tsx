@@ -1,8 +1,9 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import L from "leaflet";
 import { describe, expect, it, vi } from "vitest";
-import { AdsbMap, TILE_REFERRER_POLICY } from "./AdsbMap";
-import { DEFAULT_MAP } from "./mapConfig";
+import { TILE_REFERRER_POLICY } from "../map/BaseMap";
+import { AdsbMap } from "./AdsbMap";
+import { DEFAULT_MAP } from "../map/mapConfig";
 import { parseStatus, tracked, type Tracked } from "./model";
 import { adsbStatusRaw } from "./testing";
 

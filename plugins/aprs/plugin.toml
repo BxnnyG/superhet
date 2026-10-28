@@ -25,5 +25,8 @@ bandwidth_hz = 12500
 [output]
 events_schema = "schema/events.json"
 
+[config]
+schema = "schema/config.json"
+
 [install]
 acknowledge = { text = "Runs direwolf (GPL-2.0-or-later) as a separate process, receive only: it does not transmit and opens no network ports. APRS positions and messages are public by design but can be personal data (callsigns, locations); decoded packets are kept in the decoder history until the retention period ends.", url = "https://github.com/wb2osz/direwolf" }

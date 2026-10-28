@@ -1,9 +1,10 @@
-// Where the ADS-B map gets its tiles from: `GET /api/v1/map-config` (docs/plugins-adsb.md). The
+// Where the maps (ADS-B aircraft, APRS stations) get its tiles from: `GET /api/v1/map-config` (docs/plugins-adsb.md). The
 // server default is OpenStreetMap; `SUPERHET_MAP_TILE_URL` points it elsewhere and the CSP
 // follows. By default the tiles come through the server's caching proxy (a same-origin path) so
 // the browser never contacts the provider. An older server without the route simply gets the
 // OpenStreetMap default, fetched directly.
 
+import { useEffect, useState } from "react";
 import { apiFetch } from "../auth/session";
 
 export interface MapConfig {
@@ -62,6 +63,21 @@ export async function loadMapConfig(fetchImpl: typeof fetch = apiFetch): Promise
   } catch {
     return DEFAULT_MAP;
   }
+}
+
+/** The tile source from the server; null until it answered (the map waits for it). */
+export function useMapConfig(): MapConfig | null {
+  const [config, setConfig] = useState<MapConfig | null>(null);
+  useEffect(() => {
+    let live = true;
+    void loadMapConfig().then((c) => {
+      if (live) setConfig(c);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  return config;
 }
 
 function escapeHtml(s: string): string {

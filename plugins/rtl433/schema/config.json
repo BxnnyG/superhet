@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rtl_433 instance configuration",
+  "type": "object",
+  "properties": {
+    "protocols": {
+      "description": "rtl_433 protocol numbers (rtl_433 -R help); empty uses its standard set.",
+      "type": "array",
+      "items": { "type": "integer", "minimum": 1, "maximum": 9999 }
+    }
+  },
+  "additionalProperties": false
+}

@@ -79,10 +79,19 @@ fn parse<T: DeserializeOwned>(payload: &[u8]) -> Result<T, Value> {
 }
 
 fn start_error(err: &StartError) -> Value {
+    if let StartError::Config(issue) = err {
+        let reply = ErrorReply::new(code::INVALID, err.to_string());
+        let reply = if issue.field.is_empty() {
+            reply
+        } else {
+            reply.with_field(&issue.field)
+        };
+        return serde_json::to_value(reply).unwrap_or(Value::Null);
+    }
     let class = match err {
         StartError::Unsupported(_) => code::UNSUPPORTED,
         StartError::Conflict(_) => code::CONFLICT,
-        StartError::Invalid(_) => code::INVALID,
+        StartError::Invalid(_) | StartError::Config(_) => code::INVALID,
         StartError::NotFound => code::NOT_FOUND,
     };
     error(class, err.to_string())

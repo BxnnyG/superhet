@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "APRS instance configuration",
+  "description": "The decoder has no options; any key is refused so typos do not go unnoticed.",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}

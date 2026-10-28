@@ -27,7 +27,7 @@ use superhet_plugin_protocol::event::{HostEvent, Line, MAX_EVENT_LINE};
 use superhet_plugin_protocol::manifest::{
     InputKind, PluginType, RuntimeKind, SampleFormat, Transport,
 };
-use superhet_plugin_protocol::{InstanceEnv, PROTOCOL_VERSION, Package};
+use superhet_plugin_protocol::{ConfigIssue, InstanceEnv, PROTOCOL_VERSION, Package};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::process::{Child, ChildStdin, Command};
@@ -179,6 +179,9 @@ pub enum StartError {
     /// The binding does not fit the plugin.
     #[error("{0}")]
     Invalid(String),
+    /// The configuration does not satisfy the plugin's `config.schema`.
+    #[error("invalid configuration: {0}")]
+    Config(ConfigIssue),
     /// Unknown instance.
     #[error("no such instance")]
     NotFound,
@@ -702,7 +705,8 @@ impl Supervisor {
     ///
     /// # Errors
     /// [`StartError::NotFound`] for unknown ids, [`StartError::Invalid`] when `config` is
-    /// neither `null` nor an object.
+    /// neither `null` nor an object, [`StartError::Config`] when it breaks the plugin's
+    /// `config.schema` (nothing is applied then, the instance keeps running as it was).
     pub fn reconfigure(&self, id: &str, config: Value) -> Result<InstanceInfo, StartError> {
         if !(config.is_null() || config.is_object()) {
             return Err(StartError::Invalid("config must be an object".into()));
@@ -710,6 +714,9 @@ impl Supervisor {
         let mut instances = self.instances();
         let entry = instances.get_mut(id).ok_or(StartError::NotFound)?;
         let shared = Arc::clone(&entry.shared);
+        if let Some(validator) = &shared.package.config_validator {
+            validator.check(&config).map_err(StartError::Config)?;
+        }
         let was_error = shared.snapshot().state == InstanceState::Error;
         shared.reconfigures.fetch_add(1, Ordering::Relaxed);
         shared.update(|m| {

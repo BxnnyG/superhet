@@ -35,5 +35,8 @@ sample_rate = 2400000
 [output]
 events_schema = "schema/events.json"
 
+[config]
+schema = "schema/config.json"
+
 [install]
 acknowledge = { text = "Runs readsb (GPL-3.0-or-later) as a separate process. The plugin takes the whole device while it runs: VFOs outside 1090 MHz (2.4 MS/s) are paused and nobody can retune. Receiving ADS-B is legal in most countries (Germany included), but aircraft identities and positions are broadcast data of third parties: decoded aircraft are kept in the decoder history until the retention period ends, and the live map is visible to everybody who may see decoders. The map loads tiles from tile.openstreetmap.org (the viewer's browser contacts OpenStreetMap). Reception needs an antenna for 1090 MHz; a bandpass filter and LNA help a lot.", url = "https://github.com/wiedehopf/readsb" }

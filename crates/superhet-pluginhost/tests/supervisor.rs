@@ -45,6 +45,16 @@ fn uuid_like() -> String {
 
 /// Write a plugin whose command is `sh -c <script>` and load it.
 fn shell_plugin(dir: &TempDir, script: &str, extra_runtime: &str) -> Arc<Package> {
+    shell_plugin_with(dir, script, extra_runtime, &[])
+}
+
+/// Like [`shell_plugin`], with extra files in the plugin directory.
+fn shell_plugin_with(
+    dir: &TempDir,
+    script: &str,
+    extra_runtime: &str,
+    files: &[(&str, &str)],
+) -> Arc<Package> {
     let name = uuid_like();
     let path = dir.0.join(&name);
     std::fs::create_dir_all(&path).expect("plugin dir");
@@ -69,6 +79,9 @@ format = "s16le"
 "#
     );
     std::fs::write(path.join("plugin.toml"), manifest).expect("manifest");
+    for (name, text) in files {
+        std::fs::write(path.join(name), text).expect("plugin file");
+    }
     Arc::new(Package::load(&path).expect("package"))
 }
 
@@ -758,5 +771,51 @@ async fn reconfigure_revives_an_instance_in_error() {
     })
     .await;
     assert_eq!(running.crashes_in_window, 0);
+    supervisor.stop(&info.id).await.expect("stopped");
+}
+
+#[tokio::test]
+async fn reconfigure_refuses_a_config_that_breaks_the_schema_and_changes_nothing() {
+    let dir = TempDir::new();
+    let supervisor = Supervisor::new(fast_policy(), Arc::new(Collect::default()));
+    let package = shell_plugin_with(
+        &dir,
+        "sleep 300",
+        "\n[config]\nschema = \"config.json\"\n",
+        &[(
+            "config.json",
+            r#"{"type":"object","properties":{"baud":{"type":"array","items":{"enum":[512,1200]}}},"additionalProperties":false}"#,
+        )],
+    );
+    let info = supervisor
+        .start(package, StartSpec::default())
+        .expect("start");
+    let first = wait_for(&supervisor, &info.id, "running", |i| {
+        i.state == InstanceState::Running
+    })
+    .await;
+
+    let Err(StartError::Config(issue)) =
+        supervisor.reconfigure(&info.id, json!({"baud": [512, 700]}))
+    else {
+        panic!("a bad value must be refused");
+    };
+    assert_eq!(issue.field, "baud.1");
+    let Err(StartError::Config(issue)) = supervisor.reconfigure(&info.id, json!({"bad": 1})) else {
+        panic!("an unknown key must be refused");
+    };
+    assert_eq!(issue.field, "bad");
+
+    // Nothing was applied: same config, no restart counted, same process.
+    let now = supervisor.get(&info.id).expect("instance");
+    assert_eq!(now.config, Value::Null);
+    assert_eq!(now.reconfigures, 0);
+    assert_eq!(now.pid, first.pid);
+
+    // A valid one still goes through.
+    let ok = supervisor
+        .reconfigure(&info.id, json!({"baud": [1200]}))
+        .expect("valid config");
+    assert_eq!(ok.reconfigures, 1);
     supervisor.stop(&info.id).await.expect("stopped");
 }

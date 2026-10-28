@@ -82,7 +82,7 @@ pub enum EventError {
 /// The `events_schema` of a plugin is not usable.
 #[derive(Debug, thiserror::Error)]
 #[error("events_schema is not a valid JSON Schema: {0}")]
-pub struct SchemaError(String);
+pub struct SchemaError(pub(crate) String);
 
 /// Result of checking one line.
 #[derive(Debug, Clone, PartialEq)]

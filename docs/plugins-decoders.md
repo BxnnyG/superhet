@@ -74,6 +74,13 @@ non-printable bytes as `<0x1c>`), `summary`, and by `type`:
 - `status`: `status`
 - `weather`, `telemetry`, `nmea`, `other`: the raw `info` only
 
+In the web UI, the APRS output of the digital dock has a List / Map switch. The map (the shared
+Leaflet map of ADS-B, `web/src/map/`, same tile source and proxy, `docs/plugins-adsb.md`) shows every
+station and object that sent a position, built from the stored history plus the live feed: last
+position, a track line of up to 60 distinct positions, faded after 30 minutes, dropped after six
+hours without a packet. A click shows last heard, speed, course, altitude, digipeater path and
+comment.
+
 Real hardware: 144.800 MHz (Europe, NFM, 12.5 kHz) or 144.390 MHz (North America); dense city
 areas give several packets per minute. A packet that direwolf cannot repair (CRC) is not reported.
 

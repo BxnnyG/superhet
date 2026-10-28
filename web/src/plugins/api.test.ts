@@ -127,6 +127,24 @@ describe("client", () => {
     });
   });
 
+  it("keeps the field a refused configuration names", async () => {
+    const { api } = client(
+      reply(400, {
+        v: 1,
+        ok: false,
+        code: "invalid",
+        error: "invalid configuration: baud.1: 700 is not one of [512, 1200, 2400]",
+        field: "baud.1",
+      }),
+    );
+    await expect(api.reconfigure("i-1", { baud: [512, 700] })).rejects.toMatchObject({
+      status: 400,
+      code: "invalid",
+      field: "baud.1",
+      message: expect.stringContaining("700 is not one of") as unknown,
+    });
+  });
+
   it("surfaces the server's message and code", async () => {
     const { api } = client(
       reply(409, {

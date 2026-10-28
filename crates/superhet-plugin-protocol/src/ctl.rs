@@ -366,6 +366,10 @@ pub struct ErrorReply {
     pub code: String,
     /// Human readable explanation.
     pub error: String,
+    /// The request field the failure concerns, as a dotted path (`baud.1`); only set for
+    /// refused configurations, which name the offending key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
 }
 
 impl ErrorReply {
@@ -377,7 +381,15 @@ impl ErrorReply {
             ok: false,
             code: code.to_owned(),
             error: error.into(),
+            field: None,
         }
+    }
+
+    /// The same failure, naming the request field it concerns.
+    #[must_use]
+    pub fn with_field(mut self, field: impl Into<String>) -> Self {
+        self.field = Some(field.into());
+        self
     }
 }
 

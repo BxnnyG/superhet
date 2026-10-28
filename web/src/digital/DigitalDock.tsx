@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { usePermissions } from "../auth/context";
 import { describeEvent } from "../decoders/render";
 import { formatMhz, formatTime, type DecoderEvent } from "../decoders/events";
@@ -18,6 +18,7 @@ import {
   Chip,
   PlainButton,
   RefreshIcon,
+  SegmentedControl,
   StopIcon,
   cn,
   toasts,
@@ -25,6 +26,8 @@ import {
 import type { Vfo } from "../vfo/api";
 import { useLeaveDigitalOnAnalog } from "./actions";
 import { digitalOnVfo, expectText, type DigitalMode } from "./modes";
+
+const AprsMapView = lazy(() => import("./AprsMapView").then((m) => ({ default: m.AprsMapView })));
 
 /** How often the dock asks the host for fresh counters. */
 export const DOCK_POLL_MS = 1500;
@@ -270,6 +273,12 @@ function Output({
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const rows = snap.events.filter((e) => e.meta.instance === instance.id).slice(0, MAX_ROWS);
   const [h1, h2, h3] = COLUMNS[mode.id];
+  const [view, setView] = useState<"list" | "map">("list");
+  const hasMap = mode.id === "aprs";
+  const mapEvents = useMemo(
+    () => (hasMap ? snap.events.filter((e) => e.meta.instance === instance.id) : []),
+    [hasMap, snap.events, instance.id],
+  );
   const problem = instance.state === "running" && verdictTone === "success" ? null : verdictText;
 
   return (
@@ -282,7 +291,31 @@ function Output({
           )}
         </Alert>
       )}
-      {rows.length === 0 ? (
+      {hasMap && rows.length > 0 && (
+        <div className="flex items-center gap-2 px-3 py-1.5">
+          <SegmentedControl
+            size="sm"
+            aria-label="APRS view"
+            value={view}
+            onChange={setView}
+            options={[
+              { value: "list", label: "List" },
+              { value: "map", label: "Map" },
+            ]}
+          />
+        </div>
+      )}
+      {hasMap && view === "map" && rows.length > 0 ? (
+        <Suspense
+          fallback={
+            <p role="status" className="px-4 py-3 text-sm text-fg-muted">
+              Loading the map…
+            </p>
+          }
+        >
+          <AprsMapView events={mapEvents} />
+        </Suspense>
+      ) : rows.length === 0 ? (
         <div className="px-4 py-5 text-sm text-fg-muted" data-testid="dock-empty">
           <p className="font-medium text-fg">
             {instance.state === "running" ? "Listening…" : "Waiting for the decoder"}

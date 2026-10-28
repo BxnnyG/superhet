@@ -18,6 +18,13 @@ import { vfo } from "../shell/fixtures";
 import { toasts } from "../ui";
 import { DOCK_POLL_MS, DigitalDock } from "./DigitalDock";
 
+// Leaflet needs a real layout; the map has its own test.
+vi.mock("./AprsMap", () => ({
+  AprsMap: (props: { stations: { id: string }[] }) => (
+    <div data-testid="map">{props.stations.map((s) => s.id).join(",")}</div>
+  ),
+}));
+
 beforeEach(() => {
   localStorage.clear();
   toasts.clear();
@@ -182,6 +189,32 @@ it("renders APRS and ISM output with their own columns", async () => {
   expect(dock).toHaveTextContent("Nexus-TH #165");
   expect(dock).toHaveTextContent("21.5 °C");
   second.store.stop();
+});
+
+it("switches the APRS output between the list and the map", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(1_700_000_000_000 + 60_000);
+  const { store } = await setup({
+    instances: [instance({ plugin_id: APRS_ID })],
+    events: [
+      ev(1, "aprs.packet", APRS_ID, { source: "N0CALL-9", type: "position", lat: 52.5, lon: 13.4 }),
+    ],
+    vfoOver: { freqHz: 144_800_000 },
+  });
+  const dock = screen.getByTestId("digital-dock");
+  expect(within(dock).getByRole("table")).toBeInTheDocument();
+  fireEvent.click(within(dock).getByRole("radio", { name: "Map" }));
+  expect(await within(dock).findByTestId("aprs-map-view")).toBeInTheDocument();
+  expect(within(dock).queryByRole("table")).toBeNull();
+  fireEvent.click(within(dock).getByRole("radio", { name: "List" }));
+  expect(within(dock).getByRole("table")).toBeInTheDocument();
+  store.stop();
+});
+
+it("offers no map for decoders without positions", async () => {
+  const { store } = await setup({ events: [page(1, "x")] });
+  expect(screen.queryByRole("radio", { name: "Map" })).toBeNull();
+  store.stop();
 });
 
 it("stops the decoder from the panel", async () => {

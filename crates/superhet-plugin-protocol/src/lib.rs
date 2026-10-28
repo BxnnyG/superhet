@@ -5,6 +5,7 @@
 //! structure: `schema/*.schema.json` in this crate (generated from the types, a test fails when
 //! they drift). The [`contract`] module is the test suite a plugin has to pass.
 
+pub mod config;
 pub mod contract;
 pub mod ctl;
 pub mod event;
@@ -13,6 +14,7 @@ pub mod manifest;
 pub mod package;
 pub mod schema;
 
+pub use config::{ConfigIssue, ConfigValidator};
 pub use event::{Event, EventError, EventValidator, Line};
 pub use manifest::{Manifest, ManifestError, PluginType, Transport};
 pub use package::{Package, PackageError};

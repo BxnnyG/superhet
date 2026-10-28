@@ -10,6 +10,13 @@
       "description": "Human readable explanation.",
       "type": "string"
     },
+    "field": {
+      "description": "The request field the failure concerns, as a dotted path (`baud.1`); only set for\nrefused configurations, which name the offending key.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "ok": {
       "description": "Always false.",
       "type": "boolean"
