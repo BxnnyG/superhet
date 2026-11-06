@@ -70,3 +70,18 @@ fn adsb() {
     assert_eq!(field(json!({"event_interval_s": 1})), "event_interval_s");
     assert!(!field(json!({"lat": 50.0})).starts_with(':'));
 }
+
+#[test]
+fn m17() {
+    assert_eq!(check("m17", &json!({})), Ok(()));
+    assert_eq!(
+        check(
+            "m17",
+            &json!({"noise_blanker": false, "invert": true, "mute_encrypted": false})
+        ),
+        Ok(())
+    );
+    let field = |config: Value| check("m17", &config).expect_err("refused").0;
+    assert_eq!(field(json!({"invert": "yes"})), "invert");
+    assert_eq!(field(json!({"x": 1})), "x");
+}

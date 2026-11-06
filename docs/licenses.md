@@ -25,8 +25,9 @@ External components run as **separate processes** (plugins) or are **dynamically
 | dsd-fme | digital voice plugin (candidate) | ISC/GPL mix – verify | **fetch & build locally** if it links mbelib | ADR-0005 |
 | digiham | digital voice plugin (candidate) | GPL-3.0 | plugin image | little maintenance since 2024 |
 | codecserver | optional codec backend | GPL-3.0 | separate | little maintenance since 2024 |
-| m17-cxx-demod | M17 plugin | GPL-3.0 | plugin image | – |
-| Codec2 | M17 voice codec | LGPL-2.1 | plugin image | patent-free |
+| m17-cxx-demod (`m17-demod`) | M17 plugin | GPL-3.0 | runtime image (built from a pinned upstream commit in the Dockerfile, one-line sed patch, separate process, `docs/third-party.md`) | – |
+| Codec2 | M17 voice codec | LGPL-2.1 | runtime image (Debian `libcodec2-1.0`, dynamic library) | patent-free |
+| Blaze | build dependency of m17-cxx-demod | BSD-3-Clause | headers only at build time, licence text in the image | – |
 | osmo-tetra (incl. sq5bpf fork) | TETRA test oracle in CI | AGPL-3.0 | not distributed (CI dev container only) | ADR-0004 |
 | tetra-kit | TETRA test oracle in CI | GPL-3.0 | not distributed (CI dev container only) | ADR-0004 |
 | ETSI TETRA ACELP reference codec | TETRA voice | ETSI IPR / download terms | **never distributed**; downloaded from etsi.org and built by the user | separate repo `superhet-codec-tetra` |

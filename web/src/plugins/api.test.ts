@@ -59,6 +59,9 @@ describe("parsing", () => {
       lastEventMs: 1_700_000_000_000,
       reconfigures: 0,
     });
+    // Plugins with audio output carry the pseudo VFO of their audio.
+    expect(parseInstance(instanceRaw()).audioVfo).toBeNull();
+    expect(parseInstance(instanceRaw({ audio_vfo: 1073741900 })).audioVfo).toBe(1073741900);
     const old = parseInstance({ ...instanceRaw(), input_bytes: undefined, input_level_db: null });
     expect(old).toMatchObject({ inputBytes: 0, inputLevelDb: null });
     expect(parseInstance(instanceRaw({ vfo: null, device: null })).vfo).toBeNull();

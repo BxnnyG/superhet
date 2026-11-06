@@ -64,4 +64,23 @@ else
     echo "FAIL readsb did not decode the synthetic ADS-B frame (got: ${adsb:-nothing})"
     fail=1
 fi
+# M17: the plugin wraps m17-demod (compiled in the Dockerfile, with a one-line patch that adds the
+# TYPE field). The synthetic stream of tests/recordings/m17-voice.* must come out as a call from
+# DL1ABC to DB0XYZ with decoded audio (the tool needs about a second to lock, so not all 3 s).
+if docker run --rm --entrypoint sh "$image" -c '! ldd /usr/bin/m17-demod | grep -q "not found"'; then
+    m17_out="$(docker run --rm -i --entrypoint sh "$image" -c \
+        'm17-demod -l 2>/tmp/m17.err | wc -c; tr "\r" "\n" </tmp/m17.err | grep -m1 "^SRC:"' \
+        <"$rec/m17-voice.sigmf-data" || true)"
+    m17_bytes="$(printf '%s\n' "$m17_out" | sed -n 1p)"
+    m17_call="$(printf '%s\n' "$m17_out" | sed -n 2p)"
+    if [ "$m17_call" = "SRC: DL1ABC, DEST: DB0XYZ, STR:V/V CAN:03, TYPE: 0x0185, NONCE: 0000000000000000000000000000, CRC: 167a" ] && [ "$m17_bytes" -ge 24000 ]; then
+        echo "ok   m17-demod decodes a synthetic M17 call ($m17_bytes bytes of audio)"
+    else
+        echo "FAIL m17-demod did not decode the synthetic M17 call (got: ${m17_call:-nothing}, $m17_bytes bytes of audio)"
+        fail=1
+    fi
+else
+    echo "FAIL m17-demod is missing or lacks a library"
+    fail=1
+fi
 exit "$fail"

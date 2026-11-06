@@ -1,4 +1,4 @@
-//! `superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb>`: runs the external decoder for one of the
+//! `superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17>`: runs the external decoder for one of the
 //! first-party plugins (see the library docs). Samples arrive on stdin, events leave on stdout,
 //! the instance configuration is read from `SUPERHET_CONFIG`.
 
@@ -6,7 +6,7 @@ use std::process::ExitCode;
 
 use serde_json::Value;
 use superhet_plugin_adapters::{
-    adsb, aprs, dab, pager, rtl433,
+    adsb, aprs, dab, m17, pager, rtl433,
     run::{run, run_many},
 };
 
@@ -60,15 +60,20 @@ fn start(mode: &str) -> Result<ExitCode, String> {
                 .map_err(|_| "SUPERHET_SOCKET is not set (framed plugin)".to_owned())?;
             Ok(adsb::run("readsb", &config, &socket))
         }
+        "m17" => {
+            let socket = std::env::var("SUPERHET_SOCKET")
+                .map_err(|_| "SUPERHET_SOCKET is not set (framed plugin)".to_owned())?;
+            Ok(m17::run("m17-demod", &config, &socket))
+        }
         other => Err(format!(
-            "unknown mode {other:?} (pocsag, aprs, rtl433, dab, adsb)"
+            "unknown mode {other:?} (pocsag, aprs, rtl433, dab, adsb, m17)"
         )),
     }
 }
 
 fn main() -> ExitCode {
     let Some(mode) = std::env::args().nth(1) else {
-        eprintln!("usage: superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb>");
+        eprintln!("usage: superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17>");
         return ExitCode::from(2);
     };
     match start(&mode) {

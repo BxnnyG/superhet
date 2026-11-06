@@ -106,7 +106,7 @@ All decoders are plugins (separate processes). Without a codec plugin, voice dec
 | YSF / C4FM | v1 (P3) | ✅ | digiham / dsd-fme | AMBE+2 / IMBE |
 | NXDN | v1 (P3) | ✅ | dsd-fme | AMBE+2 |
 | P25 Phase 1 | v1 (P3) | ✅ | dsd-fme | IMBE; rare in Europe |
-| M17 | v1 (P3) | ✅ | m17-cxx-demod (GPL-3.0) / dsd-fme | Codec2 (LGPL-2.1) is free → **voice works without restricted codec** |
+| M17 | v1 (P3), **bundled** (`docs/plugins-m17.md`, ADR-0018) | ✅ | m17-cxx-demod (GPL-3.0) | Codec2 (LGPL-2.1) is free → **voice works without restricted codec**; voice streams only, first second of a call may be missing |
 | dPMR | later | ✅ | dsd-fme | – |
 | TETRA TMO – own cell: MCC/MNC, LA, cell/neighbour info, registrations, ISSI/GSSI, group attach, call setup/teardown, SDS (incl. status, text, LIP location), encryption state, signal quality per burst | v1 (P3) | ✅ (25 kHz, π/4-DQPSK 18 ksym/s) | native Rust stack `superhet-tetra` (ADR-0004); osmo-tetra (AGPL-3.0) / tetra-kit (GPL-3.0) as CI test oracles only | Large effort; reference recordings from own equipment |
 | TETRA DMO – own hotspot/MTM (direct mode, DM-GATE / DM-REP): call setup, SDS, presence, gateway/repeater signalling | v1 (P3) | ✅ | native Rust stack (no maintained open-source DMO decoder known) | Must be implemented from EN 300 396; reference recordings essential |

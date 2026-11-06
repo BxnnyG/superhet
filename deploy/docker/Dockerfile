@@ -52,16 +52,54 @@ RUN git init -q . \
     && strip readsb \
     && ./readsb --version
 
-# ---- Stage 5: runtime ----
+# ---- Stage 5: m17-demod built from source ----
+# The M17 plugin wraps m17-demod from mobilinkd's m17-cxx-demod (GPL-3.0; M17 is an open amateur
+# radio standard whose voice codec, Codec2, is open and patent-free; ADR-0018). Debian does not
+# package it, so it is compiled here from a pinned upstream commit; Codec2 (LGPL-2.1) and Boost
+# come from Debian and are linked dynamically. The upstream build wants the Blaze maths library
+# (BSD-3-Clause) as a git submodule: fetched from its pinned commit and used as headers only.
+# m17-demod prints the link setup frame (callsigns, type, CAN) with `-l`; upstream leaves the
+# encryption bits out of that line, so a one-line sed (deploy/docker/m17-demod-type.sed) adds the
+# raw TYPE field. Only m17-demod and the licence texts reach the runtime stage; m17-mod is built
+# for the self-test below (a synthetic call must decode) and to generate test recordings.
+FROM debian:bookworm-slim AS m17
+ARG M17_COMMIT=9b8cec24d3f8d5e9f7f6e9c23661439e32343d6b
+ARG BLAZE_COMMIT=7a9086596e7783afb3cac0394bbc55d4c8b45a80
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential cmake git ca-certificates \
+        libcodec2-dev libboost-program-options-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src/m17
+COPY deploy/docker/m17-demod-type.sed /tmp/m17-demod-type.sed
+RUN git init -q . \
+    && git fetch -q --depth 1 https://github.com/mobilinkd/m17-cxx-demod "$M17_COMMIT" \
+    && git checkout -q FETCH_HEAD \
+    && cd blaze \
+    && git init -q . \
+    && git fetch -q --depth 1 https://bitbucket.org/blaze-lib/blaze "$BLAZE_COMMIT" \
+    && git checkout -q FETCH_HEAD \
+    && cd .. \
+    && rm -rf .git blaze/.git \
+    && sed -i -f /tmp/m17-demod-type.sed apps/m17-demod.cpp \
+    && grep -q 'TYPE: 0x' apps/m17-demod.cpp \
+    && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-I/src/m17/blaze" \
+    && cmake --build build --target m17-demod m17-mod -j"$(nproc)" \
+    && strip build/apps/m17-demod build/apps/m17-mod
+# Self-test: a synthetic call must come out with callsigns and the TYPE field.
+RUN head -c 96000 /dev/zero | build/apps/m17-mod -S SELFTEST 2>/dev/null \
+        | build/apps/m17-demod -l 2>&1 >/dev/null | grep -q 'SRC: SELFTEST.*TYPE: 0x'
+
+# ---- Stage 6: runtime ----
 FROM debian:bookworm-slim
 # multimon-ng, direwolf and rtl-433 are the external decoders of the first-party plugins
 # (plugins/): separate GPL-2.0 processes started by the plugin host through
 # superhet-plugin-adapter; about 27 MiB (docs/third-party.md). welle-cli (DAB plugin) needs the
 # libraries on the second line: about 7 MiB together with the binary copied below; readsb (ADS-B
-# plugin) needs zstd.
+# plugin) needs zstd; m17-demod (M17 plugin) needs Codec2 and Boost.Program_options (about 3 MiB).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends librtlsdr0 libopus0 multimon-ng direwolf rtl-433 \
         libfaad2 libfftw3-single3 libmp3lame0 libmpg123-0 libasound2 libairspy0 libsoapysdr0.8 libusb-1.0-0 libzstd1 ca-certificates \
+        libcodec2-1.0 libboost-program-options1.74.0 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home --home-dir /home/superhet superhet \
     && mkdir -p /data/plugins /data/tiles \
@@ -75,6 +113,12 @@ COPY --from=welle /usr/share/doc/welle.io/copyright /usr/share/doc/welle.io/copy
 COPY --from=readsb /src/readsb/readsb /usr/bin/readsb
 COPY --from=readsb /src/readsb/COPYING /usr/share/doc/readsb/copyright
 
+# m17-demod as compiled above (GPL-3.0, one-line patch: deploy/docker/m17-demod-type.sed), with its
+# licence and the one of the Blaze headers it was built with (BSD-3-Clause).
+COPY --from=m17 /src/m17/build/apps/m17-demod /usr/bin/m17-demod
+COPY --from=m17 /src/m17/LICENSE /usr/share/doc/m17-cxx-demod/copyright
+COPY --from=m17 /src/m17/blaze/LICENSE /usr/share/doc/m17-cxx-demod/blaze-LICENSE
+
 COPY --from=rust /usr/local/lib/libsuperhet-loopback-bind.so /usr/local/lib/superhet/libsuperhet-loopback-bind.so
 
 # One image for every service; compose selects the binary via `command`.
@@ -87,6 +131,7 @@ COPY plugins/aprs /usr/share/superhet/plugins/aprs
 COPY plugins/rtl433 /usr/share/superhet/plugins/rtl433
 COPY plugins/dab /usr/share/superhet/plugins/dab
 COPY plugins/adsb /usr/share/superhet/plugins/adsb
+COPY plugins/m17 /usr/share/superhet/plugins/m17
 # The API does not serve the frontend yet; the build output is shipped for later use.
 COPY --from=web /src/web/dist /usr/share/superhet/web
 

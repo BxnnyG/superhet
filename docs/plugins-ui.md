@@ -9,7 +9,7 @@ policy shows decoder events) and nothing of the plugin management.
 
 The decoders are presented like OpenWebRX's "digital modes" (`web/src/digital/`). Next to the
 analog mode buttons (WFM NFM AM USB LSB CW) the tuning strip has a **Digital** select with
-**POCSAG**, **APRS** and **ISM** (rtl_433); a mode is listed when its plugin is installed.
+**POCSAG**, **APRS**, **ISM** (rtl_433) and **M17** (digital voice, `docs/plugins-m17.md`); a mode is listed when its plugin is installed.
 
 - **Pick one**: the receiver is set up (NFM, the bandwidth the decoder wants: 12.5 kHz for POCSAG
   and APRS, 250 kHz for ISM; squelch off), other digital decoders on the receiver are stopped, the
@@ -23,10 +23,15 @@ analog mode buttons (WFM NFM AM USB LSB CW) the tuning strip has a **Digital** s
   "Try POCSAG?" (439.9875 DAPNET, 929 to 932 MHz). It only starts the mode when clicked. The table
   is `web/src/digital/modes.ts`.
 - **Output panel** (below the spectrum, collapsible, remembered): for the selected receiver's
-  digital decoder a table, newest first, of what it decoded. POCSAG: time, RIC, function / type /
+  digital decoder a table, newest first, of what it decoded. M17: time, callsigns, CAN and
+  encryption, duration / text / position. POCSAG: time, RIC, function / type /
   baud, message. APRS: time, station, type and path, position and text with a map link. ISM: time,
   sensor model and id, channel, readings. Only events of this instance are listed. The header
   shows the state, **Settings**, **Stop** (and **Restart** after a failure).
+  **M17** adds a "now talking" bar (station on the air, destination, CAN, encryption, clock, text,
+  position; "Channel idle" and the last call between calls, polled from the plugin's status
+  document) above a call log with one row per finished call. Its decoded voice joins the audio
+  mix and the receiver's own audio is muted while the decoder runs (`web/src/m17/`).
 - **Counters**: input received (bytes and level in dBFS), decoded events, time of the last one,
   dropped input chunks, rejected output lines and restarts, from the instance counters of the host
   (`docs/api-plugins.md`). Under an empty table a verdict names the likely cause: no samples have

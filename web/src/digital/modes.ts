@@ -5,9 +5,10 @@
 
 import { formatMhz } from "../decoders/events";
 import type { VfoPatch } from "../vfo/api";
+import { M17_CALL_END, M17_CALL_START, M17_PLUGIN_ID } from "../m17/model";
 import type { PluginInstance } from "../plugins/api";
 
-export type DigitalModeId = "pocsag" | "aprs" | "ism";
+export type DigitalModeId = "pocsag" | "aprs" | "ism" | "m17";
 
 export interface FrequencyHint {
   loHz: number;
@@ -29,7 +30,7 @@ export interface DigitalMode {
   vfo: VfoPatch & { mode: "nfm"; bandwidthHz: number; squelchDbfs: null };
   /** Typical frequencies, for the "try this mode here" hint. */
   hints: readonly FrequencyHint[];
-  /** Noun for counters: "pages", "packets", "readings". */
+  /** Noun for counters: "pages", "packets", "readings", "calls". */
   noun: string;
   /** What to expect while nothing has been decoded yet. */
   expect: string;
@@ -83,6 +84,21 @@ export const DIGITAL_MODES: readonly DigitalMode[] = [
     noun: "readings",
     expect:
       "Most sensors send every 30 to 60 seconds, some only on change (remotes, door contacts). Put the VFO on the sensor's centre frequency, for example 433.92 MHz.",
+  },
+  {
+    id: "m17",
+    label: "M17",
+    title:
+      "M17 digital voice (4800 baud 4FSK, Codec2): callsigns, CAN, encryption flag and the audio",
+    pluginId: M17_PLUGIN_ID,
+    eventKinds: [M17_CALL_START, M17_CALL_END],
+    // One 12.5 kHz channel; the receiver's own audio is the 4FSK baseband and is muted while M17 runs.
+    vfo: { mode: "nfm", bandwidthHz: 12_500, squelchDbfs: null },
+    // M17 has no worldwide calling frequency, so there is nothing to suggest.
+    hints: [],
+    noun: "calls",
+    expect:
+      "M17 is used on amateur radio VHF/UHF channels (2 m and 70 cm; check the band plan of your country). Tune exactly onto the channel: a signal a few kHz off, for example from an uncorrected RTL-SDR clock, is lost. The first second of a call may be missing while the decoder locks on.",
   },
 ];
 

@@ -1,0 +1,17 @@
+{
+  "global": {
+    "core:datatype": "ri16_le",
+    "core:sample_rate": 48000,
+    "core:version": "1.2.0",
+    "core:description": "Synthetic M17 voice stream DL1ABC to DB0XYZ, CAN 3, 3 s (4FSK baseband as an NFM receiver delivers it)",
+    "core:author": "BxnnyG",
+    "core:license": "CC0-1.0",
+    "core:recorder": "scripts/gen-m17-recording.sh (m17-mod from m17-cxx-demod)"
+  },
+  "captures": [
+    {
+      "core:sample_start": 0
+    }
+  ],
+  "annotations": []
+}

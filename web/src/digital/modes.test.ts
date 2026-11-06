@@ -10,7 +10,7 @@ import {
 
 describe("digital modes", () => {
   it("maps the bundled plugins to modes with a decoder-friendly VFO preset", () => {
-    expect(DIGITAL_MODES.map((m) => m.id)).toEqual(["pocsag", "aprs", "ism"]);
+    expect(DIGITAL_MODES.map((m) => m.id)).toEqual(["pocsag", "aprs", "ism", "m17"]);
     for (const m of DIGITAL_MODES) {
       expect(m.vfo.mode).toBe("nfm");
       expect(m.vfo.squelchDbfs).toBeNull();
@@ -28,6 +28,8 @@ describe("digital modes", () => {
     expect(suggestDigital(868_300_000)?.mode.id).toBe("ism");
     expect(suggestDigital(439_987_500)?.mode.id).toBe("pocsag");
     expect(suggestDigital(100_000_000)).toBeNull();
+    // M17 has no calling frequency to suggest.
+    expect(DIGITAL_MODES.find((m) => m.id === "m17")?.hints).toEqual([]);
     expect(suggestDigital(145_500_000)).toBeNull();
   });
 
