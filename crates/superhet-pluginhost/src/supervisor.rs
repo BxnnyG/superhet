@@ -37,8 +37,17 @@ use crate::framed_session;
 use crate::outputs::{NoOutputs, Outputs};
 
 /// Environment variables passed through to plugins; everything else (NATS and database
-/// credentials in particular) is withheld.
-const PASSTHROUGH_ENV: &[&str] = &["PATH", "LANG", "LC_ALL", "TZ", "TMPDIR"];
+/// credentials in particular) is withheld. `SUPERHET_DSD_FME_PATH` is the location of the
+/// user-installed `dsd-fme` for the DMR / dPMR / NXDN plugin (`docs/plugins-dsd.md`); it is a file
+/// path, not a secret.
+const PASSTHROUGH_ENV: &[&str] = &[
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "TZ",
+    "TMPDIR",
+    "SUPERHET_DSD_FME_PATH",
+];
 
 /// Restart and shutdown behaviour.
 #[derive(Debug, Clone)]

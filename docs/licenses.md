@@ -22,7 +22,7 @@ External components run as **separate processes** (plugins) or are **dynamically
 | acarsdec (f00b4r0 fork) | ACARS plugin | GPL-2.0 | plugin image | original TLeconte repo archived |
 | dumpvdl2 | VDL2 plugin | GPL-3.0 | plugin image | – |
 | redsea | RDS plugin | MIT | plugin image | – |
-| dsd-fme | digital voice plugin (candidate) | ISC/GPL mix – verify | **fetch & build locally** if it links mbelib | ADR-0005 |
+| dsd-fme | DMR / dPMR / NXDN plugin (`docs/plugins-dsd.md`) | ISC/GPL mix – verify | **user-installed, not in the repository, image or releases** (links mbelib); the plugin only runs it as a separate process | ADR-0005, ADR-0018 |
 | digiham | digital voice plugin (candidate) | GPL-3.0 | plugin image | little maintenance since 2024 |
 | codecserver | optional codec backend | GPL-3.0 | separate | little maintenance since 2024 |
 | m17-cxx-demod (`m17-demod`) | M17 plugin | GPL-3.0 | runtime image (built from a pinned upstream commit in the Dockerfile, one-line sed patch, separate process, `docs/third-party.md`) | – |

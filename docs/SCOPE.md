@@ -101,13 +101,13 @@ All decoders are plugins (separate processes). Without a codec plugin, voice dec
 | ADS-B 1090 MHz (exclusive) | v1 (P2) | ✅ | readsb (GPL-3.0) | Pins the device; needs a 1090 MHz antenna for decent range |
 | DAB / DAB+ (exclusive, whole ensemble): service list, DLS, slideshow (MOT), AAC → Opus audio | v1 (P2) | ✅ (1.536 MHz ensemble fits the 2.4 MS/s window; Band III antenna needed) | welle-cli / welle.io (GPL-2.0+), fallback eti-cmdline + dablin (ADR-0013) | Pins the device; AAC decoder licence (faad2 vs fdk-aac) shown at install; nothing vendored |
 | AIS 161.975/162.025 MHz | v1 (P2/P3) | ✅ | AIS-catcher (GPL-3.0) | – |
-| DMR Tier I/II (Tier III metadata) | v1 (P3) | ✅ | dsd-fme (ISC/GPL mix, verify) or digiham (GPL-3.0) | dsd-fme links mbelib at build time → frame output needs patching or the plugin itself is "fetch & build locally" (ADR-0005) |
+| DMR Tier I/II (Tier III metadata) | v1 (P3), **plugin with user-installed dsd-fme** (`docs/plugins-dsd.md`) | ✅ | dsd-fme (ISC/GPL mix, verify; user-installed) or digiham (GPL-3.0) | dsd-fme links mbelib at build time → frame output needs patching or the plugin itself is "fetch & build locally" (ADR-0005) |
 | D-Star | v1 (P3) | ✅ | digiham / dsd-fme | AMBE codec |
 | YSF / C4FM | v1 (P3) | ✅ | digiham / dsd-fme | AMBE+2 / IMBE |
-| NXDN | v1 (P3) | ✅ | dsd-fme | AMBE+2 |
+| NXDN | v1 (P3), **plugin with user-installed dsd-fme** (`docs/plugins-dsd.md`) | ✅ | dsd-fme (user-installed, never shipped) | AMBE+2; events and audio as DMR; not verified on air |
 | P25 Phase 1 | v1 (P3) | ✅ | dsd-fme | IMBE; rare in Europe |
 | M17 | v1 (P3), **bundled** (`docs/plugins-m17.md`, ADR-0018) | ✅ | m17-cxx-demod (GPL-3.0) | Codec2 (LGPL-2.1) is free → **voice works without restricted codec**; voice streams only, first second of a call may be missing |
-| dPMR | later | ✅ | dsd-fme | – |
+| dPMR | v1 (P3), **plugin with user-installed dsd-fme** (`docs/plugins-dsd.md`) | ✅ | dsd-fme (user-installed, never shipped) | not verified on air |
 | TETRA TMO – own cell: MCC/MNC, LA, cell/neighbour info, registrations, ISSI/GSSI, group attach, call setup/teardown, SDS (incl. status, text, LIP location), encryption state, signal quality per burst | v1 (P3) | ✅ (25 kHz, π/4-DQPSK 18 ksym/s) | native Rust stack `superhet-tetra` (ADR-0004); osmo-tetra (AGPL-3.0) / tetra-kit (GPL-3.0) as CI test oracles only | Large effort; reference recordings from own equipment |
 | TETRA DMO – own hotspot/MTM (direct mode, DM-GATE / DM-REP): call setup, SDS, presence, gateway/repeater signalling | v1 (P3) | ✅ | native Rust stack (no maintained open-source DMO decoder known) | Must be implemented from EN 300 396; reference recordings essential |
 | TETRA voice (TMO + DMO, unencrypted own traffic) – **primary goal** | v1 (P3) | ✅ | `tetra-acelp` frames → ETSI codec plugin | Codec only via separate plugin (ADR-0005); encrypted calls shown, never decrypted |

@@ -5,6 +5,17 @@
 // new plugin shows up readable without a UI change.
 
 import { isRec, type Rec } from "../spectrum/api";
+import {
+  DSD_CALL_END,
+  DSD_CALL_START,
+  channelLabel,
+  encryptionLabel as dsdEncryptionLabel,
+  formatDuration as dsdDuration,
+  parseCall as parseDsdCall,
+  protocolLabel,
+  sourceLabel,
+  targetLabel,
+} from "../dsd/model";
 import type { BadgeTone } from "../ui";
 import {
   M17_CALL_END,
@@ -405,6 +416,54 @@ function m17(e: DecoderEvent, d: Rec): EventView | null {
   };
 }
 
+// ---------- DMR / dPMR / NXDN ----------
+
+function dsd(e: DecoderEvent, d: Rec): EventView | null {
+  const call = parseDsdCall(d);
+  if (call === null) return null;
+  const ended = e.kind === DSD_CALL_END;
+  const label = protocolLabel(call.mode);
+  const channel = channelLabel(call);
+
+  const detailParts: string[] = [];
+  if (ended && call.durationMs !== null) detailParts.push(dsdDuration(call.durationMs));
+  if (ended && call.muted) detailParts.push("audio withheld");
+  else if (ended && call.audioMs !== null && call.audioMs < (call.durationMs ?? 0) / 2) {
+    detailParts.push(`${dsdDuration(call.audioMs)} of voice decoded`);
+  }
+
+  const fields: EventField[] = [];
+  put(fields, "Protocol", label);
+  put(fields, "Source ID", call.src, true);
+  put(fields, "Target", targetLabel(call), true);
+  put(fields, "Call type", call.group === null ? null : call.group ? "group" : "private");
+  put(fields, "Slot", call.slot);
+  put(fields, "Colour code", call.cc);
+  put(fields, "RAN", call.ran);
+  put(fields, "Encryption", dsdEncryptionLabel(call));
+  if (ended) {
+    put(fields, "Duration", call.durationMs === null ? null : dsdDuration(call.durationMs));
+    put(fields, "Voice decoded", call.audioMs === null ? null : dsdDuration(call.audioMs));
+    put(fields, "Ended", call.reason);
+  }
+
+  return {
+    label,
+    tone: call.encrypted ? "warn" : ended ? "success" : "accent",
+    title: ended ? `${label} call ended` : `${label} call started`,
+    headline: `${sourceLabel(call)} → ${targetLabel(call)}`,
+    tags: [
+      ...(channel === "" ? [] : [channel]),
+      ...(call.encrypted ? [dsdEncryptionLabel(call)] : []),
+    ],
+    detail: detailParts.length > 0 ? detailParts.join(" · ") : ended ? null : "on the air",
+    fields,
+    link: null,
+    mono: true,
+    raw: rawJson(d),
+  };
+}
+
 // ---------- generic ----------
 
 /** "bytes=1920 seq=47": the scalar members of the data, for a one-line summary. */
@@ -454,6 +513,9 @@ export function describeEvent(e: DecoderEvent): EventView {
     case M17_CALL_START:
     case M17_CALL_END:
       return m17(e, d) ?? generic(e, d);
+    case DSD_CALL_START:
+    case DSD_CALL_END:
+      return dsd(e, d) ?? generic(e, d);
     case "rtl433.reading":
       return rtl433(e, d);
     default:

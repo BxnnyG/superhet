@@ -1,0 +1,48 @@
+# DMR, dPMR and NXDN digital voice, received with dsd-fme: a decoder the USER installs. Neither
+# dsd-fme nor its AMBE vocoder (mbelib) is part of this repository, the image or any release, and the
+# plugin never downloads anything (docs/plugins-dsd.md, ADR-0018). Without the tool the plugin
+# stays idle and its status document says `tool.state = "missing"` (the web UI shows "needs dsd-fme").
+#
+# Non-exclusive: bind it to an NFM VFO on the channel (12.5 kHz raster); the VFO's FM audio is the
+# baseband dsd-fme reads. The decoded voice goes to the listener like M17 (pseudo VFO,
+# `InstanceInfo.audio_vfo`), calls are events (`dsd.call.start`, `dsd.call.end`) and the status
+# document carries the calls on the air. Config keys (all optional):
+#   protocol = "auto"        # auto | dmr | dpmr | nxdn
+#   audio = true             # false: events only, dsd-fme gets no audio output
+#   mute_encrypted = true    # do not play the audio of encrypted calls
+#   frame_flag = "-fs"       # override dsd-fme's frame-type switch
+
+[plugin]
+id = "org.superhet.decoder.dsd"
+name = "DMR / dPMR / NXDN (dsd-fme)"
+version = "0.1.0"
+protocol = 1
+license = "AGPL-3.0-only"
+type = "decoder"
+description = "DMR, dPMR and NXDN digital voice through a user-installed dsd-fme: slot, source ID, talkgroup, colour code, encryption flag and the voice audio"
+homepage = "https://github.com/BxnnyG/superhet"
+
+[runtime]
+kind = "process"
+transport = "framed"
+command = ["superhet-plugin-adapter", "dsd"]
+heartbeat_timeout_s = 15
+
+[input]
+kind = "discriminator"
+sample_rate = 48000
+format = "s16le"
+bandwidth_hz = 12500
+
+[output]
+events_schema = "schema/events.json"
+
+[output.audio]
+sample_rate = 48000
+channels = 1
+
+[config]
+schema = "schema/config.json"
+
+[install]
+acknowledge = { text = "Needs dsd-fme, which you install yourself: it is not part of Superhet and is never downloaded by it. dsd-fme is third-party software under its own licences (see its repository); its voice decoding uses the AMBE+2 / AMBE vocoder (mbelib), which is covered by patents in many countries, and Superhet takes no position on whether building or running it is allowed where you live. Receive only. Whether listening to digital voice radio is allowed depends on the country and on what is received (in Germany, for example, section 5 TKG protects the content of communications not meant for you); you are responsible for that. Encrypted calls are recognised and, by default, not played; nothing is decrypted. Source IDs, talkgroups and call times of stations are kept in the decoder history until the retention period ends.", url = "https://github.com/lwvmobile/dsd-fme" }

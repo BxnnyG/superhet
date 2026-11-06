@@ -5,10 +5,12 @@
 
 import { formatMhz } from "../decoders/events";
 import type { VfoPatch } from "../vfo/api";
+import { DSD_CALL_END, DSD_CALL_START, DSD_PLUGIN_ID } from "../dsd/model";
 import { M17_CALL_END, M17_CALL_START, M17_PLUGIN_ID } from "../m17/model";
+import { isRec, type Rec } from "../spectrum/api";
 import type { PluginInstance } from "../plugins/api";
 
-export type DigitalModeId = "pocsag" | "aprs" | "ism" | "m17";
+export type DigitalModeId = "pocsag" | "aprs" | "ism" | "m17" | "dmr" | "dpmr" | "nxdn";
 
 export interface FrequencyHint {
   loHz: number;
@@ -34,7 +36,31 @@ export interface DigitalMode {
   noun: string;
   /** What to expect while nothing has been decoded yet. */
   expect: string;
+  /**
+   * Start configuration, for modes that share one plugin (DMR, dPMR and NXDN are one dsd-fme
+   * plugin told which protocol to decode). Also tells the instances of the modes apart.
+   */
+  config?: Rec;
 }
+
+// DMR, dPMR and NXDN are one plugin (a user-installed dsd-fme, docs/plugins-dsd.md); the config's
+// protocol tells the three modes apart. All three are one 12.5 kHz channel and no calling frequency.
+const DSD_TITLE =
+  " digital voice (needs your own dsd-fme): source ID, talkgroup, colour code and the audio";
+const DSD_EXPECT =
+  "Needs dsd-fme, which you install yourself (the panel says when it is missing). Tune exactly onto the channel: a signal a few kHz off, for example from an uncorrected RTL-SDR clock, is lost. Encrypted calls are flagged and not played.";
+const dsdMode = (id: "dmr" | "dpmr" | "nxdn", label: string, expect: string): DigitalMode => ({
+  id,
+  label,
+  title: `${label}${DSD_TITLE}`,
+  pluginId: DSD_PLUGIN_ID,
+  eventKinds: [DSD_CALL_START, DSD_CALL_END],
+  vfo: { mode: "nfm", bandwidthHz: 12_500, squelchDbfs: null },
+  hints: [],
+  noun: "calls",
+  expect,
+  config: { protocol: id },
+});
 
 export const DIGITAL_MODES: readonly DigitalMode[] = [
   {
@@ -100,6 +126,9 @@ export const DIGITAL_MODES: readonly DigitalMode[] = [
     expect:
       "M17 is used on amateur radio VHF/UHF channels (2 m and 70 cm; check the band plan of your country). Tune exactly onto the channel: a signal a few kHz off, for example from an uncorrected RTL-SDR clock, is lost. The first second of a call may be missing while the decoder locks on.",
   },
+  dsdMode("dmr", "DMR", `${DSD_EXPECT} DMR carries two calls at once (time slots 1 and 2).`),
+  dsdMode("dpmr", "dPMR", DSD_EXPECT),
+  dsdMode("nxdn", "NXDN", `${DSD_EXPECT} The 12.5 kHz variant (NXDN96) is decoded.`),
 ];
 
 export const digitalMode = (id: DigitalModeId): DigitalMode => {
@@ -111,6 +140,17 @@ export const digitalMode = (id: DigitalModeId): DigitalMode => {
 export const digitalModeOfPlugin = (pluginId: string): DigitalMode | null =>
   DIGITAL_MODES.find((m) => m.pluginId === pluginId) ?? null;
 
+/**
+ * The mode a plugin instance runs: the one of its plugin, and where several modes share a plugin
+ * (DMR, dPMR, NXDN) the one whose config the instance carries; the first of them otherwise.
+ */
+export function digitalModeOfInstance(instance: PluginInstance): DigitalMode | null {
+  const modes = DIGITAL_MODES.filter((m) => m.pluginId === instance.pluginId);
+  if (modes.length <= 1) return modes[0] ?? null;
+  const config = isRec(instance.config) ? instance.config : {};
+  return modes.find((m) => m.config?.protocol === config.protocol) ?? modes[0] ?? null;
+}
+
 /** Digital modes with a running (or starting) instance on a VFO. */
 export function digitalOnVfo(
   instances: readonly PluginInstance[],
@@ -120,7 +160,7 @@ export function digitalOnVfo(
   const out: { mode: DigitalMode; instance: PluginInstance }[] = [];
   for (const instance of instances) {
     if (instance.device !== device || instance.vfo !== vfo) continue;
-    const mode = digitalModeOfPlugin(instance.pluginId);
+    const mode = digitalModeOfInstance(instance);
     if (mode !== null) out.push({ mode, instance });
   }
   return out;

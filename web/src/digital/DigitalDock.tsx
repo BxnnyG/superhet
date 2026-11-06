@@ -5,6 +5,9 @@ import { formatMhz, formatTime, type DecoderEvent } from "../decoders/events";
 import { DecoderEventStore } from "../decoders/store";
 import { describeHttpError } from "../http";
 import type { PluginInstance } from "../plugins/api";
+import { DsdNow } from "../dsd/DsdNow";
+import { DSD_CALL_END, DSD_PLUGIN_ID, sourceLabel, type DsdStatus } from "../dsd/model";
+import { useDsdStatus } from "../dsd/useDsdStatus";
 import { M17_CALL_END, type M17Status } from "../m17/model";
 import { NowTalking } from "../m17/NowTalking";
 import { useM17Status } from "../m17/useM17Status";
@@ -115,6 +118,10 @@ function DockPanel({
   // M17 only: who is on the air, polled from the plugin's status document.
   const m17 = useM17Status(mode.id === "m17" ? instance.id : null);
   const onAir = m17.stale ? null : m17.status.now;
+  // DMR / dPMR / NXDN: the calls on the air, and whether the user-installed dsd-fme is there.
+  const dsd = useDsdStatus(mode.pluginId === DSD_PLUGIN_ID ? instance.id : null);
+  const dsdOnAir = dsd.stale ? undefined : dsd.status.now[0];
+  const needsTool = !dsd.stale && dsd.status.tool.state === "missing";
 
   const setOpen = (next: boolean) => {
     setOpenState(next);
@@ -176,6 +183,12 @@ function DockPanel({
         {onAir !== null && (
           <Badge tone={onAir.encrypted === true ? "warn" : "success"} dot pulse>
             <span className="font-mono">{onAir.src}</span>
+          </Badge>
+        )}
+        {needsTool && <Badge tone="warn">needs dsd-fme</Badge>}
+        {dsdOnAir !== undefined && (
+          <Badge tone={dsdOnAir.encrypted ? "warn" : "success"} dot pulse>
+            <span className="font-mono">{sourceLabel(dsdOnAir)}</span>
           </Badge>
         )}
         {siblings.length > 1 && (
@@ -242,6 +255,7 @@ function DockPanel({
             verdictTone={state.tone}
             vfo={vfo}
             m17={mode.id === "m17" ? m17 : null}
+            dsd={mode.pluginId === DSD_PLUGIN_ID ? dsd : null}
           />
         </div>
       )}
@@ -254,6 +268,9 @@ const COLUMNS: Record<DigitalMode["id"], readonly [string, string, string]> = {
   aprs: ["Station", "Type · path", "Position · text"],
   ism: ["Sensor", "Channel", "Readings"],
   m17: ["Call", "CAN · encryption", "Duration · text · position"],
+  dmr: ["Call", "Slot · colour code", "Duration · encryption"],
+  dpmr: ["Call", "Colour code", "Duration · encryption"],
+  nxdn: ["Call", "RAN", "Duration · encryption"],
 };
 
 function Output({
@@ -265,6 +282,7 @@ function Output({
   verdictTone,
   vfo,
   m17,
+  dsd,
 }: {
   mode: DigitalMode;
   instance: PluginInstance;
@@ -275,6 +293,8 @@ function Output({
   vfo: Vfo;
   /** M17 only: the plugin's status poll. */
   m17: { status: M17Status; stale: boolean } | null;
+  /** DMR / dPMR / NXDN only: the plugin's status poll. */
+  dsd: { status: DsdStatus; stale: boolean } | null;
 }) {
   // A private event store for the panel: history of this plugin plus the live feed.
   const store = useMemo(
@@ -287,9 +307,11 @@ function Output({
     return () => store.stop();
   }, [store, mode.pluginId]);
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot);
-  // The M17 call log has one row per finished call; the call on the air is in the banner.
+  // The call logs (M17, DMR / dPMR / NXDN) have one row per finished call; the call on the air is
+  // in the banner.
+  const callEnd = m17 !== null ? M17_CALL_END : dsd !== null ? DSD_CALL_END : null;
   const rows = snap.events
-    .filter((e) => e.meta.instance === instance.id && (m17 === null || e.kind === M17_CALL_END))
+    .filter((e) => e.meta.instance === instance.id && (callEnd === null || e.kind === callEnd))
     .slice(0, MAX_ROWS);
   const [h1, h2, h3] = COLUMNS[mode.id];
   const [view, setView] = useState<"list" | "map">("list");
@@ -314,6 +336,13 @@ function Output({
         <NowTalking
           status={m17.status}
           stale={m17.stale}
+          running={instance.state === "running" && verdictTone === "success"}
+        />
+      )}
+      {dsd !== null && (
+        <DsdNow
+          status={dsd.status}
+          stale={dsd.stale}
           running={instance.state === "running" && verdictTone === "success"}
         />
       )}
@@ -344,7 +373,11 @@ function Output({
       ) : rows.length === 0 ? (
         <div className="px-4 py-5 text-sm text-fg-muted" data-testid="dock-empty">
           <p className="font-medium text-fg">
-            {instance.state === "running" ? "Listening…" : "Waiting for the decoder"}
+            {dsd !== null && !dsd.stale && dsd.status.tool.state === "missing"
+              ? "Waiting for dsd-fme"
+              : instance.state === "running"
+                ? "Listening…"
+                : "Waiting for the decoder"}
           </p>
           <p className="mt-1 max-w-prose">{expectText(mode, vfo.freqHz)}</p>
           {!snap.loaded && <p className="mt-1 text-xs text-fg-subtle">Loading history…</p>}

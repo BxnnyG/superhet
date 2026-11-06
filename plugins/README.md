@@ -20,5 +20,10 @@ First-party plugins live here. The contract (manifest, transports, supervision, 
   an NFM VFO, framed transport with call events, a status document and the decoded voice as plugin
   audio (`docs/plugins-m17.md`, ADR-0018).
 
+- `dsd/` – DMR / dPMR / NXDN (a **user-installed** dsd-fme behind `superhet-plugin-adapter dsd`):
+  manifest and adapter only, no codec in the repository, image or releases; without the tool the
+  plugin reports "needs dsd-fme". Non-exclusive, framed transport, call events per DMR slot, status
+  document and decoded voice as plugin audio (`docs/plugins-dsd.md`, ADR-0018).
+
 Install a plugin through the admin API (`POST /api/v1/plugins`, `docs/api-plugins.md`) or the host's `install` command; the host copies it to
 `$SUPERHET_PLUGIN_DIR/<id>/<version>` (default `/data/plugins`).

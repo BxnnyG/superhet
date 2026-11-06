@@ -31,11 +31,11 @@ use call::{Emit, Tracker};
 use lsf::Line;
 
 /// Interval of the plugin's heartbeat frames (the host's watchdog allows 15 s).
-const HEARTBEAT_EVERY: Duration = Duration::from_secs(3);
+pub(crate) const HEARTBEAT_EVERY: Duration = Duration::from_secs(3);
 /// Sample chunks waiting for the demodulator (about 2.5 s at the daemon's 20 ms chunks).
-const INPUT_QUEUE: usize = 128;
+pub(crate) const INPUT_QUEUE: usize = 128;
 /// How often the call tracker is asked whether the signal is gone.
-const TICK: Duration = Duration::from_millis(100);
+pub(crate) const TICK: Duration = Duration::from_millis(100);
 /// Audio that arrives without a call waits this long for the link setup frame the tool prints
 /// just before it (two pipes, two threads).
 const LSF_GRACE: Duration = Duration::from_millis(50);
@@ -107,7 +107,7 @@ impl Config {
     }
 }
 
-fn on_path(program: &str) -> Option<PathBuf> {
+pub(crate) fn on_path(program: &str) -> Option<PathBuf> {
     if program.contains('/') {
         return Some(PathBuf::from(program));
     }
@@ -120,7 +120,7 @@ fn on_path(program: &str) -> Option<PathBuf> {
 
 /// Start the tool. `m17-demod` writes the decoded voice through C stdio, which buffers 4 KiB on a
 /// pipe (a quarter of a second of audio): `stdbuf -o0` makes every frame leave at once.
-fn spawn(program: &str, args: &[String]) -> Result<Child, String> {
+pub(crate) fn spawn(program: &str, args: &[String]) -> Result<Child, String> {
     let Some(path) = on_path(program) else {
         return Err(format!("{program} is not installed (not found on PATH)"));
     };
@@ -185,7 +185,7 @@ impl Shared {
     }
 }
 
-fn unix_ms() -> u64 {
+pub(crate) fn unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
@@ -319,7 +319,7 @@ pub fn run(program: &str, config: &Value, socket: &str) -> ExitCode {
 }
 
 /// Samples from the host into the tool's stdin.
-fn handle(frame: &Frame, input: &mpsc::SyncSender<Vec<u8>>) {
+pub(crate) fn handle(frame: &Frame, input: &mpsc::SyncSender<Vec<u8>>) {
     if frame.kind != FrameKind::Samples {
         return;
     }
@@ -331,7 +331,7 @@ fn handle(frame: &Frame, input: &mpsc::SyncSender<Vec<u8>>) {
     }
 }
 
-fn feed(mut stdin: ChildStdin, queue: &mpsc::Receiver<Vec<u8>>) {
+pub(crate) fn feed(mut stdin: ChildStdin, queue: &mpsc::Receiver<Vec<u8>>) {
     for chunk in queue {
         if stdin.write_all(&chunk).is_err() {
             return;
