@@ -60,7 +60,7 @@ impl ConfigValidator {
         let Some(error) = self.schema.iter_errors(config).next() else {
             return Ok(());
         };
-        let mut field = dotted(&error.instance_path().to_string());
+        let mut field = dotted(&error.instance_path.to_string());
         let mut message = error.to_string();
         // "Additional properties are not allowed ('x' was unexpected)" and a missing required
         // key name the key in the message; point at it instead of at the parent object.

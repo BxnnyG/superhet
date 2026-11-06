@@ -27,6 +27,7 @@ const MAX_BODY_BYTES: usize = 8 * 1024;
 pub fn router(auth: AuthState) -> Router {
     Router::new()
         .merge(super::accounts::router())
+        .merge(super::oidc::router())
         .route("/api/v1/auth/status", get(status))
         .route("/api/v1/auth/setup", post(setup))
         .route("/api/v1/auth/login", post(login))
@@ -247,6 +248,8 @@ async fn status_inner(auth: &AuthState, client: &ClientInfo, headers: &HeaderMap
         "role": principal.as_ref().map(|p| p.role.as_str()),
         "kind": principal.as_ref().map(|p| if p.is_guest() { "guest" } else { "user" }),
         "must_change_password": principal.as_ref().is_some_and(|p| p.must_change_password),
+        "oidc": auth.oidc_public().await,
+        "local_login": auth.local_login_allowed().await,
         "guest": {
             "enabled": guest.enabled,
             "privacy_text": guest.enabled.then_some(guest.privacy_text),
@@ -357,6 +360,9 @@ async fn login_inner(
 ) -> Reply {
     guard_origin(auth, headers)?;
     let db = auth.db()?;
+    if !auth.local_login_allowed().await {
+        return Err(error(StatusCode::FORBIDDEN, "local_login_disabled", None));
+    }
     let req: LoginBody = parse_json(headers, body)?;
     let who = account_who(client, None, &req.username, None);
     let blocked = check_rate(auth, client).and_then(|()| {

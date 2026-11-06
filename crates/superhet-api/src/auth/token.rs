@@ -53,7 +53,7 @@ pub fn secrets_equal(a: &str, b: &str) -> bool {
         == 0
 }
 
-fn cookie_value(headers: &HeaderMap, wanted: &str) -> Option<String> {
+pub(crate) fn cookie_value(headers: &HeaderMap, wanted: &str) -> Option<String> {
     headers
         .get_all(header::COOKIE)
         .iter()

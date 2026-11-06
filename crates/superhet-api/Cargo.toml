@@ -32,11 +32,13 @@ getrandom = "0.4"
 maxminddb = "0.32.0"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+openidconnect = { version = "4", default-features = false }
 
 [dev-dependencies]
 http-body-util.workspace = true
 tokio-tungstenite = "0.30"
 sqlx.workspace = true
+ring = "0.17"
 
 [lints]
 workspace = true

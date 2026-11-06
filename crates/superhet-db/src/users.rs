@@ -66,11 +66,16 @@ pub struct UserInfo {
     pub created_at_ms: i64,
     /// Last successful login, Unix milliseconds.
     pub last_login_ms: Option<i64>,
+    /// Contact address (used to link OIDC logins when the admin allows it).
+    pub email: Option<String>,
+    /// The account is linked to an OIDC identity.
+    pub oidc: bool,
 }
 
 const USER_COLUMNS: &str = "id, username, role, disabled_at IS NOT NULL AS disabled, \
     must_change_password, (extract(epoch FROM created_at) * 1000)::bigint AS created_ms, \
-    (extract(epoch FROM last_login_at) * 1000)::bigint AS login_ms";
+    (extract(epoch FROM last_login_at) * 1000)::bigint AS login_ms, email, \
+    EXISTS (SELECT 1 FROM superhet.oidc_identities i WHERE i.user_id = users.id) AS oidc";
 
 fn user_info(row: &sqlx::postgres::PgRow) -> UserInfo {
     UserInfo {
@@ -81,6 +86,8 @@ fn user_info(row: &sqlx::postgres::PgRow) -> UserInfo {
         must_change_password: row.get("must_change_password"),
         created_at_ms: row.get("created_ms"),
         last_login_ms: row.get("login_ms"),
+        email: row.get("email"),
+        oidc: row.get("oidc"),
     }
 }
 
@@ -294,6 +301,35 @@ pub async fn reset_password(
     }
     tx.commit().await?;
     Ok(changed > 0)
+}
+
+/// Result of changing an account's email address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmailSet {
+    /// Done.
+    Done,
+    /// No such user.
+    NotFound,
+    /// Another account has that address (case-insensitive).
+    Taken,
+}
+
+/// Set or clear (`None`) the email address of an account.
+///
+/// # Errors
+/// Fails if the query fails for any reason other than a duplicate address.
+pub async fn set_email(pool: &PgPool, id: i64, email: Option<&str>) -> Result<EmailSet, Error> {
+    let result = sqlx::query("UPDATE superhet.users SET email = $2 WHERE id = $1")
+        .bind(id)
+        .bind(email)
+        .execute(pool)
+        .await;
+    match result {
+        Ok(done) if done.rows_affected() == 0 => Ok(EmailSet::NotFound),
+        Ok(_) => Ok(EmailSet::Done),
+        Err(err) if is_unique_violation(&err) => Ok(EmailSet::Taken),
+        Err(err) => Err(err.into()),
+    }
 }
 
 /// Record a successful login.
