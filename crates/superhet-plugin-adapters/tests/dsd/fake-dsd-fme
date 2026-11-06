@@ -5,7 +5,7 @@ dsd-fme itself must never be part of this repository (it carries the AMBE vocode
 replays a recorded log instead. Reads 48 kHz s16le baseband on stdin like the real tool; for every
 40 ms of input it plays back one step of the transcript: the lines up to the next `---` go to
 stderr (the tool's log) and, when a line mentions voice, 40 ms of decoded voice (8 kHz s16le, a
-sine, like `-o -`) go to stdout. Comment lines (#) are skipped. When the transcript is used up the
+sine, stereo for DMR and auto, like `-o -`) go to stdout. Comment lines (#) are skipped. When the transcript is used up the
 tool stays silent.
 
 Environment: FAKE_DSD_TRANSCRIPT the transcript file (required), FAKE_DSD_DIE=1 to exit with status
@@ -61,7 +61,10 @@ while True:
             for _ in range(320):
                 samples.append(int(8000 * math.sin(phase)))
                 phase += 2 * math.pi * 440 / 8000
-            sys.stdout.buffer.write(struct.pack("<320h", *samples))
+            # DMR and auto write one channel per slot, the others are mono.
+            stereo = "-fs" in sys.argv or "-fa" in sys.argv
+            frames = [v for sample in samples for v in (sample, 0)] if stereo else samples
+            sys.stdout.buffer.write(struct.pack(f"<{len(frames)}h", *frames))
             sys.stdout.buffer.flush()
         if done == len(steps) and die:
             time.sleep(0.2)
