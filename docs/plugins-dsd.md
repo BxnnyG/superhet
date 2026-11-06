@@ -128,8 +128,10 @@ itself does not touch the vocoder in any case: it passes `dsd-fme` samples and r
   than the 12.5 kHz this plugin asks for and a different `frame_flag`; it is not a tested path.
 - **DMR Tier III / trunked systems:** only what the channel carries is decoded; there is no control
   channel following or talkgroup hunting.
-- **No audio for listeners yet.** Like M17, the audio stream is announced through the plugin
-  instance, which only operators can list (open point from ADR-0018).
+- **Listeners can hear it.** The instance and its audio stream are announced to listeners (and to
+  guests while the guest policy shows decoder output) through the read-only
+  `GET /api/v1/plugin-streams` (no configuration); the web UI then shows the call log and mixes the
+  voice like any VFO, without start / stop / settings. Only operators start and control it.
 - **The log layout of `dsd-fme` is not a stable interface.** The adapter reads its human-oriented
   console log (see below). A release that changes the wording can make calls disappear until
   `lines.rs` is adapted; unrecognised lines are mentioned in the plugin log to help with that.
