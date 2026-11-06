@@ -104,7 +104,26 @@ export const M17_RAW = {
   install: { acknowledge: { text: "Runs m17-demod as a separate process." } },
 };
 
+export const DSD_ID = "org.superhet.decoder.dsd";
+
+export const DSD_RAW = {
+  plugin: {
+    id: DSD_ID,
+    name: "DMR / dPMR / NXDN (dsd-fme)",
+    version: "0.1.0",
+    protocol: 1,
+    license: "AGPL-3.0-only",
+    type: "decoder",
+    description: "DMR, dPMR and NXDN digital voice through a user-installed dsd-fme",
+  },
+  runtime: { kind: "process", transport: "framed", command: ["superhet-plugin-adapter", "dsd"] },
+  input: { kind: "discriminator", sample_rate: 48000, format: "s16le", bandwidth_hz: 12500 },
+  device: { exclusive: false },
+  install: { acknowledge: { text: "Needs dsd-fme, which you install yourself." } },
+};
+
 export const aprs: PluginManifest = parseManifest(APRS_RAW);
+export const dsd: PluginManifest = parseManifest(DSD_RAW);
 export const m17: PluginManifest = parseManifest(M17_RAW);
 export const pocsag: PluginManifest = parseManifest(POCSAG_RAW);
 export const rtl433: PluginManifest = parseManifest(RTL433_RAW);
@@ -152,12 +171,13 @@ export function fakePluginApi(
     install: vi.fn(() => Promise.resolve(pocsag)),
     remove: vi.fn(() => Promise.resolve()),
     listInstances: vi.fn(() => Promise.resolve(state.instances)),
-    start: vi.fn((req: { pluginId: string; vfo?: number; device?: string }) => {
+    start: vi.fn((req: { pluginId: string; vfo?: number; device?: string; config?: Rec }) => {
       const created = instance({
         id: `i-${state.instances.length + 1}`,
         plugin_id: req.pluginId,
         device: req.device ?? null,
         vfo: req.vfo ?? null,
+        config: req.config ?? null,
       });
       state.instances = [...state.instances, created];
       return Promise.resolve(created);

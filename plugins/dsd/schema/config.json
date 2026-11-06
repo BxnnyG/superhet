@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DMR / dPMR / NXDN (dsd-fme) instance configuration",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "description": "Which protocol dsd-fme decodes: auto-detect, DMR, dPMR or NXDN (12.5 kHz).",
+      "enum": ["auto", "dmr", "dpmr", "nxdn"]
+    },
+    "audio": {
+      "description": "Pass the decoded voice on. Off runs dsd-fme without audio output: call events only.",
+      "type": "boolean"
+    },
+    "mute_encrypted": {
+      "description": "Do not play the audio of encrypted calls.",
+      "type": "boolean"
+    },
+    "frame_flag": {
+      "description": "Frame-type switch of dsd-fme (-fs, -fm, -fn, ...), for builds that spell it differently. Overrides protocol.",
+      "type": "string",
+      "pattern": "^-f[0-9a-zA-Z]{1,2}$"
+    }
+  },
+  "additionalProperties": false
+}

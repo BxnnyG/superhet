@@ -1,0 +1,13 @@
+# Hand-written transcript in the style of dsd-fme's log (see dmr-two-slots.log): an encrypted DMR
+# call whose privacy header arrives after the first link control, with ANSI colours as dsd-fme
+# prints them. NOT a capture of a particular release.
+[32m12:10:00 Sync: +DMR  MS VOICE        | Color Code=07 | VC1[0m
+[33m Slot 1 TGT=9 SRC=1234567 FLCO=0x00 FID=0x10 SVC=0x00 Group Voice[0m
+---
+[31m Slot 1 PI Header ALG ID: 0x21 KEY ID: 0x01[0m
+12:10:01 Sync: +DMR  MS VOICE        | Color Code=07 | VC2
+---
+12:10:02 Sync: +DMR  MS VOICE        | Color Code=07 | VC3
+ Slot 1 TGT=9 SRC=1234567 FLCO=0x00 FID=0x10 SVC=0x40 Group Voice
+---
+ Slot 1 Terminator with LC TGT=9 SRC=1234567

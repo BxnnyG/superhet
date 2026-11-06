@@ -9,7 +9,7 @@ policy shows decoder events) and nothing of the plugin management.
 
 The decoders are presented like OpenWebRX's "digital modes" (`web/src/digital/`). Next to the
 analog mode buttons (WFM NFM AM USB LSB CW) the tuning strip has a **Digital** select with
-**POCSAG**, **APRS**, **ISM** (rtl_433) and **M17** (digital voice, `docs/plugins-m17.md`); a mode is listed when its plugin is installed.
+**POCSAG**, **APRS**, **ISM** (rtl_433), **M17** (digital voice, `docs/plugins-m17.md`) and **DMR**, **dPMR**, **NXDN** (one plugin around a user-installed dsd-fme, `docs/plugins-dsd.md`; the select starts it with that protocol); a mode is listed when its plugin is installed.
 
 - **Pick one**: the receiver is set up (NFM, the bandwidth the decoder wants: 12.5 kHz for POCSAG
   and APRS, 250 kHz for ISM; squelch off), other digital decoders on the receiver are stopped, the
@@ -32,6 +32,10 @@ analog mode buttons (WFM NFM AM USB LSB CW) the tuning strip has a **Digital** s
   position; "Channel idle" and the last call between calls, polled from the plugin's status
   document) above a call log with one row per finished call. Its decoded voice joins the audio
   mix and the receiver's own audio is muted while the decoder runs (`web/src/m17/`).
+  **DMR / dPMR / NXDN** show the same "now talking" idea with one line per call on the air (DMR: per
+  slot: source ID, `TG` / `ID` target, slot, colour code or RAN, encryption, clock) above a call log,
+  and a "needs dsd-fme" notice with the places searched while the user-installed tool is missing
+  (`web/src/dsd/`).
 - **Counters**: input received (bytes and level in dBFS), decoded events, time of the last one,
   dropped input chunks, rejected output lines and restarts, from the instance counters of the host
   (`docs/api-plugins.md`). Under an empty table a verdict names the likely cause: no samples have

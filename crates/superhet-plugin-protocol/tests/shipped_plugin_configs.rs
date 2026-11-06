@@ -85,3 +85,22 @@ fn m17() {
     assert_eq!(field(json!({"invert": "yes"})), "invert");
     assert_eq!(field(json!({"x": 1})), "x");
 }
+
+#[test]
+fn dsd() {
+    assert_eq!(check("dsd", &json!({})), Ok(()));
+    assert_eq!(
+        check(
+            "dsd",
+            &json!({"protocol": "nxdn", "audio": false, "mute_encrypted": false, "frame_flag": "-fn"})
+        ),
+        Ok(())
+    );
+    let field = |config: Value| check("dsd", &config).expect_err("refused").0;
+    assert_eq!(field(json!({"protocol": "tetra"})), "protocol");
+    assert_eq!(field(json!({"audio": "yes"})), "audio");
+    // The switch is passed to the tool: only the -f family, nothing that opens files or sockets.
+    assert_eq!(field(json!({"frame_flag": "-w /tmp/x"})), "frame_flag");
+    assert_eq!(field(json!({"frame_flag": "-o"})), "frame_flag");
+    assert_eq!(field(json!({"x": 1})), "x");
+}

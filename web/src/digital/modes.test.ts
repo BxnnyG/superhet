@@ -10,11 +10,20 @@ import {
 
 describe("digital modes", () => {
   it("maps the bundled plugins to modes with a decoder-friendly VFO preset", () => {
-    expect(DIGITAL_MODES.map((m) => m.id)).toEqual(["pocsag", "aprs", "ism", "m17"]);
+    expect(DIGITAL_MODES.map((m) => m.id)).toEqual([
+      "pocsag",
+      "aprs",
+      "ism",
+      "m17",
+      "dmr",
+      "dpmr",
+      "nxdn",
+    ]);
     for (const m of DIGITAL_MODES) {
       expect(m.vfo.mode).toBe("nfm");
       expect(m.vfo.squelchDbfs).toBeNull();
-      expect(digitalModeOfPlugin(m.pluginId)).toBe(m);
+      // DMR, dPMR and NXDN share one plugin; the first of them stands for it.
+      expect(digitalModeOfPlugin(m.pluginId)?.pluginId).toBe(m.pluginId);
     }
     // rtl_433 wants the whole signal.
     expect(DIGITAL_MODES.find((m) => m.id === "ism")?.vfo.bandwidthHz).toBe(250_000);

@@ -1,0 +1,18 @@
+# Transcript of a dsd-fme log (stderr) in the style of its DMR output, written by hand for the
+# parser tests: NOT a capture of a particular dsd-fme release (docs/plugins-dsd.md, "Not verified").
+# Lines starting with # are skipped by the tests, "---" lets half a second pass.
+Digital Speech Decoder: Florida Man Edition
+Audio Out Device: -
+---
+12:00:00 Sync: +DMR  BS VOICE        | Color Code=01 | VC1
+ Slot 1 TGT=91 SRC=3101234 FLCO=0x00 FID=0x00 SVC=0x00 Group Voice
+---
+12:00:01 Sync: +DMR  BS VOICE        | Color Code=01 | VC2
+ Slot 1 TGT=91 SRC=3101234 FLCO=0x00 FID=0x00 SVC=0x00 Group Voice
+ Slot 2 TGT=4000123 SRC=2620001 FLCO=0x03 FID=0x00 SVC=0x00 Private Voice
+---
+12:00:02 Sync: +DMR  BS VOICE        | Color Code=01 | VC3
+ Slot 1 TLC
+---
+12:00:03 Sync: +DMR  BS DATA         | Color Code=01 | CSBK
+ Slot 2 TLC

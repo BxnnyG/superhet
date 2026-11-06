@@ -51,6 +51,7 @@ export async function enterDigital(
     device,
     vfo: vfo.id,
     freqHz: vfo.freqHz,
+    ...(mode.config === undefined ? {} : { config: mode.config }),
   });
   rememberNotice(manifest);
   return "started";

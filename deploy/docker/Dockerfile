@@ -132,6 +132,9 @@ COPY plugins/rtl433 /usr/share/superhet/plugins/rtl433
 COPY plugins/dab /usr/share/superhet/plugins/dab
 COPY plugins/adsb /usr/share/superhet/plugins/adsb
 COPY plugins/m17 /usr/share/superhet/plugins/m17
+# DMR / dPMR / NXDN: the manifest and the adapter only. dsd-fme (with its AMBE vocoder) is NOT in
+# this image; the user installs it (docs/plugins-dsd.md).
+COPY plugins/dsd /usr/share/superhet/plugins/dsd
 # The API does not serve the frontend yet; the build output is shipped for later use.
 COPY --from=web /src/web/dist /usr/share/superhet/web
 

@@ -140,7 +140,8 @@ Mechanics, per process start of an instance:
 ## Process environment and working directory
 
 The process starts in the plugin directory, in its own process group, with an empty environment
-plus `PATH`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR` from the host (NATS and database credentials are
+plus `PATH`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR` and `SUPERHET_DSD_FME_PATH` (the location of the
+user-installed `dsd-fme`, `docs/plugins-dsd.md`) from the host (NATS and database credentials are
 never passed on) and:
 
 | Variable | Content |

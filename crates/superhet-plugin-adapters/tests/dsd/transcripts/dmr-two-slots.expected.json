@@ -1,0 +1,64 @@
+[
+  {
+    "data": {
+      "call": "1700000001900-s1",
+      "cc": 1,
+      "dst": 91,
+      "encrypted": false,
+      "group": true,
+      "mode": "dmr",
+      "slot": 1,
+      "src": 3101234
+    },
+    "type": "dsd.call.start",
+    "v": 1
+  },
+  {
+    "data": {
+      "call": "1700000002700-s2",
+      "cc": 1,
+      "dst": 4000123,
+      "encrypted": false,
+      "group": false,
+      "mode": "dmr",
+      "slot": 2,
+      "src": 2620001
+    },
+    "type": "dsd.call.start",
+    "v": 1
+  },
+  {
+    "data": {
+      "audio_ms": 0,
+      "call": "1700000001900-s1",
+      "cc": 1,
+      "dst": 91,
+      "duration_ms": 1500,
+      "encrypted": false,
+      "group": true,
+      "mode": "dmr",
+      "reason": "eos",
+      "slot": 1,
+      "src": 3101234
+    },
+    "type": "dsd.call.end",
+    "v": 1
+  },
+  {
+    "data": {
+      "audio_ms": 0,
+      "call": "1700000002700-s2",
+      "cc": 1,
+      "dst": 4000123,
+      "duration_ms": 1400,
+      "encrypted": false,
+      "group": false,
+      "mode": "dmr",
+      "reason": "eos",
+      "slot": 2,
+      "src": 2620001
+    },
+    "type": "dsd.call.end",
+    "v": 1
+  }
+]

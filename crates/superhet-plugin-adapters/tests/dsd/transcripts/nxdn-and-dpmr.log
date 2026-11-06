@@ -1,0 +1,20 @@
+# Hand-written transcript in the style of dsd-fme's log: an NXDN call that ends with a TX release,
+# then a dPMR call that is never terminated (the decoder just stops hearing it). NOT a capture of a
+# particular release.
+Sync: +NXDN96  VOICE | RAN=04
+ NXDN VCALL Group Source: 20017 Target: 100 RAN: 4
+---
+Sync: +NXDN96  VOICE | RAN=04
+---
+ NXDN TX_REL Source: 20017 Target: 100
+---
+---
+Sync: +dPMR  VOICE | CC=3
+ dPMR Voice Source: 1234 Target: 5678 CC: 3
+---
+Sync: +dPMR  VOICE | CC=3
+---
+---
+---
+---
+---
