@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "M17 instance configuration",
+  "type": "object",
+  "properties": {
+    "noise_blanker": {
+      "description": "Silence frames the Viterbi decoder is unsure about instead of playing noise.",
+      "type": "boolean"
+    },
+    "invert": {
+      "description": "The baseband has the opposite polarity (an inverting receiver chain).",
+      "type": "boolean"
+    },
+    "mute_encrypted": {
+      "description": "Do not play the audio of encrypted calls (it would be noise).",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}

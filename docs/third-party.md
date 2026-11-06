@@ -14,6 +14,9 @@ this repository. The only code the project forbids shipping is the ETSI TETRA co
 | rtl-433 | 22.11 | GPL-2.0-or-later | plugin `org.superhet.decoder.rtl433` | https://github.com/merbanan/rtl_433 |
 | welle.io (only `/usr/bin/welle-cli`) | 2.4+ds-2 | GPL-2.0-or-later | plugin `org.superhet.decoder.dab` | https://github.com/AlbrechtL/welle.io |
 | readsb (wiedehopf; built in the Dockerfile, not a Debian package) | 3.16.20 | GPL-3.0-or-later | plugin `org.superhet.decoder.adsb` | https://github.com/wiedehopf/readsb |
+| m17-demod (mobilinkd m17-cxx-demod; built in the Dockerfile, one line patched) | commit 9b8cec2 (2.2) | GPL-3.0 | plugin `org.superhet.decoder.m17` | https://github.com/mobilinkd/m17-cxx-demod |
+| libcodec2-1.0 (Codec2 vocoder of M17) | 1.0.5 | LGPL-2.1 | m17-demod (dynamic library) | https://github.com/drowe67/codec2 |
+| libboost-program-options1.74.0 | 1.74 | BSL-1.0 | m17-demod (dynamic library) | `apt-cache show libboost-program-options1.74.0` |
 | libzstd1 | - | BSD-3-Clause / GPL-2.0 (dual) | readsb (dynamic library) | `apt-cache show libzstd1` |
 | libfaad2 (HE-AAC decoder of welle-cli) | 2.10 | GPL-2.0-or-later | welle-cli | https://github.com/knik0/faad2 |
 | libfftw3-single3, libmp3lame0, libmpg123-0, libasound2, libairspy0, libsoapysdr0.8, libusb-1.0-0 | - | GPL-2.0+ / LGPL-2+ / MIT / BSL / Boost (each per its copyright file) | welle-cli (dynamic libraries) | `apt-cache show <package>` |
@@ -29,9 +32,11 @@ GPL obligations for redistributing the image are met by this and by the licence 
 
 **ADS-B / readsb.** Debian bookworm has no readsb package. The Dockerfile compiles it in a build stage from the upstream commit of tag v3.16.20 (`READSB_COMMIT`), without ncurses and without SDR libraries (`make readsb DISABLE_INTERACTIVE=yes`), strips it and copies only `/usr/bin/readsb` and the upstream `COPYING` (as `/usr/share/doc/readsb/copyright`) into the runtime image. It is not modified; its source is the pinned upstream commit of https://github.com/wiedehopf/readsb. It runs as a separate process, reads IQ on stdin and opens no network port (ADR-0017).
 
+**M17 / m17-demod.** Debian bookworm has no m17-cxx-demod package. The Dockerfile (stage `m17`) compiles `m17-demod` from the upstream commit `M17_COMMIT` (and `m17-mod` for tests, which is not copied into the runtime image) against Debian's `libcodec2-dev` and Boost, with the Blaze maths library (BSD-3-Clause, header only, upstream's git submodule) fetched from its pinned commit `BLAZE_COMMIT`. The only change to the upstream source is a `sed` expression (`deploy/docker/m17-demod-type.sed`) that makes the tool also print the raw TYPE field of the link setup frame; the licence texts of m17-cxx-demod and Blaze are installed under `/usr/share/doc/m17-cxx-demod/`. Corresponding source: the pinned upstream commit plus the sed file. M17 and Codec2 are open and free of patents (ADR-0018); no restricted codec is involved. Size: about 17 MB, almost all of it Codec2's library.
+
 **Leaflet (web UI).** The ADS-B map uses Leaflet 1.9.4 (BSD-2-Clause, https://leafletjs.com) from npm, bundled into the web build, version pinned in `web/package.json`. Map tiles are fetched by `superhet-api` (caching proxy, User-Agent `Superhet/<version>`) from OpenStreetMap by default (`https://tile.openstreetmap.org`, replaceable with `SUPERHET_MAP_TILE_URL`; `SUPERHET_MAP_TILE_MODE=direct` lets the viewer's browser fetch them instead; data (c) OpenStreetMap contributors, ODbL; tile usage policy https://operations.osmfoundation.org/policies/tiles/); the attribution is shown on the map.
 
-Size: the three packages and their dependencies add about 27 MiB of installed files to the
+Size (multimon-ng, direwolf, rtl-433): the three packages and their dependencies add about 27 MiB of installed files to the
 runtime image (measured on `debian:bookworm-slim` with librtlsdr0 and libopus0 present), i.e. the
 image grows from about 111 MB to about 140 MB.
 

@@ -5,6 +5,9 @@ import { formatMhz, formatTime, type DecoderEvent } from "../decoders/events";
 import { DecoderEventStore } from "../decoders/store";
 import { describeHttpError } from "../http";
 import type { PluginInstance } from "../plugins/api";
+import { M17_CALL_END, type M17Status } from "../m17/model";
+import { NowTalking } from "../m17/NowTalking";
+import { useM17Status } from "../m17/useM17Status";
 import { InstanceFacts } from "../plugins/InstanceFacts";
 import { InstanceSettings, hasSettings } from "../plugins/InstanceSettings";
 import { useFlow, verdict } from "../plugins/liveness";
@@ -109,6 +112,9 @@ function DockPanel({
   const [busy, setBusy] = useState(false);
   const flow = useFlow(instance);
   const state = verdict(instance, flow);
+  // M17 only: who is on the air, polled from the plugin's status document.
+  const m17 = useM17Status(mode.id === "m17" ? instance.id : null);
+  const onAir = m17.stale ? null : m17.status.now;
 
   const setOpen = (next: boolean) => {
     setOpenState(next);
@@ -167,6 +173,11 @@ function DockPanel({
           VFO {vfo.id} · {formatMhz(vfo.freqHz)} MHz
         </span>
         <StateBadge state={instance.state} />
+        {onAir !== null && (
+          <Badge tone={onAir.encrypted === true ? "warn" : "success"} dot pulse>
+            <span className="font-mono">{onAir.src}</span>
+          </Badge>
+        )}
         {siblings.length > 1 && (
           <div role="group" aria-label="Decoders on this receiver" className="flex gap-1">
             {siblings.map((s) => (
@@ -230,6 +241,7 @@ function DockPanel({
             verdictText={state.text}
             verdictTone={state.tone}
             vfo={vfo}
+            m17={mode.id === "m17" ? m17 : null}
           />
         </div>
       )}
@@ -241,6 +253,7 @@ const COLUMNS: Record<DigitalMode["id"], readonly [string, string, string]> = {
   pocsag: ["Address", "Type", "Message"],
   aprs: ["Station", "Type · path", "Position · text"],
   ism: ["Sensor", "Channel", "Readings"],
+  m17: ["Call", "CAN · encryption", "Duration · text · position"],
 };
 
 function Output({
@@ -251,6 +264,7 @@ function Output({
   verdictText,
   verdictTone,
   vfo,
+  m17,
 }: {
   mode: DigitalMode;
   instance: PluginInstance;
@@ -259,6 +273,8 @@ function Output({
   verdictText: string;
   verdictTone: "success" | "warn" | "danger" | "neutral" | "accent" | "info";
   vfo: Vfo;
+  /** M17 only: the plugin's status poll. */
+  m17: { status: M17Status; stale: boolean } | null;
 }) {
   // A private event store for the panel: history of this plugin plus the live feed.
   const store = useMemo(
@@ -271,7 +287,10 @@ function Output({
     return () => store.stop();
   }, [store, mode.pluginId]);
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot);
-  const rows = snap.events.filter((e) => e.meta.instance === instance.id).slice(0, MAX_ROWS);
+  // The M17 call log has one row per finished call; the call on the air is in the banner.
+  const rows = snap.events
+    .filter((e) => e.meta.instance === instance.id && (m17 === null || e.kind === M17_CALL_END))
+    .slice(0, MAX_ROWS);
   const [h1, h2, h3] = COLUMNS[mode.id];
   const [view, setView] = useState<"list" | "map">("list");
   const hasMap = mode.id === "aprs";
@@ -290,6 +309,13 @@ function Output({
             <p className="mt-1 break-words text-xs">{instance.lastError}</p>
           )}
         </Alert>
+      )}
+      {m17 !== null && (
+        <NowTalking
+          status={m17.status}
+          stale={m17.stale}
+          running={instance.state === "running" && verdictTone === "success"}
+        />
       )}
       {hasMap && rows.length > 0 && (
         <div className="flex items-center gap-2 px-3 py-1.5">

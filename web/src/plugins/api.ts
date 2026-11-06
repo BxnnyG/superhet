@@ -84,6 +84,8 @@ export interface PluginInstance {
   lastEventMs: number | null;
   createdMs: number;
   reconfigures: number;
+  /** Pseudo VFO id the plugin's audio is published under (plugins with audio output). */
+  audioVfo: number | null;
 }
 
 export interface StartRequest {
@@ -192,6 +194,7 @@ export function parseInstance(raw: unknown): PluginInstance {
     lastEventMs: numOrNull(raw.last_event_unix_ms),
     createdMs: count(raw.created_unix_ms),
     reconfigures: count(raw.reconfigures),
+    audioVfo: numOrNull(raw.audio_vfo),
   };
 }
 

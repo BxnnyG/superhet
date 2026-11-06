@@ -23,5 +23,8 @@ symphonia = { version = "0.6", default-features = false, features = ["mp3"] }
 superhet-dsp.workspace = true
 superhet-plugin-protocol.workspace = true
 
+[dev-dependencies]
+num-complex.workspace = true
+
 [lints]
 workspace = true
