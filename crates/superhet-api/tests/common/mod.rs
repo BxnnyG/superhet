@@ -2,6 +2,8 @@
 //! real PostgreSQL (`DATABASE_URL`, an admin-capable URL; each test gets its own database).
 #![allow(dead_code)]
 
+pub mod idp;
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::process::{Child, Command, Stdio};

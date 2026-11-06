@@ -179,10 +179,10 @@ received. Two things are therefore assumptions that need a first run with the re
    keyword-based to tolerate differences, but a first run with a real recording should be turned into a
    transcript and a test.
 2. **The command line and the audio format.** `-i -` (stdin), `-o -` (stdout) and the frame-type
-   switches `-fs` / `-fm` / `-fn` / `-fa` follow the tool's documented options as remembered; the
-   voice output is assumed to be 8 kHz mono s16le. Check `dsd-fme -h` of your build; `frame_flag`
-   overrides the switch if the spelling differs. If your build writes stereo or another rate, the
-   audio will sound wrong and the adapter needs a format option.
+   switches `-fs` / `-fm` / `-fn` / `-fa` match the option list in the tool's `dsd_main.c`, not yet a running build; the
+   voice output is 8 kHz s16le, two channels (one per slot) for DMR and auto, mono for dPMR and NXDN (checked against `dsd_main.c`, not against a running build). Check `dsd-fme -h` of your build; `frame_flag`
+   overrides the switch if the spelling differs. If your build writes another rate, the audio will
+   sound wrong and the adapter needs a format option.
 
 Open: a real DMR recording (an amateur repeater, DMR hotspot or a DMR-MARC / BrandMeister network
 channel on 70 cm) through an RTL-SDR, to confirm call start, slot, IDs, colour code and the audio.

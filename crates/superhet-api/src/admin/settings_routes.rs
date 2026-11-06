@@ -15,7 +15,7 @@ use crate::access::Principal;
 use crate::auth::{Reply, db_failed, error, flatten, guard_origin, json_reply, parse_json};
 use crate::settings::{AuditSettings, ClientReportPolicy, GuestPolicy, Limits, SettingsError};
 
-fn store_failed(err: SettingsError) -> Response {
+pub(super) fn store_failed(err: SettingsError) -> Response {
     match err {
         SettingsError::Unavailable => error(StatusCode::SERVICE_UNAVAILABLE, "unavailable", None),
         SettingsError::Db(err) => db_failed(err),
@@ -23,7 +23,7 @@ fn store_failed(err: SettingsError) -> Response {
 }
 
 /// Top-level keys whose values differ between two settings documents.
-fn changed_keys(old: &Value, new: &Value) -> Vec<String> {
+pub(super) fn changed_keys(old: &Value, new: &Value) -> Vec<String> {
     let (Some(old), Some(new)) = (old.as_object(), new.as_object()) else {
         return Vec::new();
     };
@@ -33,7 +33,7 @@ fn changed_keys(old: &Value, new: &Value) -> Vec<String> {
         .collect()
 }
 
-fn to_value<T: serde::Serialize>(value: &T) -> Value {
+pub(super) fn to_value<T: serde::Serialize>(value: &T) -> Value {
     serde_json::to_value(value).unwrap_or(Value::Null)
 }
 

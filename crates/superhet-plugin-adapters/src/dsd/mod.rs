@@ -118,6 +118,22 @@ impl Config {
         Ok(config)
     }
 
+    /// Channels of the tool's voice output: DMR and auto write one channel per slot, the others
+    /// are mono (`pulse_digi_out_channels` in `dsd_main.c`).
+    pub fn output_channels(&self) -> usize {
+        if let Some(flag) = &self.frame_flag {
+            return if matches!(flag.as_str(), "-fa" | "-fs") {
+                2
+            } else {
+                1
+            };
+        }
+        match self.protocol {
+            None | Some(Protocol::Dmr) => 2,
+            Some(Protocol::Dpmr | Protocol::Nxdn) => 1,
+        }
+    }
+
     /// The tool's frame-type switch for the protocol (`dsd-fme -h`: `-fa` auto, `-fs` DMR, `-fm`
     /// dPMR, `-fn` NXDN 12.5 kHz).
     #[must_use]
@@ -338,7 +354,8 @@ pub fn run(config: &Value, socket: &str, plugin_dir: &Path) -> ExitCode {
     let writer = std::thread::spawn(move || feed(stdin, &input_rx));
     let audio = {
         let shared = Arc::clone(&shared);
-        std::thread::spawn(move || voice(stdout, &shared))
+        let channels = config.output_channels();
+        std::thread::spawn(move || voice(stdout, channels, &shared))
     };
     let log = {
         let shared = Arc::clone(&shared);
@@ -469,26 +486,38 @@ fn idle_without_tool(
     ExitCode::SUCCESS
 }
 
-/// Decoded voice (8 kHz s16le mono) to 48 kHz s16le for the host.
-fn voice(mut stdout: impl Read, shared: &Shared) {
+/// Mixes the whole interleaved frames of `samples` down to mono and leaves a partial frame behind
+/// for the next read. The idle DMR slot is silence, so a call keeps its level.
+fn downmix(samples: &mut Vec<f32>, channels: usize) -> Vec<f32> {
+    let whole = samples.len() - samples.len() % channels;
+    let mono = samples[..whole]
+        .chunks_exact(channels)
+        .map(|frame| frame.iter().sum::<f32>().clamp(-1.0, 1.0))
+        .collect();
+    samples.drain(..whole);
+    mono
+}
+
+/// Decoded voice (8 kHz s16le, `channels` interleaved) to 48 kHz s16le mono for the host.
+fn voice(mut stdout: impl Read, channels: usize, shared: &Shared) {
     let mut resampler = Resampler::new(8000.0, 48_000.0);
     let mut buf = vec![0u8; 8192];
     let mut carry: Option<u8> = None;
-    let mut input: Vec<f32> = Vec::new();
+    let mut pending: Vec<f32> = Vec::new();
     let mut output: Vec<f32> = Vec::new();
     loop {
         let n = match stdout.read(&mut buf) {
             Ok(0) | Err(_) => break,
             Ok(n) => n,
         };
-        input.clear();
         let mut bytes = carry.take().into_iter().chain(buf[..n].iter().copied());
         while let (Some(low), high) = (bytes.next(), bytes.next()) {
             match high {
-                Some(high) => input.push(f32::from(i16::from_le_bytes([low, high])) / 32768.0),
+                Some(high) => pending.push(f32::from(i16::from_le_bytes([low, high])) / 32768.0),
                 None => carry = Some(low),
             }
         }
+        let input = downmix(&mut pending, channels);
         if input.is_empty() {
             continue;
         }
@@ -578,6 +607,7 @@ mod tests {
         let config = Config::from_json(&Value::Null).expect("null is fine");
         assert_eq!(config, Config::default());
         assert_eq!(config.args(), ["-i", "-", "-o", "-", "-fa"]);
+        assert_eq!(config.output_channels(), 2);
         assert!(config.mute_encrypted);
     }
 
@@ -642,5 +672,17 @@ mod tests {
         let err = locate(Some("/nonexistent/dsd-fme"), None, &root).expect_err("missing");
         assert!(err[0].contains("/nonexistent/dsd-fme"), "{err:?}");
         assert_eq!(err.len(), 3);
+    }
+
+    #[test]
+    fn stereo_voice_is_mixed_to_mono_across_reads() {
+        let mut pending = vec![0.25, 0.0, 0.5];
+        assert_eq!(downmix(&mut pending, 2), vec![0.25]);
+        assert_eq!(pending, vec![0.5]);
+        pending.push(0.25);
+        assert_eq!(downmix(&mut pending, 2), vec![0.75]);
+        assert!(pending.is_empty());
+        let mut mono = vec![0.5, -0.5];
+        assert_eq!(downmix(&mut mono, 1), vec![0.5, -0.5]);
     }
 }

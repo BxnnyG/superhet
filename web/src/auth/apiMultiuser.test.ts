@@ -38,6 +38,8 @@ describe("status document", () => {
       role: "operator",
       kind: "user",
       mustChangePassword: true,
+      oidc: null,
+      localLogin: true,
       guest: { enabled: true, privacyText: "Notice" },
     });
   });

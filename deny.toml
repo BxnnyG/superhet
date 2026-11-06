@@ -6,6 +6,14 @@ all-features = false
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+    # `rsa` / `crypto-bigint` arrive with `openidconnect` (OIDC login, ADR-0019). Both advisories
+    # concern timing side channels on secret integers, i.e. private-key operations (decryption,
+    # signing). Superhet only verifies ID-token signatures with the identity provider's public
+    # keys; it never holds or uses an RSA private key. Re-check when openidconnect moves on.
+    { id = "RUSTSEC-2023-0071", reason = "Marvin attack; public-key verification only (ADR-0019)" },
+    { id = "RUSTSEC-2026-0387", reason = "constant-time issues on secret integers; public-key verification only (ADR-0019)" },
+]
 
 [licenses]
 version = 2

@@ -13,6 +13,7 @@
 mod accounts;
 pub(crate) mod bans;
 mod limiter;
+pub(crate) mod oidc;
 pub(crate) mod password;
 mod routes;
 pub(crate) mod token;
@@ -116,6 +117,8 @@ pub struct AuthConfig {
     pub setup_token: Option<String>,
     /// Failed-attempt limiter thresholds.
     pub limits: Limits,
+    /// The `SUPERHET_OIDC_*` environment (docs/api-oidc.md).
+    pub oidc: oidc::OidcEnv,
 }
 
 impl AuthConfig {
@@ -165,6 +168,7 @@ impl AuthConfig {
             trusted_proxies,
             setup_token,
             limits: Limits::default(),
+            oidc: oidc::OidcEnv::from_env()?,
         })
     }
 }
@@ -185,6 +189,7 @@ struct Inner {
     registry: Registry,
     bans: Arc<bans::Bans>,
     enricher: Enricher,
+    oidc: oidc::OidcState,
 }
 
 /// Shared state of the auth layer (cheap to clone).
@@ -234,6 +239,7 @@ impl AuthState {
         let settings = Arc::new(SettingsStore::new(db.clone()));
         let audit = Audit::new(db.clone(), Arc::clone(&settings));
         let registry = Registry::new(audit.clone());
+        let oidc = oidc::OidcState::new(config.oidc.clone());
         Ok(Self(Arc::new(Inner {
             limiter: limiter::Limiter::new(config.limits),
             name_limiter: limiter::NameLimiter::new(config.limits.window, config.limits.per_name),
@@ -249,6 +255,7 @@ impl AuthState {
             registry,
             bans: Arc::new(bans::Bans::default()),
             enricher,
+            oidc,
         })))
     }
 

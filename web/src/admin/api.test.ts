@@ -52,6 +52,8 @@ describe("users and invites", () => {
         createdAtMs: 1000,
         lastLoginMs: null,
         sessions: 2,
+        email: null,
+        oidc: false,
       },
     ]);
   });

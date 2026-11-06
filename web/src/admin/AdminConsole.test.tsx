@@ -7,6 +7,7 @@ import { toasts } from "../ui";
 import {
   DEFAULT_CLIENT_REPORT_POLICY,
   DEFAULT_GUEST_POLICY,
+  DEFAULT_OIDC_SETTINGS,
   type AdminApi,
   type AuditEvent,
   type Invite,
@@ -49,6 +50,8 @@ const user = (id: number, over: Partial<User> = {}): User => ({
   createdAtMs: NOW - 86_400_000,
   lastLoginMs: NOW - 3_600_000,
   sessions: 1,
+  email: null,
+  oidc: false,
   ...over,
 });
 
@@ -239,6 +242,17 @@ function fakeApi(over: Partial<AdminApi> = {}): AdminApi {
     putLimits: vi.fn().mockImplementation((l) => Promise.resolve(l)),
     getClientReportPolicy: vi.fn().mockResolvedValue(DEFAULT_CLIENT_REPORT_POLICY),
     putClientReportPolicy: vi.fn().mockImplementation((p) => Promise.resolve(p)),
+    getOidc: vi.fn().mockResolvedValue({
+      settings: DEFAULT_OIDC_SETTINGS,
+      source: "database",
+      redirectUrl: null,
+      clientSecretSet: false,
+      oidcAdminExists: false,
+      localLoginActive: true,
+      keepLocalLogin: false,
+    }),
+    putOidc: vi.fn(),
+    testOidc: vi.fn().mockResolvedValue({ ok: true, issuer: "https://idp.example", error: null }),
     ...over,
   };
 }
