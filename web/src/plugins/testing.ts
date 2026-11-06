@@ -86,7 +86,26 @@ export const APRS_RAW = {
   install: { acknowledge: { text: "APRS positions can be personal data." } },
 };
 
+export const M17_ID = "org.superhet.decoder.m17";
+
+export const M17_RAW = {
+  plugin: {
+    id: M17_ID,
+    name: "M17 digital voice",
+    version: "0.1.0",
+    protocol: 1,
+    license: "AGPL-3.0-only",
+    type: "decoder",
+    description: "M17 amateur radio digital voice",
+  },
+  runtime: { kind: "process", transport: "framed", command: ["superhet-plugin-adapter", "m17"] },
+  input: { kind: "discriminator", sample_rate: 48000, format: "s16le", bandwidth_hz: 12500 },
+  device: { exclusive: false },
+  install: { acknowledge: { text: "Runs m17-demod as a separate process." } },
+};
+
 export const aprs: PluginManifest = parseManifest(APRS_RAW);
+export const m17: PluginManifest = parseManifest(M17_RAW);
 export const pocsag: PluginManifest = parseManifest(POCSAG_RAW);
 export const rtl433: PluginManifest = parseManifest(RTL433_RAW);
 export const adsb: PluginManifest = parseManifest(ADSB_RAW);

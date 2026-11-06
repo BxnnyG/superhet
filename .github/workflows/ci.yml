@@ -53,6 +53,13 @@ jobs:
       # External decoders of the first-party plugins (golden tests, crates/superhet-plugin-adapters).
       - name: Install plugin decoders
         run: sudo apt-get install -y --no-install-recommends multimon-ng direwolf rtl-433
+      # m17-demod (M17 plugin) is not packaged: build it with the Dockerfile stage `m17` and put a
+      # wrapper that runs it in that container on PATH.
+      - name: Build m17-demod
+        run: |
+          docker build --target m17 -t superhet-m17 -f deploy/docker/Dockerfile .
+          printf '#!/bin/sh\nexec docker run --rm -i superhet-m17 /src/m17/build/apps/m17-demod "$@"\n' | sudo tee /usr/local/bin/m17-demod >/dev/null
+          sudo chmod +x /usr/local/bin/m17-demod
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy

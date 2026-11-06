@@ -2531,6 +2531,7 @@ dependencies = [
 name = "superhet-plugin-adapters"
 version = "0.1.0"
 dependencies = [
+ "num-complex",
  "serde",
  "serde_json",
  "superhet-dsp",

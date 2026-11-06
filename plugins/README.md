@@ -16,5 +16,9 @@ First-party plugins live here. The contract (manifest, transports, supervision, 
   framed transport, live picture as the status document, rationed events (`docs/plugins-adsb.md`,
   ADR-0017).
 
+- `m17/` – M17 digital voice (m17-demod behind `superhet-plugin-adapter m17`): non-exclusive, taps
+  an NFM VFO, framed transport with call events, a status document and the decoded voice as plugin
+  audio (`docs/plugins-m17.md`, ADR-0018).
+
 Install a plugin through the admin API (`POST /api/v1/plugins`, `docs/api-plugins.md`) or the host's `install` command; the host copies it to
 `$SUPERHET_PLUGIN_DIR/<id>/<version>` (default `/data/plugins`).

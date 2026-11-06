@@ -6,6 +6,13 @@
 
 import { isRec, type Rec } from "../spectrum/api";
 import type { BadgeTone } from "../ui";
+import {
+  M17_CALL_END,
+  M17_CALL_START,
+  encryptionLabel,
+  formatDuration,
+  parseCall,
+} from "../m17/model";
 import { CORE_SOURCE, isCoreKind, type DecoderEvent } from "./events";
 
 export interface EventField {
@@ -337,6 +344,67 @@ function rtl433(e: DecoderEvent, d: Rec): EventView {
   };
 }
 
+// ---------- M17 ----------
+
+function m17(e: DecoderEvent, d: Rec): EventView | null {
+  const call = parseCall(d);
+  if (call === null) return null;
+  const ended = e.kind === M17_CALL_END;
+  const crypto = encryptionLabel(call);
+  const coords = call.position === null ? null : formatCoords(call.position.lat, call.position.lon);
+
+  const detailParts: string[] = [];
+  if (ended && call.durationMs !== null) detailParts.push(formatDuration(call.durationMs));
+  if (ended && call.muted) detailParts.push("audio withheld");
+  else if (ended && call.audioMs !== null && call.audioMs < (call.durationMs ?? 0) / 2) {
+    detailParts.push(`${formatDuration(call.audioMs)} of voice decoded`);
+  }
+  if (call.text !== null) detailParts.push(`“${call.text}”`);
+  if (coords !== null) detailParts.push(coords);
+
+  const fields: EventField[] = [];
+  put(fields, "From", call.src, true);
+  put(fields, "To", call.dst, true);
+  put(fields, "CAN", call.can);
+  put(fields, "Content", call.mode);
+  put(fields, "Encryption", crypto);
+  put(fields, "Text", call.text);
+  if (call.position !== null) {
+    put(fields, "Position", coords, true);
+    put(
+      fields,
+      "Altitude",
+      call.position.altitudeM === null ? null : `${call.position.altitudeM} m`,
+    );
+    put(fields, "Speed", call.position.speedKmh === null ? null : `${call.position.speedKmh} km/h`);
+    put(
+      fields,
+      "Bearing",
+      call.position.bearingDeg === null ? null : `${call.position.bearingDeg}°`,
+    );
+    put(fields, "Accuracy", call.position.radiusM === null ? null : `${call.position.radiusM} m`);
+    put(fields, "Station", call.position.station);
+  }
+  if (ended) {
+    put(fields, "Duration", call.durationMs === null ? null : formatDuration(call.durationMs));
+    put(fields, "Voice decoded", call.audioMs === null ? null : formatDuration(call.audioMs));
+    put(fields, "Ended", call.reason);
+  }
+
+  return {
+    label: "M17",
+    tone: call.encrypted === true ? "warn" : ended ? "success" : "accent",
+    title: ended ? "M17 call ended" : "M17 call started",
+    headline: `${call.src} → ${call.dst}`,
+    tags: [`CAN ${call.can}`, ...(call.encrypted === true && crypto !== null ? [crypto] : [])],
+    detail: detailParts.length > 0 ? detailParts.join(" · ") : ended ? null : "on the air",
+    fields,
+    link: call.position === null ? null : mapLink(call.position.lat, call.position.lon),
+    mono: true,
+    raw: rawJson(d),
+  };
+}
+
 // ---------- generic ----------
 
 /** "bytes=1920 seq=47": the scalar members of the data, for a one-line summary. */
@@ -383,6 +451,9 @@ export function describeEvent(e: DecoderEvent): EventView {
       return flex(e, d);
     case "aprs.packet":
       return aprs(e, d);
+    case M17_CALL_START:
+    case M17_CALL_END:
+      return m17(e, d) ?? generic(e, d);
     case "rtl433.reading":
       return rtl433(e, d);
     default:

@@ -26,6 +26,7 @@ import { channelTarget, matchChannel, stepChannelBy } from "../channels/lookup";
 import { modeOf, type Plan, type PlanChannel } from "../channels/schema";
 import { ChannelStore } from "../channels/store";
 import { DecoderEventStore } from "../decoders/store";
+import { useM17Audio } from "../m17/audio";
 import { claimOwner } from "../plugins/claim";
 import { PluginStore } from "../plugins/store";
 import { createProfileApi } from "../profiles/api";
@@ -310,11 +311,13 @@ export function useReceiver(device: string) {
   const vfosLoaded = vfoSnap.loaded;
   // The audio of a running DAB plugin is one more stream on the same socket (pseudo VFO id).
   const dabAudioVfo = dabSnap.reply?.audioVfo ?? null;
+  // So is the decoded voice of an M17 decoder (its receiver is muted, see m17/audio.ts).
+  const m17 = useM17Audio(audio, pluginSnap.instances, device);
   useEffect(() => {
     if (!vfosLoaded) return;
     const ids = vfoIds === "" ? [] : vfoIds.split(",").map(Number);
-    audio.setVfos(dabAudioVfo === null ? ids : [...ids, dabAudioVfo]);
-  }, [audio, vfoIds, vfosLoaded, dabAudioVfo]);
+    audio.setVfos([...ids, ...(dabAudioVfo === null ? [] : [dabAudioVfo]), ...m17.audioVfos]);
+  }, [audio, vfoIds, vfosLoaded, dabAudioVfo, m17]);
   useEffect(() => {
     audio.setActive(vfoSnap.selectedId);
   }, [audio, vfoSnap.selectedId]);

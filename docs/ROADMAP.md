@@ -62,7 +62,7 @@ Scope: spike dsd-fme vs. digiham (ADR addendum); DMR, D-Star, YSF, NXDN, P25, M1
 
 Acceptance criteria:
 1. DMR reference recording: correct source/destination IDs, talkgroup, slot, call start/end events in CI. With codec plugin installed locally: intelligible audio (manual check); without: identical events, UI shows "codec not installed".
-2. M17 voice plays with the bundled Codec2 plugin (reference recording).
+2. M17 voice plays with the bundled Codec2 plugin (reference recording). *Done for the synthetic reference recording (`m17-demod` inside the M17 decoder plugin, `docs/plugins-m17.md`, ADR-0018); not yet received on air.*
 3. TETRA TMO reference recordings (own cell): MCC/MNC, LA, cell, neighbour cells, registrations, group calls, SDS/status and encryption state decoded; PDUs match osmo-tetra/tetra-kit output on the same recordings (CI). TETRA DMO reference recordings (own MTM hotspot, gateway and repeater mode): call setup and SDS decoded. Voice from own unencrypted TMO and DMO calls is intelligible with the ETSI codec plugin (manual check), live on own equipment within 1 s latency.
 4. Codec plugin install shows license/patent notice and only proceeds after confirmation; checksum mismatch aborts install (test).
 5. Lookups: cache hit rate observable, per-source switch disables all network calls of that source (test with mock server), configured rate limits are never exceeded (test).

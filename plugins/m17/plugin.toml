@@ -1,0 +1,44 @@
+# M17 digital voice (4FSK, 4800 baud, Codec2 3200), received with m17-demod from m17-cxx-demod
+# (a separate GPL-3.0 process). Non-exclusive: bind it to an NFM VFO on the M17 channel (12.5 kHz
+# raster, amateur allocations around 144-146 MHz and 430-440 MHz); the VFO's FM audio is the
+# baseband the demodulator reads. The decoded voice goes to the listener like DAB audio (pseudo
+# VFO, `InstanceInfo.audio_vfo`), calls are events (`m17.call.start`, `m17.call.end`) and the
+# status document carries the call on the air. Config keys (all optional):
+#   noise_blanker = true     # silence frames the decoder is unsure about
+#   invert = false           # inverted baseband polarity
+#   mute_encrypted = true    # do not play the noise of encrypted calls
+
+[plugin]
+id = "org.superhet.decoder.m17"
+name = "M17 digital voice"
+version = "0.1.0"
+protocol = 1
+license = "AGPL-3.0-only"
+type = "decoder"
+description = "M17 amateur radio digital voice: callsigns, CAN, encryption flag, GNSS position and the voice audio"
+homepage = "https://github.com/BxnnyG/superhet"
+
+[runtime]
+kind = "process"
+transport = "framed"
+command = ["superhet-plugin-adapter", "m17"]
+heartbeat_timeout_s = 15
+
+[input]
+kind = "discriminator"
+sample_rate = 48000
+format = "s16le"
+bandwidth_hz = 12500
+
+[output]
+events_schema = "schema/events.json"
+
+[output.audio]
+sample_rate = 48000
+channels = 1
+
+[config]
+schema = "schema/config.json"
+
+[install]
+acknowledge = { text = "Runs m17-demod from m17-cxx-demod (GPL-3.0) as a separate process; the voice codec is Codec2 (LGPL-2.1). M17 is an open amateur radio protocol (specification and codec are free of patents and licence fees). Encrypted calls are recognised and, by default, not played. Callsigns, call times and positions sent by stations are kept in the decoder history until the retention period ends. Receiving amateur radio transmissions is allowed in most countries; check the rules where you live, especially before sharing what you hear.", url = "https://github.com/mobilinkd/m17-cxx-demod" }
