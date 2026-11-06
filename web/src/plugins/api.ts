@@ -3,6 +3,7 @@
 //   POST   /api/v1/plugins { path }             -> { plugin }                       (admin)
 //   DELETE /api/v1/plugins/{id}                 -> 204                              (admin)
 //   GET    /api/v1/plugin-instances             -> { instances: [InstanceInfo] }    (operator)
+//   GET    /api/v1/plugin-streams               -> { instances: [InstanceInfo] }    (listener; no config)
 //   POST   /api/v1/plugin-instances             -> { instance }                     (operator)
 //   POST   /api/v1/plugin-instances/{id}/stop|restart -> { instance }               (operator)
 //   POST   /api/v1/plugin-instances/{id}/reconfigure { config } -> { instance }     (operator)
@@ -101,6 +102,8 @@ export interface PluginApi {
   install(path: string): Promise<PluginManifest>;
   remove(pluginId: string): Promise<void>;
   listInstances(signal?: AbortSignal): Promise<PluginInstance[]>;
+  /** Read-only view for listeners: running instances without their configuration. */
+  listStreams(signal?: AbortSignal): Promise<PluginInstance[]>;
   start(req: StartRequest): Promise<PluginInstance>;
   stop(instanceId: string): Promise<PluginInstance>;
   restart(instanceId: string): Promise<PluginInstance>;
@@ -252,6 +255,10 @@ export function createPluginApi(fetchImpl: typeof fetch = apiFetch): PluginApi {
     async listInstances(signal) {
       const r = await call("GET", `${BASE}/plugin-instances`, undefined, signal);
       return isRec(r) ? list(r.instances).map(parseInstance) : bad("instance list");
+    },
+    async listStreams(signal) {
+      const r = await call("GET", `${BASE}/plugin-streams`, undefined, signal);
+      return isRec(r) ? list(r.instances).map(parseInstance) : bad("stream list");
     },
     async start(req) {
       return instance(await call("POST", `${BASE}/plugin-instances`, startBody(req)));

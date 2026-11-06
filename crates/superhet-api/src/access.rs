@@ -193,6 +193,9 @@ pub const RULES: &[Rule] = &[
     rule("GET", "/api/v1/plugin-instances", Operator),
     rule("POST", "/api/v1/plugin-instances", Operator),
     rule("GET", "/api/v1/plugin-instances/{id}", Operator),
+    // Read-only view for listening (no configuration, see plugins::listen_view): the running
+    // instances and their audio streams. The streams themselves are on the audio WebSocket.
+    rule("GET", "/api/v1/plugin-streams", GuestDecoder),
     rule("POST", "/api/v1/plugin-instances/{id}/stop", Operator),
     rule("POST", "/api/v1/plugin-instances/{id}/restart", Operator),
     // What a running plugin reports (DAB services, now playing) is decoder output: same
@@ -379,6 +382,79 @@ mod tests {
                 g_dec,
                 "{access:?} guest+decoder"
             );
+        }
+    }
+
+    /// Whether `principal` passes the rule of a route (a missing rule means refused).
+    fn passes(principal: &Principal, guests_see: bool, method: &str, path: &str) -> bool {
+        let method = Method::from_bytes(method.as_bytes()).expect("method");
+        find_rule(&method, path).is_some_and(|r| r.access.allows(principal, guests_see))
+    }
+
+    #[test]
+    fn plugin_listening_is_open_and_plugin_control_is_not() {
+        let listener = Principal::test(Role::Listener);
+        let operator = Principal::test(Role::Operator);
+        // What a listener needs to find and hear a decoder.
+        for (method, path) in [
+            ("GET", "/api/v1/plugin-streams"),
+            ("GET", "/api/v1/plugin-instances/{id}/status"),
+            ("GET", "/api/v1/ws/audio"),
+        ] {
+            assert!(passes(&listener, false, method, path), "listener {path}");
+            assert!(passes(&operator, false, method, path), "operator {path}");
+        }
+        // Guests: audio always, the instance view and call log only while the policy shows
+        // decoder output.
+        assert!(passes(&guest(), false, "GET", "/api/v1/ws/audio"));
+        assert!(!passes(&guest(), false, "GET", "/api/v1/plugin-streams"));
+        assert!(passes(&guest(), true, "GET", "/api/v1/plugin-streams"));
+        assert!(!passes(
+            &guest(),
+            false,
+            "GET",
+            "/api/v1/plugin-instances/{id}/status"
+        ));
+        assert!(passes(
+            &guest(),
+            true,
+            "GET",
+            "/api/v1/plugin-instances/{id}/status"
+        ));
+        // Control and the full instance records (configuration) stay with operators.
+        for (method, path) in [
+            ("GET", "/api/v1/plugins"),
+            ("GET", "/api/v1/plugin-instances"),
+            ("GET", "/api/v1/plugin-instances/{id}"),
+            ("POST", "/api/v1/plugin-instances"),
+            ("POST", "/api/v1/plugin-instances/{id}/stop"),
+            ("POST", "/api/v1/plugin-instances/{id}/restart"),
+            ("POST", "/api/v1/plugin-instances/{id}/control"),
+            ("POST", "/api/v1/plugin-instances/{id}/reconfigure"),
+        ] {
+            assert!(
+                !passes(&listener, true, method, path),
+                "listener {method} {path}"
+            );
+            assert!(
+                !passes(&guest(), true, method, path),
+                "guest {method} {path}"
+            );
+            assert!(
+                passes(&operator, false, method, path),
+                "operator {method} {path}"
+            );
+        }
+        // Installing and removing is admin only.
+        for (method, path) in [
+            ("POST", "/api/v1/plugins"),
+            ("DELETE", "/api/v1/plugins/{id}"),
+        ] {
+            assert!(
+                !passes(&operator, true, method, path),
+                "operator {method} {path}"
+            );
+            assert!(passes(&Principal::test(Role::Admin), false, method, path));
         }
     }
 

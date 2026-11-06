@@ -40,6 +40,8 @@ while an instance of the plugin exists (stop it first).
 
 ## Instances
 
+`GET /api/v1/plugin-streams` – listening view for listeners (and for guests while the guest policy shows decoder output): `{"ok":true,"instances":[...]}` with only `id`, `plugin_id`, `device`, `vfo`, `freq_hz`, `exclusive`, `state`, `audio_vfo` and `updated_unix_ms` of every instance that is not stopped. Never the configuration, process id, error text or counters. The plugin's audio is the pseudo VFO `audio_vfo` on `/api/v1/ws/audio`, open to every role; the call log and "now talking" come from `/status` and the decoder history. Starting, stopping, reconfiguring and the full records below stay `operator`.
+
 `GET /api/v1/plugin-instances` – `{"instances":[InstanceInfo]}`;
 `GET /api/v1/plugin-instances/{id}` – `{"instance":InstanceInfo}` (`404` for unknown ids).
 `InstanceInfo`: `id`, `plugin_id`, `device`, `vfo`, `freq_hz`, `config`, `exclusive`, `state`

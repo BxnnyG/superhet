@@ -28,6 +28,22 @@ describe("PluginStore", () => {
     expect(api.listInstances).toHaveBeenCalledTimes(2);
   });
 
+  it("reads only the secret-free stream view in listen-only mode", async () => {
+    const { api, state } = fakePluginApi([], [instance()]);
+    const store = new PluginStore(api, true);
+    store.start();
+    await flush();
+    expect(store.getSnapshot()).toMatchObject({ loaded: true, error: null, plugins: [] });
+    expect(store.getSnapshot().instances).toHaveLength(1);
+    state.instances = [];
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    expect(store.getSnapshot().instances).toEqual([]);
+    store.stop();
+    expect(api.listStreams).toHaveBeenCalledTimes(2);
+    expect(api.listInstances).not.toHaveBeenCalled();
+    expect(api.listPlugins).not.toHaveBeenCalled();
+  });
+
   it("shows why the lists are unavailable and recovers", async () => {
     const { api } = fakePluginApi();
     api.listPlugins.mockRejectedValueOnce(

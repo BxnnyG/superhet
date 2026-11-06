@@ -8,7 +8,7 @@ import type { PluginInstance } from "../plugins/api";
 import { DsdNow } from "../dsd/DsdNow";
 import { DSD_CALL_END, DSD_PLUGIN_ID, sourceLabel, type DsdStatus } from "../dsd/model";
 import { useDsdStatus } from "../dsd/useDsdStatus";
-import { M17_CALL_END, type M17Status } from "../m17/model";
+import { M17_CALL_END, M17_PLUGIN_ID, type M17Status } from "../m17/model";
 import { NowTalking } from "../m17/NowTalking";
 import { useM17Status } from "../m17/useM17Status";
 import { InstanceFacts } from "../plugins/InstanceFacts";
@@ -31,7 +31,7 @@ import {
 } from "../ui";
 import type { Vfo } from "../vfo/api";
 import { useLeaveDigitalOnAnalog } from "./actions";
-import { digitalOnVfo, expectText, type DigitalMode } from "./modes";
+import { digitalModeOfInstance, digitalOnVfo, expectText, type DigitalMode } from "./modes";
 
 const AprsMapView = lazy(() => import("./AprsMapView").then((m) => ({ default: m.AprsMapView })));
 
@@ -63,20 +63,32 @@ interface Props {
  * digital decoder it shows what the decoder says (a table of pages, packets or readings), whether
  * it gets input, and lets the user change its settings live. Renders nothing for an analog
  * receiver. It also stops a decoder whose receiver was switched back to an analog mode.
+ *
+ * Listeners and guests (who may see decoder output) get a read-only variant of the voice modes
+ * (M17, DMR, dPMR, NXDN): the call log and who is on the air for a running instance on the
+ * device, whichever receiver they have selected, with no start / stop / settings. The voice
+ * itself plays through the normal audio mix.
  */
 export function DigitalDock({ plugins, device, vfos, selectedId, createEvents }: Props) {
   const perms = usePermissions();
   const snap = useSyncExternalStore(plugins.subscribe, plugins.getSnapshot);
-  useLeaveDigitalOnAnalog(plugins, device, vfos, snap.instances);
+  useLeaveDigitalOnAnalog(plugins, device, vfos, perms.canUsePlugins ? snap.instances : []);
   const vfo = vfos.find((v) => v.id === selectedId) ?? null;
-  const here = vfo === null ? [] : digitalOnVfo(snap.instances, device, vfo.id);
+  const readOnly = !perms.canUsePlugins;
+  const here = readOnly
+    ? listenableVoice(snap.instances, device)
+    : vfo === null
+      ? []
+      : digitalOnVfo(snap.instances, device, vfo.id);
   const [pick, setPick] = useState<string | null>(null);
-  if (!perms.canUsePlugins || vfo === null || here.length === 0) return null;
+  if ((!readOnly && vfo === null) || here.length === 0) return null;
+  if (readOnly && !perms.canSeeDecoders) return null;
   const current = here.find((h) => h.instance.id === pick) ?? here[0];
   if (current === undefined) return null;
   return (
     <DockPanel
       key={current.instance.id}
+      readOnly={readOnly}
       vfo={vfo}
       mode={current.mode}
       instance={current.instance}
@@ -89,8 +101,26 @@ export function DigitalDock({ plugins, device, vfos, selectedId, createEvents }:
   );
 }
 
+/** Voice decoders (with a call log) that run on the device, for the read-only dock. */
+function listenableVoice(
+  instances: readonly PluginInstance[],
+  device: string,
+): { mode: DigitalMode; instance: PluginInstance }[] {
+  const out: { mode: DigitalMode; instance: PluginInstance }[] = [];
+  for (const instance of instances) {
+    if (instance.device !== device || instance.state === "stopped") continue;
+    if (instance.pluginId !== M17_PLUGIN_ID && instance.pluginId !== DSD_PLUGIN_ID) continue;
+    const mode = digitalModeOfInstance(instance);
+    if (mode !== null) out.push({ mode, instance });
+  }
+  return out;
+}
+
 interface PanelProps {
-  vfo: Vfo;
+  /** Listeners: no controls, no counters; the instance record carries no configuration. */
+  readOnly: boolean;
+  /** The receiver the decoder is bound to when the viewer is looking at it; null for listeners. */
+  vfo: Vfo | null;
   mode: DigitalMode;
   instance: PluginInstance;
   siblings: readonly { id: string; label: string }[];
@@ -101,6 +131,7 @@ interface PanelProps {
 }
 
 function DockPanel({
+  readOnly,
   vfo,
   mode,
   instance,
@@ -177,7 +208,8 @@ function DockPanel({
           {mode.label}
         </PlainButton>
         <span className="num text-xs text-fg-muted">
-          VFO {vfo.id} · {formatMhz(vfo.freqHz)} MHz
+          {vfo !== null && `VFO ${vfo.id} · `}
+          {formatMhz(vfo?.freqHz ?? instance.freqHz ?? 0)} MHz
         </span>
         <StateBadge state={instance.state} />
         {onAir !== null && (
@@ -201,7 +233,7 @@ function DockPanel({
           </div>
         )}
         <span className="ml-auto flex items-center gap-1.5">
-          {hasSettings(instance.pluginId) && (
+          {!readOnly && hasSettings(instance.pluginId) && (
             <Button
               size="sm"
               variant="secondary"
@@ -214,7 +246,7 @@ function DockPanel({
               Settings
             </Button>
           )}
-          {instance.state === "error" && (
+          {!readOnly && instance.state === "error" && (
             <Button
               size="sm"
               icon={<RefreshIcon size={12} />}
@@ -224,24 +256,28 @@ function DockPanel({
               Restart
             </Button>
           )}
-          <Button
-            size="sm"
-            variant="secondary"
-            icon={<StopIcon size={12} />}
-            disabled={busy}
-            aria-label={`Stop ${mode.label}`}
-            onClick={() => void act("stop")}
-          >
-            Stop
-          </Button>
+          {!readOnly && (
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<StopIcon size={12} />}
+              disabled={busy}
+              aria-label={`Stop ${mode.label}`}
+              onClick={() => void act("stop")}
+            >
+              Stop
+            </Button>
+          )}
         </span>
       </header>
-      <div className="px-3 pb-2">
-        <InstanceFacts instance={instance} flow={flow} noun={mode.noun} />
-      </div>
+      {!readOnly && (
+        <div className="px-3 pb-2">
+          <InstanceFacts instance={instance} flow={flow} noun={mode.noun} />
+        </div>
+      )}
       {open && (
         <div className="flex min-h-0 flex-1 flex-col">
-          {settingsOpen && (
+          {!readOnly && settingsOpen && (
             <div className="max-h-48 overflow-y-auto border-t border-border px-3 py-3">
               <InstanceSettings instance={instance} store={plugins} />
             </div>
@@ -254,6 +290,7 @@ function DockPanel({
             verdictText={state.text}
             verdictTone={state.tone}
             vfo={vfo}
+            readOnly={readOnly}
             m17={mode.id === "m17" ? m17 : null}
             dsd={mode.pluginId === DSD_PLUGIN_ID ? dsd : null}
           />
@@ -281,6 +318,7 @@ function Output({
   verdictText,
   verdictTone,
   vfo,
+  readOnly,
   m17,
   dsd,
 }: {
@@ -290,7 +328,8 @@ function Output({
   createEvents: Props["createEvents"];
   verdictText: string;
   verdictTone: "success" | "warn" | "danger" | "neutral" | "accent" | "info";
-  vfo: Vfo;
+  vfo: Vfo | null;
+  readOnly: boolean;
   /** M17 only: the plugin's status poll. */
   m17: { status: M17Status; stale: boolean } | null;
   /** DMR / dPMR / NXDN only: the plugin's status poll. */
@@ -320,7 +359,15 @@ function Output({
     () => (hasMap ? snap.events.filter((e) => e.meta.instance === instance.id) : []),
     [hasMap, snap.events, instance.id],
   );
-  const problem = instance.state === "running" && verdictTone === "success" ? null : verdictText;
+  // Without counters (read-only view) only the lifecycle state says anything about the decoder.
+  const problem = readOnly
+    ? instance.state === "running"
+      ? null
+      : `The decoder is ${instance.state}.`
+    : instance.state === "running" && verdictTone === "success"
+      ? null
+      : verdictText;
+  const healthy = readOnly ? instance.state === "running" : verdictTone === "success";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col border-t border-border">
@@ -336,14 +383,14 @@ function Output({
         <NowTalking
           status={m17.status}
           stale={m17.stale}
-          running={instance.state === "running" && verdictTone === "success"}
+          running={instance.state === "running" && healthy}
         />
       )}
       {dsd !== null && (
         <DsdNow
           status={dsd.status}
           stale={dsd.stale}
-          running={instance.state === "running" && verdictTone === "success"}
+          running={instance.state === "running" && healthy}
         />
       )}
       {hasMap && rows.length > 0 && (
@@ -379,7 +426,7 @@ function Output({
                 ? "Listening…"
                 : "Waiting for the decoder"}
           </p>
-          <p className="mt-1 max-w-prose">{expectText(mode, vfo.freqHz)}</p>
+          <p className="mt-1 max-w-prose">{expectText(mode, vfo?.freqHz ?? instance.freqHz)}</p>
           {!snap.loaded && <p className="mt-1 text-xs text-fg-subtle">Loading history…</p>}
         </div>
       ) : (

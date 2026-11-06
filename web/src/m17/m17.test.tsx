@@ -1,10 +1,12 @@
-import { act, render, renderHook, screen, within } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventApi } from "../decoders/api";
 import { parseEvent, type DecoderEvent } from "../decoders/events";
 import { DecoderEventStore } from "../decoders/store";
 import { describeEvent } from "../decoders/render";
 import { DigitalDock } from "../digital/DigitalDock";
+import { AuthContext } from "../auth/context";
+import { accountStatus, authValue, guestStatus, GUEST_LIMITS } from "../auth/testing";
 import { PluginStore } from "../plugins/store";
 import { M17_ID, fakePluginApi, instance, m17 as m17Manifest } from "../plugins/testing";
 import { vfo } from "../shell/fixtures";
@@ -275,6 +277,91 @@ describe("M17 in the output dock", () => {
     expect(screen.getByTestId("dock-empty")).toHaveTextContent("No calls yet on 144.910 MHz");
     expect(screen.getByTestId("m17-now")).toHaveTextContent("Channel idle");
     store.stop();
+  });
+});
+
+describe("M17 for listeners", () => {
+  const flush = () => act(() => new Promise<void>((r) => setTimeout(r, 0)));
+
+  async function setup(session: ReturnType<typeof authValue>) {
+    // The decoder is bound to the operator's receiver 9; this viewer only has VFO 1.
+    const fake = fakePluginApi([], [instance({ id: "i-1", plugin_id: M17_ID, vfo: 9 })]);
+    const store = new PluginStore(fake.api, true);
+    const events$ = new DecoderEventStore({
+      device: "dev0",
+      api: {
+        list: vi.fn<EventApi["list"]>(() =>
+          Promise.resolve({
+            events: [
+              ev(4, "m17.call.end", { ...CALL, duration_ms: 8000, audio_ms: 7000, reason: "eos" }),
+            ],
+            next: null,
+          }),
+        ),
+        clear: vi.fn<EventApi["clear"]>(() => Promise.resolve(0)),
+      },
+      createSocket: () => ({ close() {} }) as unknown as WebSocket,
+    });
+    render(
+      <AuthContext.Provider value={session}>
+        <DigitalDock
+          plugins={store}
+          device="dev0"
+          vfos={[vfo(1, { freqHz: 98_000_000 })]}
+          selectedId={1}
+          createEvents={() => events$}
+        />
+      </AuthContext.Provider>,
+    );
+    store.start();
+    await flush();
+    return { store, fake };
+  }
+
+  it("shows the call log read-only and never asks for the operator's instance list", async () => {
+    const { store, fake } = await setup(authValue(accountStatus("listener")));
+    const dock = screen.getByTestId("digital-dock");
+    expect(within(dock).getAllByRole("row")[1]).toHaveTextContent("DL1ABC → DB0XYZ");
+    expect(within(dock).queryByRole("button", { name: /stop/i })).toBeNull();
+    expect(within(dock).queryByRole("button", { name: /settings|restart/i })).toBeNull();
+    expect(fake.api.listStreams).toHaveBeenCalled();
+    expect(fake.api.listInstances).not.toHaveBeenCalled();
+    expect(fake.api.listPlugins).not.toHaveBeenCalled();
+    expect(fake.api.stop).not.toHaveBeenCalled();
+    store.stop();
+  });
+
+  it("shows a guest the decoder only while the policy shows decoder output", async () => {
+    const closed = await setup(authValue(guestStatus(), { limits: GUEST_LIMITS }));
+    expect(screen.queryByTestId("digital-dock")).toBeNull();
+    closed.store.stop();
+    cleanup();
+    const open = await setup(
+      authValue(guestStatus(), { limits: { ...GUEST_LIMITS, showDecoderEvents: true } }),
+    );
+    expect(screen.getByTestId("digital-dock")).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("digital-dock")).queryByRole("button", {
+        name: /stop|settings|restart/i,
+      }),
+    ).toBeNull();
+    open.store.stop();
+  });
+
+  it("finds the voice stream on the instance record the listener view carries", () => {
+    const routes = m17Routes(
+      [
+        instance({
+          id: "i-1",
+          plugin_id: M17_ID,
+          device: "dev0",
+          vfo: 9,
+          audio_vfo: 4_000_000_001,
+        }),
+      ],
+      "dev0",
+    );
+    expect(routes).toEqual({ audioVfos: [4_000_000_001], receivers: [9] });
   });
 });
 
