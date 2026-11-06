@@ -3,7 +3,7 @@
 Local authentication, see ADR-0008 for the design and ADR-0011 for the multi-user extension
 (roles, invites, guests; contract in `docs/api-users.md`, audit log in `docs/api-audit.md`). All bodies are JSON
 (`Content-Type: application/json`, at most 8 KiB); all responses carry `Cache-Control: no-store`.
-Errors are `{"error": "<code>"}`, optionally with `"message"` (human readable).
+Optional OpenID Connect login: `docs/api-oidc.md`. Errors are `{"error": "<code>"}`, optionally with `"message"` (human readable).
 
 Public routes: `/healthz`, `/readyz`, `/api/v1/auth/*` and the static web UI (every other `GET`/`HEAD`
 path outside `/api`, served from `SUPERHET_WEB_DIR`, default `/usr/share/superhet/web`; unknown

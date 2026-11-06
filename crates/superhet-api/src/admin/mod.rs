@@ -7,6 +7,7 @@
 
 mod audit_routes;
 mod bans;
+mod oidc_routes;
 mod report;
 mod sessions;
 mod settings_routes;
@@ -102,6 +103,11 @@ pub fn router(state: AdminState) -> Router {
                 .put(settings_routes::put_audit_settings)
                 .layer(limit),
         )
+        .route(
+            "/api/v1/admin/oidc",
+            get(oidc_routes::get).put(oidc_routes::put).layer(limit),
+        )
+        .route("/api/v1/admin/oidc/test", post(oidc_routes::test))
         .route(
             "/api/v1/admin/limits",
             get(settings_routes::get_limits)

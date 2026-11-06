@@ -17,6 +17,21 @@ export interface GuestInfo {
   clientReport?: ClientReportRequest | null;
 }
 
+/** The single sign-on button of the login page (the provider is configured by an admin). */
+export interface SsoInfo {
+  /** Label: "Sign in with <name>". */
+  name: string;
+  /** Where the browser goes to start the login (a plain navigation, not a fetch). */
+  loginUrl: string;
+}
+
+/** What the login page offers besides the guest option. */
+export interface LoginOptions {
+  sso: SsoInfo | null;
+  /** The password form is shown; false once an admin switched password logins off. */
+  localLogin: boolean;
+}
+
 export interface AuthStatus {
   setupRequired: boolean;
   authenticated: boolean;
@@ -28,6 +43,10 @@ export interface AuthStatus {
   /** The account still has a one-time password: only the password change works. */
   mustChangePassword: boolean;
   guest: GuestInfo;
+  /** Single sign-on, when an admin enabled it. */
+  oidc: SsoInfo | null;
+  /** Password logins are accepted. */
+  localLogin: boolean;
   /** What this browser is asked to report about itself; null/absent: nothing. */
   clientReport?: ClientReportRequest | null;
 }
@@ -62,6 +81,7 @@ export type AuthErrorKind =
   | "not_found"
   | "forbidden"
   | "password_change_required"
+  | "local_login_disabled"
   | "unavailable"
   | "banned"
   | "network"
@@ -129,8 +149,51 @@ export function parseStatus(raw: unknown): AuthStatus {
     kind: raw.authenticated ? (kind ?? "user") : null,
     mustChangePassword: raw.must_change_password === true,
     guest,
+    oidc: parseSso(raw.oidc),
+    localLogin: raw.local_login !== false,
     ...withReport(raw.authenticated ? parseClientReportRequest(raw.client_report) : null),
   };
+}
+
+/** `oidc` of the status reply; only same-origin paths are accepted as login URL. */
+function parseSso(raw: unknown): SsoInfo | null {
+  if (!isRec(raw) || raw.enabled !== true) return null;
+  const url = raw.login_url;
+  if (typeof url !== "string" || !url.startsWith("/") || url.startsWith("//")) return null;
+  const name = typeof raw.name === "string" && raw.name.trim() !== "" ? raw.name : "single sign-on";
+  return { name, loginUrl: url };
+}
+
+export function loginOptionsOf(st: AuthStatus): LoginOptions {
+  return { sso: st.oidc, localLogin: st.localLogin };
+}
+
+/** User-facing text for the `oidc_error` code the server appends to `/` after a failed SSO login. */
+export function oidcErrorMessage(code: string): string {
+  switch (code) {
+    case "no_account":
+      return "There is no account for you here yet. Ask the administrator.";
+    case "no_role":
+      return "Your account at the identity provider has no access to this receiver.";
+    case "disabled":
+      return "This account is disabled.";
+    case "already_linked":
+      return "That email address belongs to an account that is linked to another identity.";
+    case "provider_denied":
+      return "The identity provider did not sign you in.";
+    case "invalid_state":
+      return "The sign-in attempt expired or did not start in this browser. Please try again.";
+    case "token_invalid":
+      return "The identity provider's answer could not be verified.";
+    case "rate_limited":
+      return "Too many attempts. Please wait a few minutes.";
+    case "busy":
+      return "Too many sign-ins are in progress. Please try again in a moment.";
+    case "not_enabled":
+      return "Single sign-on is not enabled.";
+    default:
+      return "Single sign-on is not available right now.";
+  }
 }
 
 /** The `clientReport` property only when the server asks for something. */
@@ -201,6 +264,12 @@ async function toError(res: Response): Promise<AuthError> {
     case 403:
       if (code === "password_change_required") {
         return new AuthError("password_change_required", "You must change your password first.");
+      }
+      if (code === "local_login_disabled") {
+        return new AuthError(
+          "local_login_disabled",
+          "Password sign-in is switched off. Use single sign-on.",
+        );
       }
       if (code === "banned") {
         return new AuthError("banned", "This address is blocked by the administrator.");

@@ -13,6 +13,8 @@ export const SIGNED_OUT: AuthStatus = {
   kind: null,
   mustChangePassword: false,
   guest: { enabled: false, privacyText: null },
+  oidc: null,
+  localLogin: true,
 };
 
 export function makeStatus(over: Partial<AuthStatus> = {}): AuthStatus {

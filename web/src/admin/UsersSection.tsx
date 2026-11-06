@@ -56,6 +56,7 @@ export function UsersSection({ api, selfId }: { api: AdminApi; selfId: number | 
     | { kind: "delete"; user: User }
     | { kind: "disable"; user: User }
     | { kind: "reset"; user: User }
+    | { kind: "email"; user: User }
     | { kind: "revoke"; invite: Invite }
     | null
   >(null);
@@ -138,12 +139,18 @@ export function UsersSection({ api, selfId }: { api: AdminApi; selfId: number | 
                         <span className="truncate text-sm font-medium">{u.username}</span>
                         {isSelf && <Badge tone="accent">You</Badge>}
                         {u.disabled && <Badge tone="danger">Disabled</Badge>}
+                        {u.oidc && (
+                          <Badge tone="neutral" title="Linked to a single sign-on identity">
+                            SSO
+                          </Badge>
+                        )}
                         {u.mustChangePassword && (
                           <Badge tone="warn" title="Signs in with a one-time password">
                             One-time password
                           </Badge>
                         )}
                       </div>
+                      {u.email && <p className="truncate text-xs text-fg-muted">{u.email}</p>}
                       <p className="text-xs text-fg-muted">
                         {u.lastLoginMs
                           ? `Last sign-in ${formatRelative(u.lastLoginMs)}`
@@ -174,6 +181,10 @@ export function UsersSection({ api, selfId }: { api: AdminApi; selfId: number | 
                             disabled: isSelf || lastAdmin,
                             onSelect: () => setConfirm({ kind: "disable", user: u }),
                           },
+                      {
+                        label: "Email address…",
+                        onSelect: () => setConfirm({ kind: "email", user: u }),
+                      },
                       {
                         label: "Reset password…",
                         onSelect: () => setConfirm({ kind: "reset", user: u }),
@@ -306,6 +317,22 @@ export function UsersSection({ api, selfId }: { api: AdminApi; selfId: number | 
         >
           The link stops working immediately.
         </ConfirmDialog>
+      )}
+      {confirm?.kind === "email" && (
+        <EmailDialog
+          user={confirm.user}
+          api={api}
+          onClose={() => setConfirm(null)}
+          onDone={(email) => {
+            const u = confirm.user;
+            setConfirm(null);
+            users.reload();
+            toasts.push({
+              tone: "success",
+              title: email ? `Email of ${u.username} saved` : `Email of ${u.username} removed`,
+            });
+          }}
+        />
       )}
       {confirm?.kind === "reset" && (
         <ResetPasswordDialog
@@ -624,6 +651,67 @@ function SecretDialog({
           Done
         </Button>
       </div>
+    </Dialog>
+  );
+}
+
+function EmailDialog({
+  user,
+  api,
+  onClose,
+  onDone,
+}: {
+  user: User;
+  api: AdminApi;
+  onClose: () => void;
+  onDone: (email: string) => void;
+}) {
+  const [email, setEmail] = useState(user.email ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const trimmed = email.trim();
+  const invalid = trimmed !== "" && !/^[^\s@]+@[^\s@]+$/.test(trimmed);
+
+  const submit = async (e: SyntheticEvent) => {
+    e.preventDefault();
+    if (busy || invalid) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.updateUser(user.id, { email: trimmed });
+      onDone(trimmed);
+    } catch (err) {
+      setError(describeHttpError(err));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog title={`Email address of ${user.username}`} onClose={onClose}>
+      <form onSubmit={submit} noValidate className="flex flex-col gap-4">
+        <p className="text-sm text-fg-muted">
+          Used to link a single sign-on login to this account, if that is enabled and the provider
+          has verified the address. Leave empty to remove it.
+        </p>
+        {error && <Alert>{error}</Alert>}
+        <TextField
+          label="Email address"
+          name="email"
+          type="email"
+          autoComplete="off"
+          value={email}
+          error={invalid ? "Enter a valid email address." : null}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" disabled={busy || invalid}>
+            {busy ? "Saving…" : "Save"}
+          </Button>
+        </div>
+      </form>
     </Dialog>
   );
 }

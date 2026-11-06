@@ -42,6 +42,8 @@ fn user_json(user: &UserInfo, sessions: usize) -> Value {
         "must_change_password": user.must_change_password,
         "created_at_ms": user.created_at_ms,
         "last_login_ms": user.last_login_ms,
+        "email": user.email,
+        "oidc": user.oidc,
         "sessions": sessions,
     })
 }
@@ -197,6 +199,23 @@ async fn create_inner(
 struct UpdateBody {
     role: Option<String>,
     disabled: Option<bool>,
+    /// New address; an empty string removes it.
+    email: Option<String>,
+}
+
+/// A plausible address: 3-254 characters, one `@` with something on both sides, no spaces.
+fn validate_email(raw: &str) -> Result<String, Response> {
+    let email = raw.trim();
+    let ok = (3..=254).contains(&email.len())
+        && !email.chars().any(|c| c.is_whitespace() || c.is_control())
+        && email
+            .split_once('@')
+            .is_some_and(|(l, d)| !l.is_empty() && !d.is_empty() && !d.contains('@'));
+    if ok {
+        Ok(email.to_owned())
+    } else {
+        Err(bad("email is not a valid address"))
+    }
 }
 
 fn last_admin() -> Response {
@@ -224,16 +243,51 @@ async fn update_inner(
     let db = state.auth.db()?;
     let id = parse_id(id)?;
     let req: UpdateBody = parse_json(headers, body)?;
-    if req.role.is_none() && req.disabled.is_none() {
+    if req.role.is_none() && req.disabled.is_none() && req.email.is_none() {
         return Err(bad("nothing to change"));
     }
     let new_role = req.role.as_deref().map(parse_role).transpose()?;
+    let new_email = req
+        .email
+        .as_deref()
+        .map(|e| {
+            if e.trim().is_empty() {
+                Ok(None)
+            } else {
+                validate_email(e).map(Some)
+            }
+        })
+        .transpose()?;
     let before = superhet_db::users::get(db, id)
         .await
         .map_err(db_failed)?
         .ok_or_else(not_found)?;
     let audit = state.auth.audit();
 
+    if let Some(email) = &new_email
+        && *email != before.email
+    {
+        match superhet_db::users::set_email(db, id, email.as_deref())
+            .await
+            .map_err(db_failed)?
+        {
+            superhet_db::users::EmailSet::Done => {
+                audit
+                    .log(
+                        &me.who(),
+                        "user.email_change",
+                        Some(&before.username),
+                        Outcome::Ok,
+                        json!({"cleared": email.is_none()}),
+                    )
+                    .await;
+            }
+            superhet_db::users::EmailSet::Taken => {
+                return Err(conflict("email_taken", "another account has that address"));
+            }
+            superhet_db::users::EmailSet::NotFound => return Err(not_found()),
+        }
+    }
     if let Some(role) = new_role
         && role != before.role
     {

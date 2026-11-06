@@ -7,11 +7,13 @@ import { AuthLayout } from "./AuthLayout";
 import {
   AuthError,
   createAuthClient,
+  loginOptionsOf,
   parseStatus,
   type AuthClient,
   type AuthStatus,
   type GuestInfo,
   type GuestLimits,
+  type LoginOptions,
 } from "./api";
 import { AuthContext, type AuthContextValue } from "./context";
 import { ForcedPasswordPage } from "./ForcedPasswordPage";
@@ -33,8 +35,8 @@ type State =
   | { kind: "unreachable" }
   | { kind: "banned" }
   | { kind: "setup" }
-  | { kind: "login"; notice?: string; guest: GuestInfo }
-  | { kind: "guest"; guest: GuestInfo }
+  | { kind: "login"; notice?: string; guest: GuestInfo; options?: LoginOptions }
+  | { kind: "guest"; guest: GuestInfo; options?: LoginOptions }
   | { kind: "password"; username: string | null }
   | { kind: "invite"; token: string; signedInAs: string | null }
   | { kind: "app"; status: AuthStatus; limits: GuestLimits | null };
@@ -86,7 +88,7 @@ export function AuthGate({ children, client = defaultClient }: Props) {
         resetSession();
         setState({ kind: "app", status: st, limits });
       } else {
-        setState({ kind: "login", guest: st.guest });
+        setState({ kind: "login", guest: st.guest, options: loginOptionsOf(st) });
       }
     },
     [client],
@@ -110,6 +112,8 @@ export function AuthGate({ children, client = defaultClient }: Props) {
               kind: "user",
               mustChangePassword: false,
               guest: NO_GUEST,
+              oidc: null,
+              localLogin: true,
             },
             limits: null,
           });
@@ -135,6 +139,7 @@ export function AuthGate({ children, client = defaultClient }: Props) {
           return {
             kind: "login",
             guest: s.status.guest,
+            options: loginOptionsOf(s.status),
             notice: guest
               ? "Your guest session has ended. You can start a new one."
               : "Your session has ended. Please sign in again.",
@@ -177,7 +182,11 @@ export function AuthGate({ children, client = defaultClient }: Props) {
     notifyUnauthorized();
     if (window.location.pathname !== "/") navigate("/", { replace: true });
     // Keep the guest offer of the session that just ended on the login page.
-    setState((s) => ({ kind: "login", guest: s.kind === "app" ? s.status.guest : NO_GUEST }));
+    setState((s) => ({
+      kind: "login",
+      guest: s.kind === "app" ? s.status.guest : NO_GUEST,
+      options: s.kind === "app" ? loginOptionsOf(s.status) : undefined,
+    }));
   }, [client]);
 
   const ctx = useMemo<AuthContextValue | null>(() => {
@@ -250,9 +259,12 @@ export function AuthGate({ children, client = defaultClient }: Props) {
         <LoginPage
           client={client}
           notice={state.notice}
+          options={state.options}
           onSuccess={(u) => void refresh(u)}
           onGuest={
-            state.guest.enabled ? () => setState({ kind: "guest", guest: state.guest }) : undefined
+            state.guest.enabled
+              ? () => setState({ kind: "guest", guest: state.guest, options: state.options })
+              : undefined
           }
         />
       );
@@ -262,7 +274,7 @@ export function AuthGate({ children, client = defaultClient }: Props) {
           client={client}
           guest={state.guest}
           onStarted={() => void refresh()}
-          onBack={() => setState({ kind: "login", guest: state.guest })}
+          onBack={() => setState({ kind: "login", guest: state.guest, options: state.options })}
         />
       );
     case "password":
