@@ -39,6 +39,8 @@ const TICK: Duration = Duration::from_millis(100);
 /// Audio that arrives without a call waits this long for the link setup frame the tool prints
 /// just before it (two pipes, two threads).
 const LSF_GRACE: Duration = Duration::from_millis(50);
+/// The end-of-stream marker waits this long for the voice of the last frames (other pipe).
+const EOS_GRACE: Duration = Duration::from_millis(80);
 /// Unrecognised lines of the tool forwarded to the host log (it prints a lot of progress).
 const MAX_LOGGED_LINES: usize = 20;
 
@@ -435,6 +437,8 @@ fn watch_stderr(stderr: impl Read, shared: &Shared) {
                     shared.call_changed.notify_all();
                 }
                 Some(Line::EndOfStream) => {
+                    // The last frame's audio may still be on its way on the other pipe.
+                    std::thread::sleep(EOS_GRACE);
                     let mut tracker = shared.tracker();
                     let emits = tracker.end_of_stream(shared.now());
                     shared.publish(&tracker, &emits);

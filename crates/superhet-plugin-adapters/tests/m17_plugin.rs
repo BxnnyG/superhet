@@ -157,8 +157,8 @@ fn audio_rms(frames: &[Frame]) -> f64 {
     let mut sum = 0.0;
     let mut n = 0usize;
     for f in frames.iter().filter(|f| f.kind == FrameKind::Audio) {
-        for pair in f.payload.chunks_exact(2) {
-            let s = f64::from(i16::from_le_bytes([pair[0], pair[1]])) / 32768.0;
+        for pair in f.payload.as_chunks::<2>().0.iter() {
+            let s = f64::from(i16::from_le_bytes(*pair)) / 32768.0;
             sum += s * s;
             n += 1;
         }
@@ -342,7 +342,7 @@ fn start(tool: Tool, input: Input, config: &str) -> Rig {
                         state ^= state << 13;
                         state ^= state >> 7;
                         state ^= state << 17;
-                        (((state >> 40) as i16 % 400) as i16).to_le_bytes()
+                        ((state >> 40) as i16 % 400).to_le_bytes()
                     })
                     .collect();
                 let header = SamplesHeader {
@@ -453,8 +453,10 @@ fn m17_decodes_after_the_production_nfm_channel() {
     // The channel wants at least 100 kS/s: FM-modulate the baseband at 5 x 48 kHz.
     let rate = 240_000u32;
     let baseband: Vec<f32> = recording()
-        .chunks_exact(2)
-        .map(|b| f32::from(i16::from_le_bytes([b[0], b[1]])) / 31_322.0)
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|b| f32::from(i16::from_le_bytes(*b)) / 31_322.0)
         .collect();
     // +-3 symbols = 2.4 kHz deviation; the NFM channel's full scale is 5 kHz.
     let mut phase = 0.0f64;
