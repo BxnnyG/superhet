@@ -8,6 +8,9 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use superhet_db::PgPool;
 
+use crate::auth::oidc::OidcSettings;
+use crate::auth::oidc::config::KEY_OIDC;
+
 /// Settings key of the guest policy.
 pub const KEY_GUEST: &str = "guest_policy";
 /// Settings key of the audit settings.
@@ -329,6 +332,7 @@ struct Cache {
     audit: Option<Cached<AuditSettings>>,
     limits: Option<Cached<Limits>>,
     client_report: Option<Cached<ClientReportPolicy>>,
+    oidc: Option<Cached<OidcSettings>>,
 }
 
 /// The three settings documents with a read cache.
@@ -419,6 +423,38 @@ impl SettingsStore {
             at: Instant::now(),
         });
         value
+    }
+
+    /// The stored OIDC settings (OIDC off when nothing is stored). The environment form
+    /// overrides this; see `AuthState::oidc_settings`.
+    pub async fn oidc(&self) -> OidcSettings {
+        if let Some(v) = fresh(&self.cache().oidc) {
+            return v;
+        }
+        let value: OidcSettings = self.load(KEY_OIDC).await;
+        self.cache().oidc = Some(Cached {
+            value: value.clone(),
+            at: Instant::now(),
+        });
+        value
+    }
+
+    /// Replace the OIDC settings.
+    ///
+    /// # Errors
+    /// Fails if the database is unavailable.
+    pub async fn put_oidc(&self, value: &OidcSettings, by: &str) -> Result<(), SettingsError> {
+        self.store(
+            KEY_OIDC,
+            serde_json::to_value(value).unwrap_or_default(),
+            by,
+        )
+        .await?;
+        self.cache().oidc = Some(Cached {
+            value: value.clone(),
+            at: Instant::now(),
+        });
+        Ok(())
     }
 
     /// The client report policy (everything off when nothing is stored). Reading it also keeps

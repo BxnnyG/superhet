@@ -19,6 +19,10 @@ export interface User {
   lastLoginMs: number | null;
   /** Live sessions of the account. */
   sessions: number;
+  /** Contact address; links a single sign-on login to the account when the admin allows it. */
+  email: string | null;
+  /** The account is linked to a single sign-on identity. */
+  oidc: boolean;
 }
 
 export type InviteState = "open" | "used" | "expired" | "revoked";
@@ -215,6 +219,8 @@ export function parseUser(raw: unknown): User {
     createdAtMs: num(raw.created_at_ms),
     lastLoginMs: numOrNull(raw.last_login_ms),
     sessions: num(raw.sessions),
+    email: strOrNull(raw.email),
+    oidc: raw.oidc === true,
   };
 }
 
@@ -383,6 +389,126 @@ export function guestPolicyBody(p: GuestPolicy): Json {
   };
 }
 
+/** Single sign-on (OpenID Connect) settings; the client secret is never part of it. */
+export interface OidcSettings {
+  enabled: boolean;
+  name: string;
+  issuer: string;
+  clientId: string;
+  publicUrl: string;
+  scopes: string[];
+  groupsClaim: string;
+  usernameClaim: string;
+  adminGroups: string[];
+  operatorGroups: string[];
+  listenerGroups: string[];
+  /** "" (refuse users no group matches), "listener", "operator" or "admin". */
+  defaultRole: "" | Role;
+  autoProvision: boolean;
+  linkByEmail: boolean;
+  syncRoles: boolean;
+  localLogin: boolean;
+}
+
+export interface OidcView {
+  settings: OidcSettings;
+  /** "env": set through SUPERHET_OIDC_* and read-only here. */
+  source: "env" | "database";
+  /** To register at the provider; null until the public URL is set. */
+  redirectUrl: string | null;
+  clientSecretSet: boolean;
+  oidcAdminExists: boolean;
+  /** Password logins are accepted right now. */
+  localLoginActive: boolean;
+  keepLocalLogin: boolean;
+}
+
+export interface OidcTestResult {
+  ok: boolean;
+  issuer: string | null;
+  error: string | null;
+}
+
+export const DEFAULT_OIDC_SETTINGS: OidcSettings = {
+  enabled: false,
+  name: "Single sign-on",
+  issuer: "",
+  clientId: "",
+  publicUrl: "",
+  scopes: ["email", "profile"],
+  groupsClaim: "groups",
+  usernameClaim: "preferred_username",
+  adminGroups: [],
+  operatorGroups: [],
+  listenerGroups: [],
+  defaultRole: "",
+  autoProvision: false,
+  linkByEmail: false,
+  syncRoles: true,
+  localLogin: true,
+};
+
+const strList = (v: unknown): string[] => list(v).filter((x): x is string => typeof x === "string");
+
+export function parseOidcView(raw: unknown): OidcView {
+  const o = isJson(raw) && isJson(raw.oidc) ? raw.oidc : null;
+  if (!isJson(raw) || !o) return bad("oidc settings");
+  const d = DEFAULT_OIDC_SETTINGS;
+  const role = ["admin", "operator", "listener"].find((r) => r === o.default_role);
+  return {
+    settings: {
+      enabled: o.enabled === true,
+      name: str(o.name, d.name),
+      issuer: str(o.issuer),
+      clientId: str(o.client_id),
+      publicUrl: str(o.public_url),
+      scopes: strList(o.scopes),
+      groupsClaim: str(o.groups_claim, d.groupsClaim),
+      usernameClaim: str(o.username_claim, d.usernameClaim),
+      adminGroups: strList(o.admin_groups),
+      operatorGroups: strList(o.operator_groups),
+      listenerGroups: strList(o.listener_groups),
+      defaultRole: (role as Role | undefined) ?? "",
+      autoProvision: o.auto_provision === true,
+      linkByEmail: o.link_by_email === true,
+      syncRoles: o.sync_roles !== false,
+      localLogin: o.local_login !== false,
+    },
+    source: raw.source === "env" ? "env" : "database",
+    redirectUrl: strOrNull(raw.redirect_url),
+    clientSecretSet: raw.client_secret_set === true,
+    oidcAdminExists: raw.oidc_admin_exists === true,
+    localLoginActive: raw.local_login_active !== false,
+    keepLocalLogin: raw.keep_local_login === true,
+  };
+}
+
+export function oidcSettingsBody(s: OidcSettings): Json {
+  return {
+    enabled: s.enabled,
+    name: s.name.trim(),
+    issuer: s.issuer.trim(),
+    client_id: s.clientId.trim(),
+    public_url: s.publicUrl.trim(),
+    scopes: s.scopes,
+    groups_claim: s.groupsClaim.trim(),
+    username_claim: s.usernameClaim.trim(),
+    admin_groups: s.adminGroups,
+    operator_groups: s.operatorGroups,
+    listener_groups: s.listenerGroups,
+    default_role: s.defaultRole,
+    auto_provision: s.autoProvision,
+    link_by_email: s.linkByEmail,
+    sync_roles: s.syncRoles,
+    local_login: s.localLogin,
+  };
+}
+
+export function parseOidcTest(raw: unknown): OidcTestResult {
+  if (!isJson(raw)) return bad("oidc test");
+  return { ok: raw.ok === true, issuer: strOrNull(raw.issuer), error: strOrNull(raw.error) };
+}
+
 export type CollectScope = "off" | "users" | "all";
 export const COLLECT_SCOPES: readonly CollectScope[] = ["off", "users", "all"];
 
@@ -493,7 +619,8 @@ export interface AdminApi {
     role: Role;
     password?: string;
   }): Promise<{ user: User; password: string | null }>;
-  updateUser(id: number, patch: { role?: Role; disabled?: boolean }): Promise<User>;
+  /** `email: ""` removes the address. */
+  updateUser(id: number, patch: { role?: Role; disabled?: boolean; email?: string }): Promise<User>;
   deleteUser(id: number): Promise<void>;
   /** Without `password` the server generates one and returns it once. */
   resetPassword(id: number, password?: string): Promise<string | null>;
@@ -523,6 +650,10 @@ export interface AdminApi {
   putLimits(l: Limits): Promise<Limits>;
   getClientReportPolicy(signal?: AbortSignal): Promise<ClientReportPolicy>;
   putClientReportPolicy(p: ClientReportPolicy): Promise<ClientReportPolicy>;
+  getOidc(signal?: AbortSignal): Promise<OidcView>;
+  putOidc(s: OidcSettings): Promise<OidcView>;
+  /** Run discovery against the saved settings. */
+  testOidc(): Promise<OidcTestResult>;
 }
 
 export interface SelfApi {
@@ -649,6 +780,15 @@ export function createAdminApi(fetchImpl?: FetchLike): AdminApi {
       return parseClientReportPolicy(
         (await call("PUT", `${ADMIN}/client-report-policy`, clientReportPolicyBody(p))).body,
       );
+    },
+    async getOidc(signal) {
+      return parseOidcView((await call("GET", `${ADMIN}/oidc`, undefined, signal)).body);
+    },
+    async putOidc(s) {
+      return parseOidcView((await call("PUT", `${ADMIN}/oidc`, oidcSettingsBody(s))).body);
+    },
+    async testOidc() {
+      return parseOidcTest((await call("POST", `${ADMIN}/oidc/test`)).body);
     },
     async getLimits(signal) {
       return parseLimits((await call("GET", `${ADMIN}/limits`, undefined, signal)).body);

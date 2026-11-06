@@ -18,6 +18,8 @@ describe("auth client", () => {
       role: "admin",
       kind: "user",
       mustChangePassword: false,
+      oidc: null,
+      localLogin: true,
       guest: { enabled: false, privacyText: null },
     });
     expect(() => parseStatus({})).toThrow(AuthError);
