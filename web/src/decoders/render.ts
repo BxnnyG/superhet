@@ -16,6 +16,24 @@ import {
   sourceLabel,
   targetLabel,
 } from "../dsd/model";
+import {
+  TETRA_CALL_END,
+  TETRA_CALL_START,
+  TETRA_CELL,
+  TETRA_NEIGHBOUR,
+  TETRA_SDS,
+  TETRA_STATUS,
+  cellEncryptionLabel,
+  cellLabel,
+  channelLabel as tetraChannel,
+  formatDuration as tetraDuration,
+  networkLabel,
+  parseCall as parseTetraCall,
+  parseCell,
+  parseNeighbour,
+  sourceLabel as tetraSource,
+  targetLabel as tetraTarget,
+} from "../tetra/model";
 import type { BadgeTone } from "../ui";
 import {
   M17_CALL_END,
@@ -24,7 +42,7 @@ import {
   formatDuration,
   parseCall,
 } from "../m17/model";
-import { CORE_SOURCE, isCoreKind, type DecoderEvent } from "./events";
+import { CORE_SOURCE, formatMhz, isCoreKind, type DecoderEvent } from "./events";
 
 export interface EventField {
   label: string;
@@ -464,6 +482,138 @@ function dsd(e: DecoderEvent, d: Rec): EventView | null {
   };
 }
 
+// ---------- TETRA ----------
+
+function tetraCall(e: DecoderEvent, d: Rec): EventView | null {
+  const call = parseTetraCall(d);
+  if (call === null) return null;
+  const ended = e.kind === TETRA_CALL_END;
+  const channel = tetraChannel(call);
+  const detailParts: string[] = [];
+  if (ended && call.durationMs !== null) detailParts.push(tetraDuration(call.durationMs));
+  if (ended && call.muted) detailParts.push("audio withheld");
+  else if (ended && call.voiceMs !== null && call.audioMs === 0 && call.voiceMs > 0) {
+    detailParts.push("voice not decoded (no ETSI codec?)");
+  }
+  const fields: EventField[] = [];
+  put(fields, "Calling party (SSI)", call.src, true);
+  put(fields, "Called party / group (SSI)", call.dst, true);
+  put(fields, "Last talker (SSI)", call.talker, true);
+  put(fields, "Traffic channel", call.usage);
+  put(fields, "Call identifier", call.cid);
+  put(fields, "Encryption", call.encrypted ? "encrypted" : "clear");
+  if (ended) {
+    put(fields, "Duration", call.durationMs === null ? null : tetraDuration(call.durationMs));
+    put(fields, "Voice on air", call.voiceMs === null ? null : tetraDuration(call.voiceMs));
+    put(fields, "Voice decoded", call.audioMs === null ? null : tetraDuration(call.audioMs));
+    put(fields, "Ended", call.reason);
+    put(fields, "Network notice", call.detail);
+  }
+  return {
+    label: "TETRA",
+    tone: call.encrypted ? "warn" : ended ? "success" : "accent",
+    title: ended ? "TETRA call ended" : "TETRA call started",
+    headline: `${tetraSource(call)} → ${tetraTarget(call)}`,
+    tags: [...(channel === "" ? [] : [channel]), ...(call.encrypted ? ["encrypted"] : [])],
+    detail: detailParts.length > 0 ? detailParts.join(" · ") : ended ? null : "on the air",
+    fields,
+    link: null,
+    mono: true,
+    raw: rawJson(d),
+  };
+}
+
+function tetra(e: DecoderEvent, d: Rec): EventView | null {
+  switch (e.kind) {
+    case TETRA_CALL_START:
+    case TETRA_CALL_END:
+      return tetraCall(e, d);
+    case TETRA_SDS: {
+      const text = str(d.text);
+      const fields: EventField[] = [];
+      put(fields, "From (SSI)", num(d.src), true);
+      put(fields, "To (SSI)", num(d.dst), true);
+      put(fields, "Protocol", str(d.protocol), true);
+      put(fields, "Text", text);
+      put(fields, "Decoder description", str(d.info), true);
+      return {
+        label: "TETRA SDS",
+        tone: "accent",
+        title: "TETRA short data message",
+        headline: `${num(d.src) ?? "?"} → ${num(d.dst) ?? "—"}`,
+        tags: str(d.protocol) === null ? [] : [String(d.protocol)],
+        detail: text,
+        fields,
+        link: null,
+        mono: true,
+        raw: rawJson(d),
+      };
+    }
+    case TETRA_STATUS: {
+      const fields: EventField[] = [];
+      put(fields, "From (SSI)", num(d.src), true);
+      put(fields, "To (SSI)", num(d.dst), true);
+      put(fields, "Status value", num(d.status), true);
+      return {
+        label: "TETRA status",
+        tone: "neutral",
+        title: "TETRA status message",
+        headline: `${num(d.src) ?? "?"} → ${num(d.dst) ?? "—"}`,
+        tags: [],
+        detail: `status ${num(d.status) ?? "?"}`,
+        fields,
+        link: null,
+        mono: true,
+        raw: rawJson(d),
+      };
+    }
+    case TETRA_CELL: {
+      const cell = parseCell(d);
+      if (cell === null) return null;
+      const encryption = cellEncryptionLabel(cell);
+      const fields: EventField[] = [];
+      put(fields, "MCC / MNC", networkLabel(cell), true);
+      put(fields, "Colour code", cell.cc);
+      put(fields, "Location area", cell.la);
+      put(fields, "Services", cell.services.join(", "));
+      return {
+        label: "TETRA cell",
+        tone: cell.encryption === "air-interface" ? "warn" : "neutral",
+        title: "TETRA cell information",
+        headline: cellLabel(cell),
+        tags: encryption === null ? [] : [encryption],
+        detail: cell.services.length > 0 ? cell.services.join(" · ") : null,
+        fields,
+        link: null,
+        mono: true,
+        raw: rawJson(d),
+      };
+    }
+    case TETRA_NEIGHBOUR: {
+      const n = parseNeighbour(d);
+      if (n === null) return null;
+      const fields: EventField[] = [];
+      put(fields, "Downlink (MHz)", formatMhz(n.dlHz), true);
+      put(fields, "MCC / MNC", n.mcc === null || n.mnc === null ? null : `${n.mcc}/${n.mnc}`, true);
+      put(fields, "Location area", n.la);
+      return {
+        label: "TETRA neighbour",
+        tone: "neutral",
+        title: "TETRA neighbour cell",
+        headline: `${formatMhz(n.dlHz)} MHz`,
+        tags: n.la === null ? [] : [`LA ${n.la}`],
+        detail: null,
+        fields,
+        link: null,
+        mono: true,
+        raw: rawJson(d),
+      };
+    }
+    default:
+      return null;
+  }
+}
+
 // ---------- generic ----------
 
 /** "bytes=1920 seq=47": the scalar members of the data, for a one-line summary. */
@@ -516,6 +666,13 @@ export function describeEvent(e: DecoderEvent): EventView {
     case DSD_CALL_START:
     case DSD_CALL_END:
       return dsd(e, d) ?? generic(e, d);
+    case TETRA_CALL_START:
+    case TETRA_CALL_END:
+    case TETRA_SDS:
+    case TETRA_STATUS:
+    case TETRA_CELL:
+    case TETRA_NEIGHBOUR:
+      return tetra(e, d) ?? generic(e, d);
     case "rtl433.reading":
       return rtl433(e, d);
     default:

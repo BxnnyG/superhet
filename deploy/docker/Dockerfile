@@ -89,17 +89,44 @@ RUN git init -q . \
 RUN head -c 96000 /dev/zero | build/apps/m17-mod -S SELFTEST 2>/dev/null \
         | build/apps/m17-demod -l 2>&1 >/dev/null | grep -q 'SRC: SELFTEST.*TYPE: 0x'
 
-# ---- Stage 6: runtime ----
+# ---- Stage 6: tetra-rx built from source ----
+# The TETRA plugin wraps tetra-rx from osmo-tetra-sq5bpf (AGPL-3.0; the "telive" fork of
+# osmo-tetra, which sends the decoded signalling and the voice blocks as UDP datagrams), built
+# against Debian's libosmocore. Only `src/` is built and only the tetra-rx binary and the licence
+# text reach the runtime stage. The fork's `etsi_codec-patches/` directory holds patches for the
+# ETSI speech codec, which is NOT part of this image, this repository or any release: the user
+# installs it (docs/plugins-tetra.md, ADR-0021, ADR-0005).
+FROM debian:bookworm-slim AS tetra
+ARG TETRA_COMMIT=4e9f1b23b460a6b24270ece685ac68d4d7fd4cc8
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential git ca-certificates pkg-config \
+        libosmocore-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src/tetra
+RUN git init -q . \
+    && git fetch -q --depth 1 https://github.com/sq5bpf/osmo-tetra-sq5bpf "$TETRA_COMMIT" \
+    && git checkout -q FETCH_HEAD \
+    && make -C src tetra-rx CFLAGS="-O2 -Wall $(pkg-config --cflags libosmocore) -I. -fcommon" \
+    && strip src/tetra-rx
+# Self-test: the sync burst that osmo-tetra's own test generator builds (MCC 262, MNC 42) must be
+# decoded (tests/tetra/sync-burst.bits, one character per bit after the comment lines).
+COPY crates/superhet-plugin-adapters/tests/tetra/sync-burst.bits /tmp/sync-burst.bits
+RUN grep -v '^#' /tmp/sync-burst.bits | tr -d '\n' | tr '01' '\000\001' > /tmp/one.raw \
+    && for i in $(seq 40); do cat /tmp/one.raw; done > /tmp/burst.raw \
+    && src/tetra-rx /tmp/burst.raw | grep -q 'MCC 0100000110(262) MNC 00000000101010(42)'
+
+# ---- Stage 7: runtime ----
 FROM debian:bookworm-slim
 # multimon-ng, direwolf and rtl-433 are the external decoders of the first-party plugins
 # (plugins/): separate GPL-2.0 processes started by the plugin host through
 # superhet-plugin-adapter; about 27 MiB (docs/third-party.md). welle-cli (DAB plugin) needs the
 # libraries on the second line: about 7 MiB together with the binary copied below; readsb (ADS-B
-# plugin) needs zstd; m17-demod (M17 plugin) needs Codec2 and Boost.Program_options (about 3 MiB).
+# plugin) needs zstd; m17-demod (M17 plugin) needs Codec2 and Boost.Program_options (about 3 MiB);
+# tetra-rx (TETRA plugin) needs libosmocore.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends librtlsdr0 libopus0 multimon-ng direwolf rtl-433 \
         libfaad2 libfftw3-single3 libmp3lame0 libmpg123-0 libasound2 libairspy0 libsoapysdr0.8 libusb-1.0-0 libzstd1 ca-certificates \
-        libcodec2-1.0 libboost-program-options1.74.0 \
+        libcodec2-1.0 libboost-program-options1.74.0 libosmocore19 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home --home-dir /home/superhet superhet \
     && mkdir -p /data/plugins /data/tiles \
@@ -119,6 +146,10 @@ COPY --from=m17 /src/m17/build/apps/m17-demod /usr/bin/m17-demod
 COPY --from=m17 /src/m17/LICENSE /usr/share/doc/m17-cxx-demod/copyright
 COPY --from=m17 /src/m17/blaze/LICENSE /usr/share/doc/m17-cxx-demod/blaze-LICENSE
 
+# tetra-rx as compiled above (AGPL-3.0), with its licence text. No ETSI codec code is in the image.
+COPY --from=tetra /src/tetra/src/tetra-rx /usr/bin/tetra-rx
+COPY --from=tetra /src/tetra/COPYING /usr/share/doc/osmo-tetra-sq5bpf/copyright
+
 COPY --from=rust /usr/local/lib/libsuperhet-loopback-bind.so /usr/local/lib/superhet/libsuperhet-loopback-bind.so
 
 # One image for every service; compose selects the binary via `command`.
@@ -135,6 +166,9 @@ COPY plugins/m17 /usr/share/superhet/plugins/m17
 # DMR / dPMR / NXDN: the manifest and the adapter only. dsd-fme (with its AMBE vocoder) is NOT in
 # this image; the user installs it (docs/plugins-dsd.md).
 COPY plugins/dsd /usr/share/superhet/plugins/dsd
+# TETRA: manifest, adapter and tetra-rx. The ETSI speech codec is NOT in this image; the user
+# installs it and points SUPERHET_TETRA_CODEC_DIR at it (docs/plugins-tetra.md).
+COPY plugins/tetra /usr/share/superhet/plugins/tetra
 # The API does not serve the frontend yet; the build output is shipped for later use.
 COPY --from=web /src/web/dist /usr/share/superhet/web
 

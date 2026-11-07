@@ -280,7 +280,7 @@ impl Shared {
 }
 
 /// Close the plugin when the host closes stdin.
-fn watch_stdin(on_close: impl FnOnce() + Send + 'static) {
+pub(crate) fn watch_stdin(on_close: impl FnOnce() + Send + 'static) {
     std::thread::spawn(move || {
         let mut sink = [0u8; 64];
         while std::io::stdin().read(&mut sink).is_ok_and(|n| n > 0) {}

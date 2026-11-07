@@ -1,0 +1,47 @@
+[
+  {
+    "data": {
+      "cc": 0,
+      "dl_hz": 392012500,
+      "encrypted_traffic_seen": false,
+      "encryption": "none",
+      "la": 1,
+      "mcc": 262,
+      "mnc": 42,
+      "ul_hz": 382012500
+    },
+    "type": "tetra.cell",
+    "v": 1
+  },
+  {
+    "data": {
+      "dl_hz": 392037500,
+      "la": 2,
+      "mcc": 262,
+      "mnc": 42,
+      "ul_hz": 382037500
+    },
+    "type": "tetra.neighbour",
+    "v": 1
+  },
+  {
+    "data": {
+      "dst": 9001,
+      "src": 2630001,
+      "status": 32770
+    },
+    "type": "tetra.status",
+    "v": 1
+  },
+  {
+    "data": {
+      "dst": 9001,
+      "info": "CPTI:1 CalledSSI:9001 CallingSSI:2630001 CallingEXT:0  UserData4: len:96 protoid:82(TEXT) SDS-TL:[ MsgType:SDS-TRANSFER MSG_REF:3 TO_GROUP:1 ]  coding_scheme:01 DATA:[Hello team]",
+      "protocol": "82(TEXT)",
+      "src": 2630001,
+      "text": "Hello team"
+    },
+    "type": "tetra.sds",
+    "v": 1
+  }
+]

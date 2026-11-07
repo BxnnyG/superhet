@@ -38,8 +38,10 @@ use crate::outputs::{NoOutputs, Outputs};
 
 /// Environment variables passed through to plugins; everything else (NATS and database
 /// credentials in particular) is withheld. `SUPERHET_DSD_FME_PATH` is the location of the
-/// user-installed `dsd-fme` for the DMR / dPMR / NXDN plugin (`docs/plugins-dsd.md`); it is a file
-/// path, not a secret.
+/// user-installed `dsd-fme` for the DMR / dPMR / NXDN plugin (`docs/plugins-dsd.md`);
+/// `SUPERHET_TETRA_CODEC_DIR` is the directory with the user's ETSI codec for the TETRA plugin and
+/// `SUPERHET_TETRA_RX_PATH` an alternative location of `tetra-rx` (`docs/plugins-tetra.md`). They
+/// are paths, not secrets.
 const PASSTHROUGH_ENV: &[&str] = &[
     "PATH",
     "LANG",
@@ -47,6 +49,8 @@ const PASSTHROUGH_ENV: &[&str] = &[
     "TZ",
     "TMPDIR",
     "SUPERHET_DSD_FME_PATH",
+    "SUPERHET_TETRA_CODEC_DIR",
+    "SUPERHET_TETRA_RX_PATH",
 ];
 
 /// Restart and shutdown behaviour.

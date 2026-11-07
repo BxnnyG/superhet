@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""Stand-in for tetra-rx in the TETRA adapter's integration test (tests/tetra_plugin.rs).
+
+The real tetra-rx (osmo-tetra-sq5bpf, AGPL-3.0) is built into the Superhet image but not into the test
+environment, so the test replays a transcript instead. Reads the demodulated bits (one byte per bit)
+from the file named on the command line (the adapter passes /dev/stdin) like the real tool; for every
+510 bits (one burst) it plays one step of the transcript: each line up to the next `---` is sent as a
+UDP datagram to 127.0.0.1:$TETRA_HACK_PORT. `console: ...` lines go to stdout, `TRA <usage>` lines are
+voice datagrams (13-byte header, then 690 int16 whose first value is the running voice counter).
+Comment lines (#) are skipped. When the transcript is used up the tool stays silent.
+
+Environment: FAKE_TETRA_TRANSCRIPT the transcript (required), FAKE_TETRA_DIE=1 to exit with status 3
+after the last step, FAKE_TETRA_RECORD=<file> to record the command line, the TETRA_HACK_* variables
+and the first 4000 bits received.
+"""
+
+import os
+import socket
+import struct
+import sys
+import time
+
+port = int(os.environ["TETRA_HACK_PORT"])
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+steps = [[]]
+with open(os.environ["FAKE_TETRA_TRANSCRIPT"], encoding="utf-8") as f:
+    for line in f.read().splitlines():
+        if line.startswith("#") or not line.strip():
+            continue
+        if line.strip() == "---":
+            steps.append([])
+        else:
+            steps[-1].append(line)
+die = os.environ.get("FAKE_TETRA_DIE") == "1"
+record = os.environ.get("FAKE_TETRA_RECORD")
+
+source = sys.argv[-1]
+fd = os.open(source, os.O_RDONLY)
+received = b""
+pending = 0
+done = 0
+counter = 0
+while True:
+    data = os.read(fd, 65536)
+    if not data:
+        sys.exit(0)
+    if record and len(received) < 4000:
+        received += data[: 4000 - len(received)]
+        if len(received) >= 4000:
+            with open(record, "w") as f:
+                f.write(" ".join(sys.argv[1:]) + "\n")
+                f.write(
+                    f"port={os.environ.get('TETRA_HACK_PORT')} ip={os.environ.get('TETRA_HACK_IP')} "
+                    f"rxid={os.environ.get('TETRA_HACK_RXID')}\n"
+                )
+                f.write("".join(str(b) for b in received) + "\n")
+    pending += len(data)
+    while pending >= 510:
+        pending -= 510
+        if done >= len(steps):
+            continue
+        step = steps[done]
+        done += 1
+        for line in step:
+            if line.startswith("console:"):
+                sys.stdout.write(line[len("console:"):].lstrip() + "\n")
+                sys.stdout.flush()
+            elif line.startswith("TRA "):
+                usage = int(line.split()[1])
+                counter += 1
+                block = struct.pack("<690h", counter, *([0] * 689))
+                sock.sendto(b"TRA:%02x RX:00\0" % usage + block, ("127.0.0.1", port))
+            else:
+                sock.sendto(line.encode() + b"\0" + b"\xaa" * 20, ("127.0.0.1", port))
+            time.sleep(0.004)
+        time.sleep(0.02)
+        if done == len(steps) and die:
+            time.sleep(0.2)
+            sys.exit(3)

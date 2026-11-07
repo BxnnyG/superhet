@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+"""Stand-in for the ETSI channel decoder (cdecoder) in tests/tetra_plugin.rs. The real one is the
+user's and never part of this repository. Reads 1380-byte voice blocks (690 int16) from argv[1], writes
+one 276-byte speech parameter frame (138 int16) per block to argv[2]; the first value of the block (a
+counter) is passed on so the speech stand-in can tell blocks apart."""
+
+import os
+import struct
+import sys
+
+source = os.open(sys.argv[1], os.O_RDONLY)
+sink = os.open(sys.argv[2], os.O_WRONLY)
+pending = b""
+while True:
+    data = os.read(source, 65536)
+    if not data:
+        sys.exit(0)
+    pending += data
+    while len(pending) >= 1380:
+        block, pending = pending[:1380], pending[1380:]
+        counter = struct.unpack("<h", block[:2])[0]
+        os.write(sink, struct.pack("<138h", counter, *([0] * 137)))
