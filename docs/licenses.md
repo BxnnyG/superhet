@@ -28,9 +28,10 @@ External components run as **separate processes** (plugins) or are **dynamically
 | m17-cxx-demod (`m17-demod`) | M17 plugin | GPL-3.0 | runtime image (built from a pinned upstream commit in the Dockerfile, one-line sed patch, separate process, `docs/third-party.md`) | – |
 | Codec2 | M17 voice codec | LGPL-2.1 | runtime image (Debian `libcodec2-1.0`, dynamic library) | patent-free |
 | Blaze | build dependency of m17-cxx-demod | BSD-3-Clause | headers only at build time, licence text in the image | – |
-| osmo-tetra (incl. sq5bpf fork) | TETRA test oracle in CI | AGPL-3.0 | not distributed (CI dev container only) | ADR-0004 |
+| osmo-tetra-sq5bpf (`tetra-rx`) | TETRA plugin (`docs/plugins-tetra.md`) | AGPL-3.0 | runtime image (built from a pinned commit in the Dockerfile, separate process, `docs/third-party.md`); osmo-tetra upstream also stays a CI test oracle | ADR-0004, ADR-0021 |
 | tetra-kit | TETRA test oracle in CI | GPL-3.0 | not distributed (CI dev container only) | ADR-0004 |
-| ETSI TETRA ACELP reference codec | TETRA voice | ETSI IPR / download terms | **never distributed**; downloaded from etsi.org and built by the user | separate repo `superhet-codec-tetra` |
+| libosmocore | `tetra-rx` runtime library | GPL-2.0-or-later | runtime image (Debian package `libosmocore19`) | ADR-0021 |
+| ETSI TETRA ACELP reference codec | TETRA voice | ETSI IPR / download terms | **never distributed**; downloaded from etsi.org and built by the user; the TETRA plugin only runs the user's `cdecoder` / `sdecoder` from `SUPERHET_TETRA_CODEC_DIR` | `docs/plugins-tetra.md`; later a separate repo `superhet-codec-tetra` |
 | mbelib | AMBE/AMBE+2/IMBE voice | ISC; patent status unclear (DVSI) | **never distributed**; fetched and built by the user | separate repo `superhet-codec-mbe` |
 | ft8_lib | FT8/FT4 plugin (later) | MIT | plugin image | – |
 | SatDump | Meteor LRPT (optional, later) | GPL-3.0 | plugin image | – |

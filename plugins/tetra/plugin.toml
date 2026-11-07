@@ -1,0 +1,50 @@
+# TETRA (TMO) receive plugin: the adapter demodulates the 25 kHz channel itself (pi/4-DQPSK, 18 ksym/s)
+# and feeds the bits to tetra-rx of osmo-tetra-sq5bpf (AGPL-3.0, a separate process, built into the
+# image). Voice goes through the ETSI speech codec (cdecoder / sdecoder) that the USER installs and
+# points SUPERHET_TETRA_CODEC_DIR at: the codec is not part of this repository, the image or any
+# release and the plugin never downloads or builds it (docs/plugins-tetra.md, ADR-0021). Without it
+# the plugin still decodes the cell, the calls and the messages and its status document says
+# `codec.state = "missing"` (the web UI shows "voice needs the ETSI codec").
+#
+# Non-exclusive: bind it to a VFO on the carrier (25 kHz wide); the host hands over the VFO's complex
+# baseband (cf32, 144000 Hz = 8 samples per symbol). Receive only; encrypted traffic is recognised
+# and never decrypted. Direct mode (DMO) is not decoded: osmo-tetra has no DMO support.
+# Config keys (all optional):
+#   audio = true             # false: signalling only, the codec is not started
+#   mute_encrypted = true    # do not play the audio of calls flagged as encrypted
+#   invert = false           # conjugate the input (a receiver chain that mirrors the spectrum)
+
+[plugin]
+id = "org.superhet.decoder.tetra"
+name = "TETRA (osmo-tetra)"
+version = "0.1.0"
+protocol = 1
+license = "AGPL-3.0-only"
+type = "decoder"
+description = "TETRA trunked radio (TMO downlink): cell identity (MCC, MNC, colour code, LA), neighbour cells, calls with SSI / GSSI, SDS and status messages, encryption flags, and clear-mode voice through a user-installed ETSI codec"
+homepage = "https://github.com/BxnnyG/superhet"
+
+[runtime]
+kind = "process"
+transport = "framed"
+command = ["superhet-plugin-adapter", "tetra"]
+heartbeat_timeout_s = 15
+
+[input]
+kind = "iq"
+sample_rate = 144000
+format = "cf32"
+bandwidth_hz = 25000
+
+[output]
+events_schema = "schema/events.json"
+
+[output.audio]
+sample_rate = 48000
+channels = 1
+
+[config]
+schema = "schema/config.json"
+
+[install]
+acknowledge = { text = "Receive only. Runs tetra-rx from osmo-tetra (AGPL-3.0) as a separate process. Voice needs the ETSI TETRA speech codec (EN 300 395-2), which you obtain from ETSI and install yourself: it is not part of Superhet, never downloaded or built by it, and published under ETSI's own IPR terms (check them for your use). Whether listening to TETRA radio is allowed depends on the country and on what is received (in Germany, for example, section 5 TKG protects the content of communications not meant for you, and the networks of public safety and other organisations are not yours to listen to); you are responsible for that. Encrypted traffic is recognised and, by default, not played; nothing is decrypted and no keys are handled. Subscriber numbers, group numbers, call times and short messages of stations are kept in the decoder history until the retention period ends.", url = "https://github.com/sq5bpf/osmo-tetra-sq5bpf" }

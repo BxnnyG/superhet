@@ -122,9 +122,30 @@ export const DSD_RAW = {
   install: { acknowledge: { text: "Needs dsd-fme, which you install yourself." } },
 };
 
+export const TETRA_ID = "org.superhet.decoder.tetra";
+
+export const TETRA_RAW = {
+  plugin: {
+    id: TETRA_ID,
+    name: "TETRA (osmo-tetra)",
+    version: "0.1.0",
+    protocol: 1,
+    license: "AGPL-3.0-only",
+    type: "decoder",
+    description: "TETRA trunked radio receive: cell, calls, messages and clear-mode voice",
+  },
+  runtime: { kind: "process", transport: "framed", command: ["superhet-plugin-adapter", "tetra"] },
+  input: { kind: "iq", sample_rate: 144000, format: "cf32", bandwidth_hz: 25000 },
+  device: { exclusive: false },
+  install: {
+    acknowledge: { text: "Receive only. Voice needs the ETSI codec, which you install yourself." },
+  },
+};
+
 export const aprs: PluginManifest = parseManifest(APRS_RAW);
 export const dsd: PluginManifest = parseManifest(DSD_RAW);
 export const m17: PluginManifest = parseManifest(M17_RAW);
+export const tetra: PluginManifest = parseManifest(TETRA_RAW);
 export const pocsag: PluginManifest = parseManifest(POCSAG_RAW);
 export const rtl433: PluginManifest = parseManifest(RTL433_RAW);
 export const adsb: PluginManifest = parseManifest(ADSB_RAW);

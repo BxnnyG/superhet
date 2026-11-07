@@ -1,4 +1,4 @@
-// Digital voice audio routing (M17, and DMR / dPMR / NXDN through dsd-fme): the decoded voice is the audio of a pseudo VFO (the plugin instance), and the
+// Digital voice audio routing (M17, DMR / dPMR / NXDN through dsd-fme, and TETRA): the decoded voice is the audio of a pseudo VFO (the plugin instance), and the
 // receiver the plugin is bound to would only play the raw 4FSK baseband, so it is muted while the
 // decoder runs.
 
@@ -6,10 +6,11 @@ import { useEffect, useMemo, useRef } from "react";
 import type { AudioController } from "../audio/controller";
 import type { PluginInstance } from "../plugins/api";
 import { DSD_PLUGIN_ID } from "../dsd/model";
+import { TETRA_PLUGIN_ID } from "../tetra/model";
 import { M17_PLUGIN_ID } from "./model";
 
 /** Plugins whose decoded voice is a pseudo VFO and whose receiver would only play the baseband. */
-const VOICE_PLUGINS: ReadonlySet<string> = new Set([M17_PLUGIN_ID, DSD_PLUGIN_ID]);
+const VOICE_PLUGINS: ReadonlySet<string> = new Set([M17_PLUGIN_ID, DSD_PLUGIN_ID, TETRA_PLUGIN_ID]);
 
 export interface M17Routes {
   /** Pseudo VFO ids carrying decoded voice. */

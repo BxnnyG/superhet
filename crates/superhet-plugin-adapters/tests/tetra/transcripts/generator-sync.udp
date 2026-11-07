@@ -1,0 +1,13 @@
+# Captured, not written by hand: the UDP datagrams (TETRA_HACK_PORT interface of osmo-tetra-sq5bpf
+# 4e9f1b2) sent while decoding tests/tetra/sync-burst.bits (repeated bursts of osmo-tetra's test
+# generator), shortened to a few bursts. One datagram per line, `---` = one step of the replay.
+TETMON_begin FUNC:ENCINFO1 CRYPT:0 ENC:00 RX:0 TETMON_end
+TETMON_begin FUNC:BURST RX:0 TETMON_end
+TETMON_begin FUNC:NETINFO1 CCODE:00 MCC:0106 MNC:002a DLF:0 ULF:0 LA:0 CRYPT:0 RX:0 TETMON_end
+---
+TETMON_begin FUNC:BURST RX:0 TETMON_end
+TETMON_begin FUNC:NETINFO1 CCODE:00 MCC:0106 MNC:002a DLF:0 ULF:0 LA:0 CRYPT:0 RX:0 TETMON_end
+---
+TETMON_begin FUNC:BURST RX:0 TETMON_end
+TETMON_begin FUNC:NETINFO1 CCODE:00 MCC:0106 MNC:002a DLF:0 ULF:0 LA:0 CRYPT:0 RX:0 TETMON_end
+---

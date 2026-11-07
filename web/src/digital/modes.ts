@@ -8,9 +8,16 @@ import type { VfoPatch } from "../vfo/api";
 import { DSD_CALL_END, DSD_CALL_START, DSD_PLUGIN_ID } from "../dsd/model";
 import { M17_CALL_END, M17_CALL_START, M17_PLUGIN_ID } from "../m17/model";
 import { isRec, type Rec } from "../spectrum/api";
+import {
+  TETRA_CALL_END,
+  TETRA_CALL_START,
+  TETRA_PLUGIN_ID,
+  TETRA_SDS,
+  TETRA_STATUS,
+} from "../tetra/model";
 import type { PluginInstance } from "../plugins/api";
 
-export type DigitalModeId = "pocsag" | "aprs" | "ism" | "m17" | "dmr" | "dpmr" | "nxdn";
+export type DigitalModeId = "pocsag" | "aprs" | "ism" | "m17" | "dmr" | "dpmr" | "nxdn" | "tetra";
 
 export interface FrequencyHint {
   loHz: number;
@@ -129,6 +136,22 @@ export const DIGITAL_MODES: readonly DigitalMode[] = [
   dsdMode("dmr", "DMR", `${DSD_EXPECT} DMR carries two calls at once (time slots 1 and 2).`),
   dsdMode("dpmr", "dPMR", DSD_EXPECT),
   dsdMode("nxdn", "NXDN", `${DSD_EXPECT} The 12.5 kHz variant (NXDN96) is decoded.`),
+  {
+    id: "tetra",
+    label: "TETRA",
+    title:
+      "TETRA trunked radio, TMO downlink: cell, calls, SSI / GSSI, short messages, encryption flags; voice with your own ETSI codec",
+    pluginId: TETRA_PLUGIN_ID,
+    eventKinds: [TETRA_CALL_START, TETRA_CALL_END, TETRA_SDS, TETRA_STATUS],
+    // One 25 kHz carrier. The plugin takes the VFO's complex baseband; the receiver's own NFM audio
+    // is noise and is muted while the decoder runs.
+    vfo: { mode: "nfm", bandwidthHz: 25_000, squelchDbfs: null },
+    // TETRA sits where the network operator put it; nothing to suggest.
+    hints: [],
+    noun: "calls and messages",
+    expect:
+      "Tune onto the downlink carrier of a TETRA cell you may listen to (25 kHz raster; an RTL-SDR with an uncorrected clock can be a few kHz off at 400 MHz, which is the limit of the decoder). The cell shows as soon as it is in sync; voice needs the ETSI speech codec that you install yourself (the panel says when it is missing). Encrypted calls are flagged and never decrypted. Direct mode (DMO) is not decoded.",
+  },
 ];
 
 export const digitalMode = (id: DigitalModeId): DigitalMode => {

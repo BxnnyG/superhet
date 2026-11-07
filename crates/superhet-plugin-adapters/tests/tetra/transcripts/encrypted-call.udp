@@ -1,0 +1,13 @@
+# A call whose PDUs carry the encryption flag (ENCR:2 in the MAC header). tetra-rx runs without -e,
+# so it does not interpret the content: only the generic PDU line shows, with the address and the
+# traffic channel. Hand-written. The release is encrypted too, so the call ends by the idle timeout.
+TETMON_begin FUNC:BURST RX:0 TETMON_end
+TETMON_begin FUNC:NETINFO1 CCODE:00 MCC:0106 MNC:002a DLF:392012500 ULF:382012500 LA:1 CRYPT:2 RX:0 TETMON_end
+---
+TETMON_begin FUNC:D-SETUP SSI:00009002 IDX:008 IDT:4 ENCR:2 RX:0 TETMON_end
+---
+TRA 8
+TRA 8
+TRA 8
+---
+---

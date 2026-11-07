@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TETRA events",
+  "description": "Validated against the complete event object (envelope included). tetra.cell is sent when the serving cell is first seen and whenever what is known about it changes; calls produce one tetra.call.start and one tetra.call.end (same call id and fields, plus the outcome). Subscriber numbers (SSI) are 24 bit; for a group call dst is the group (GSSI).",
+  "$defs": {
+    "ssi": { "type": "integer", "minimum": 0, "maximum": 16777215 },
+    "call": {
+      "type": "object",
+      "properties": {
+        "call": { "description": "Id of the call (its start time in Unix ms and the call identifier, or the traffic channel when the set-up was missed).", "type": "string" },
+        "cid": { "description": "Call identifier of the CMCE signalling (14 bit, reused by the network).", "type": "integer", "minimum": 0, "maximum": 16383 },
+        "usage": { "description": "Traffic channel (usage marker) the voice is on.", "type": "integer", "minimum": 4, "maximum": 63 },
+        "dst": { "description": "Called party: the GSSI of a group call, the subscriber of an individual call.", "$ref": "#/$defs/ssi" },
+        "src": { "description": "Calling party named by the set-up.", "$ref": "#/$defs/ssi" },
+        "talker": { "description": "Party that last got the right to transmit.", "$ref": "#/$defs/ssi" },
+        "encrypted": { "description": "The air interface encryption flag was seen on the call's PDUs. Nothing is decrypted.", "type": "boolean" }
+      },
+      "required": ["call", "encrypted"]
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "type": { "const": "tetra.cell" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "mcc": { "description": "Mobile country code.", "type": "integer", "minimum": 0, "maximum": 1023 },
+            "mnc": { "description": "Mobile network code.", "type": "integer", "minimum": 0, "maximum": 16383 },
+            "cc": { "description": "Colour code.", "type": "integer", "minimum": 0, "maximum": 63 },
+            "la": { "description": "Location area.", "type": "integer", "minimum": 0, "maximum": 16383 },
+            "dl_hz": { "description": "Downlink main carrier from the system information.", "type": "integer", "minimum": 1 },
+            "ul_hz": { "type": "integer", "minimum": 1 },
+            "encryption": { "description": "What the system information announces: no air interface encryption, or it is on (class 2 / 3), or not known yet.", "enum": ["unknown", "none", "air-interface"] },
+            "encrypted_traffic_seen": { "description": "A PDU with an encryption mode other than clear was seen on this cell.", "type": "boolean" },
+            "services": { "description": "Service details of the BS, named.", "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["mcc", "mnc", "cc", "encryption", "encrypted_traffic_seen"]
+        }
+      },
+      "required": ["type", "data"]
+    },
+    {
+      "properties": {
+        "type": { "const": "tetra.neighbour" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "dl_hz": { "type": "integer", "minimum": 1 },
+            "ul_hz": { "type": "integer", "minimum": 1 },
+            "mcc": { "type": "integer", "minimum": 0, "maximum": 1023 },
+            "mnc": { "type": "integer", "minimum": 0, "maximum": 16383 },
+            "la": { "type": "integer", "minimum": 0, "maximum": 16383 }
+          },
+          "required": ["dl_hz"]
+        }
+      },
+      "required": ["type", "data"]
+    },
+    {
+      "properties": {
+        "type": { "const": "tetra.call.start" },
+        "data": { "$ref": "#/$defs/call" }
+      },
+      "required": ["type", "data"]
+    },
+    {
+      "properties": {
+        "type": { "const": "tetra.call.end" },
+        "data": {
+          "allOf": [{ "$ref": "#/$defs/call" }],
+          "properties": {
+            "duration_ms": { "type": "integer", "minimum": 0 },
+            "voice_ms": { "description": "Voice seen on the air (60 ms per traffic slot).", "type": "integer", "minimum": 0 },
+            "audio_ms": { "description": "Voice handed to the codec, so what could be heard.", "type": "integer", "minimum": 0 },
+            "muted": { "description": "True when audio was withheld (encrypted call).", "type": "boolean" },
+            "reason": { "enum": ["release", "lost", "new-call", "stop"] },
+            "detail": { "description": "The network's notification text for a release.", "type": "string" }
+          },
+          "required": ["duration_ms", "voice_ms", "audio_ms", "reason"]
+        }
+      },
+      "required": ["type", "data"]
+    },
+    {
+      "properties": {
+        "type": { "const": "tetra.sds" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "src": { "$ref": "#/$defs/ssi" },
+            "dst": { "$ref": "#/$defs/ssi" },
+            "protocol": { "description": "Protocol identifier as the decoder printed it.", "type": "string" },
+            "text": { "description": "Text of a text message.", "type": "string" },
+            "info": { "description": "The decoder's one-line description of the message.", "type": "string", "maxLength": 300 }
+          },
+          "required": ["info"]
+        }
+      },
+      "required": ["type", "data"]
+    },
+    {
+      "properties": {
+        "type": { "const": "tetra.status" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "src": { "$ref": "#/$defs/ssi" },
+            "dst": { "$ref": "#/$defs/ssi" },
+            "status": { "description": "Status value (16 bit).", "type": "integer", "minimum": 0, "maximum": 65535 }
+          },
+          "required": ["dst", "status"]
+        }
+      },
+      "required": ["type", "data"]
+    }
+  ]
+}

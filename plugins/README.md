@@ -25,5 +25,7 @@ First-party plugins live here. The contract (manifest, transports, supervision, 
   plugin reports "needs dsd-fme". Non-exclusive, framed transport, call events per DMR slot, status
   document and decoded voice as plugin audio (`docs/plugins-dsd.md`, ADR-0018).
 
+- `tetra/` – TETRA TMO (downlink): the adapter demodulates the 25 kHz channel itself and feeds `tetra-rx` (osmo-tetra-sq5bpf, built into the image); cell, neighbours, calls, SDS and status events, encryption flags (never decrypted), voice through the **user-installed** ETSI codec (`SUPERHET_TETRA_CODEC_DIR`, never shipped; without it the plugin reports "voice needs the ETSI codec"). Non-exclusive, framed transport, IQ input (`docs/plugins-tetra.md`, ADR-0021).
+
 Install a plugin through the admin API (`POST /api/v1/plugins`, `docs/api-plugins.md`) or the host's `install` command; the host copies it to
 `$SUPERHET_PLUGIN_DIR/<id>/<version>` (default `/data/plugins`).
