@@ -15,6 +15,8 @@ application/json`. Roles (`access::RULES`, `docs/api-users.md`):
 | `POST /api/v1/plugin-instances`, `POST .../{id}/stop`, `POST .../{id}/restart`, `POST .../{id}/reconfigure`, `POST .../{id}/control` | `operator` |
 | `GET .../{id}/status`, `GET .../{id}/media/{key}` | everybody who may see the decoder history (listener, guests per guest policy) |
 | `POST /api/v1/plugins`, `DELETE /api/v1/plugins/{id}` | `admin` |
+| `GET /api/v1/plugin-panels` | everybody who may see the decoder history |
+| `GET /api/v1/plugin-ui/{plugin_id}/{path}` | **no session** (public, sandboxed assets) |
 
 `listener` and guests get 403 everywhere. (Listing plugins is `operator` rather than `admin`
 because an operator needs the plugin ids and manifests to start an instance.)
@@ -37,6 +39,12 @@ validates the manifest, refuses symbolic links and copies the tree to
 
 `DELETE /api/v1/plugins/{id}` – remove every version. `204`; `404` when not installed; `409`
 while an instance of the plugin exists (stop it first).
+
+## Web panels
+
+`GET /api/v1/plugin-panels` – `{"ok":true,"panels":[{"plugin_id","name","version","title","placement":"inspector","entry":"index.html","reads":[plugin ids],"tune":bool}]}` for every installed plugin with a `[ui]` section (never its runtime, install or config sections). `entry` is the page below the UI root.
+
+`GET /api/v1/plugin-ui/{plugin_id}/{path}` – one file of the plugin's panel, asked from the plugin host (`asset`). Public on purpose (a sandboxed frame has no session cookie; the files are plugin code, not secrets) and answered with the locked-down headers of `docs/plugins-ui-panels.md` (CSP with `sandbox allow-scripts`, `connect-src 'none'`, `nosniff`). `400` for an invalid plugin id or path (anything but plain `[A-Za-z0-9._-]` segments, so `..`, `%2e%2e`, backslashes and hidden files never reach the host), `404` for an unknown plugin, no panel, a file type that is not served or a missing file, `503` while the plugin host is down.
 
 ## Instances
 

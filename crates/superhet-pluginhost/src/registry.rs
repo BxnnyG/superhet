@@ -28,6 +28,32 @@ pub enum RegistryError {
     Io(#[from] std::io::Error),
 }
 
+/// Why an asset of a plugin's web panel was not delivered.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum AssetError {
+    /// Unknown plugin, no panel, a file type that is not served, or no such file.
+    #[error("no such asset")]
+    NotFound,
+    /// The path is not a plain relative path below the UI root.
+    #[error("invalid asset path")]
+    Invalid,
+    /// The file is larger than the bus can carry.
+    #[error("asset larger than {} KiB", superhet_plugin_protocol::ui::MAX_ASSET_BYTES / 1024)]
+    TooLarge,
+    /// The file could not be read.
+    #[error("io: {0}")]
+    Io(String),
+}
+
+/// One file of a plugin's web panel.
+#[derive(Debug)]
+pub struct Asset {
+    /// Content type (`superhet_plugin_protocol::ui::mime_for`).
+    pub mime: &'static str,
+    /// File contents.
+    pub bytes: Vec<u8>,
+}
+
 /// All installed plugins; the highest version of an id is the active one.
 #[derive(Debug)]
 pub struct Registry {
@@ -112,6 +138,52 @@ impl Registry {
             .values()
             .next_back()
             .cloned()
+    }
+
+    /// Read `path` (below the UI root, the directory of `ui.entry`) of the active version of
+    /// `plugin_id`. Blocking file access: call from `spawn_blocking`.
+    ///
+    /// Only regular files of a served type below the root are delivered: the path must be a plain
+    /// relative path (`ui::valid_asset_path`), the resolved file must lie inside the resolved
+    /// root and reach it without crossing a symbolic link.
+    ///
+    /// # Errors
+    /// [`AssetError`] naming why nothing is delivered.
+    pub fn read_asset(&self, plugin_id: &str, path: &str) -> Result<Asset, AssetError> {
+        use superhet_plugin_protocol::ui;
+        if !ui::valid_asset_path(path) {
+            return Err(AssetError::Invalid);
+        }
+        let package = self.get(plugin_id).ok_or(AssetError::NotFound)?;
+        let section = package.manifest.ui.as_ref().ok_or(AssetError::NotFound)?;
+        let (root, _) = ui::split_entry(&section.entry).ok_or(AssetError::NotFound)?;
+        let mime = ui::mime_for(path).ok_or(AssetError::NotFound)?;
+        let not_found = |err: std::io::Error| match err.kind() {
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory => {
+                AssetError::NotFound
+            }
+            _ => AssetError::Io(err.to_string()),
+        };
+        let real_root = package.dir.join(root).canonicalize().map_err(not_found)?;
+        // The canonical file must be exactly root + path: a link anywhere below the root (to a
+        // file or a directory) changes the resolved path and is refused.
+        let wanted = real_root.join(path);
+        let real_file = wanted.canonicalize().map_err(not_found)?;
+        if real_file != wanted {
+            return Err(AssetError::NotFound);
+        }
+        let meta = std::fs::metadata(&real_file).map_err(not_found)?;
+        if !meta.is_file() {
+            return Err(AssetError::NotFound);
+        }
+        if meta.len() > ui::MAX_ASSET_BYTES as u64 {
+            return Err(AssetError::TooLarge);
+        }
+        let bytes = std::fs::read(&real_file).map_err(not_found)?;
+        if bytes.len() > ui::MAX_ASSET_BYTES {
+            return Err(AssetError::TooLarge);
+        }
+        Ok(Asset { mime, bytes })
     }
 
     /// Delete every installed version of `id` from memory and disk. The caller makes sure no

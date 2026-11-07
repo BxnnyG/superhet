@@ -12,6 +12,7 @@ const BAR_TABS: readonly InspectorTab[] = [
   "decoders",
   "dab",
   "adsb",
+  "panels",
   "display",
   "source",
 ];
@@ -20,9 +21,16 @@ const BAR_TABS: readonly InspectorTab[] = [
  * Bottom tab bar below 600 px: each button opens (or closes) the inspector sheet on its tab.
  * Icon above a small label; the buttons share the width equally, so six fit on a 320 px phone.
  */
-export function MobileTabBar({ inspector }: { inspector: InspectorState }) {
+export function MobileTabBar({
+  inspector,
+  hasPanels = false,
+}: {
+  inspector: InspectorState;
+  /** A plugin ships a panel, so the plugins tab is offered. */
+  hasPanels?: boolean;
+}) {
   const phoneUp = useMediaQuery(PHONE_QUERY);
-  const visible = visibleTabs(usePermissions());
+  const visible = visibleTabs(usePermissions(), hasPanels);
   if (phoneUp) return null;
   return (
     <nav

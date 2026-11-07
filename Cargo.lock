@@ -3246,6 +3246,7 @@ dependencies = [
  "sqlx",
  "superhet-bus",
  "superhet-db",
+ "superhet-plugin-protocol",
  "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite 0.30.0",

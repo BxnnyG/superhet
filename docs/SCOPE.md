@@ -168,7 +168,7 @@ All decoders are plugins (separate processes). Without a codec plugin, voice dec
 | JSON Lines events (schema validated), audio/frame output | v1 (P2) | – |
 | Execution as local process or own container | v1 (P2 process, P3 container) | Container plugins declared in `compose.plugins.yaml`, no Docker socket (ADR-0003) |
 | Install from Git URL / local path; plugin management UI | v1 (P2 path, P3 Git) | Supply-chain risk: show manifest + commands before install |
-| UI plugins (panels/widgets, documented frontend API) | later (P5) | ES modules, sandboxing limited (single user) |
+| UI plugins (panels, documented bridge) | v1 (P5) | Static page in a sandboxed iframe, postMessage bridge, ADR-0022 |
 | WASM plugins (wasmtime) for in-process DSP | later | ADR-0003 keeps this as option |
 
 ## 7. Auth & operations

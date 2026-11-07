@@ -140,6 +140,83 @@ test("an operator starts a decoder on the VFO and sees its state and events", as
   expect(csv).toContain(ECHO_ID);
 });
 
+test("the plugin's panel runs in a sandboxed frame, shows its data and cannot reach the app", async () => {
+  await page.goto("/");
+  await page.getByRole("tab", { name: "Plugins" }).click();
+  const frameEl = page.locator("iframe[title='Echo view']");
+  await expect(frameEl).toHaveAttribute("sandbox", "allow-scripts");
+
+  // The panel talks to the app through the bridge only: it learns its plugin, then the instance
+  // and the plugin's own events.
+  const panel = page.frameLocator("iframe[title='Echo view']");
+  await expect(panel.getByRole("status")).toContainText(`Connected to ${ECHO_ID}`);
+  await expect(panel.getByRole("list", { name: "Instances" })).toContainText("running", {
+    timeout: 30_000,
+  });
+  await expect(panel.getByRole("list", { name: "Events" })).toContainText("echo.", {
+    timeout: 45_000,
+  });
+
+  // The admin may tune: the request goes through the bridge and is answered.
+  await panel.getByRole("button", { name: /^Tune to/ }).click();
+  await expect(panel.locator("#tune-note")).toHaveText("Tuned.");
+
+  // From the app's side the frame is a foreign document (opaque origin), and inside it there is
+  // no cookie, no storage, no API and no access to the app.
+  expect(
+    await page.evaluate(
+      () => document.querySelector<HTMLIFrameElement>("iframe[title='Echo view']")?.contentDocument,
+    ),
+  ).toBeNull();
+  const inner = page.frames().find((f) => f.url().includes("/api/v1/plugin-ui/"));
+  expect(inner).toBeDefined();
+  const probe = await inner!.evaluate(async () => {
+    const attempt = async (f: () => unknown) => {
+      try {
+        return String(await f());
+      } catch (e) {
+        return `blocked: ${(e as Error).name}`;
+      }
+    };
+    return {
+      cookie: await attempt(() => document.cookie),
+      storage: await attempt(() => window.localStorage.length),
+      top: await attempt(() => window.top?.document.title),
+      api: await attempt(() => fetch("/api/v1/plugin-instances").then((r) => r.status)),
+      // A beacon is "queued" (true) whatever happens to it; the CSP report tells.
+      beacon: await new Promise<string>((resolve) => {
+        document.addEventListener("securitypolicyviolation", (e) => resolve(e.effectiveDirective), {
+          once: true,
+        });
+        navigator.sendBeacon("/api/v1/plugin-instances", "x");
+        setTimeout(() => resolve("not blocked"), 3000);
+      }),
+    };
+  });
+  expect(probe.cookie).toMatch(/^blocked/);
+  expect(probe.storage).toMatch(/^blocked/);
+  expect(probe.top).toMatch(/^blocked/);
+  expect(probe.api).toMatch(/^blocked/);
+  expect(probe.beacon).toBe("connect-src");
+
+  // Opened outside a frame the page is sandboxed all the same, and nothing outside its UI
+  // directory is served.
+  const url = `/api/v1/plugin-ui/${ECHO_ID}/index.html`;
+  const direct = await page.request.get(url);
+  expect(direct.status()).toBe(200);
+  expect(direct.headers()["content-security-policy"]).toContain("sandbox allow-scripts;");
+  expect(direct.headers()["content-security-policy"]).not.toContain("allow-same-origin");
+  for (const path of [
+    "..%2fplugin.toml",
+    "%2e%2e/plugin.toml",
+    "plugin.toml",
+    "bin/example-echo",
+  ]) {
+    const res = await page.request.get(`/api/v1/plugin-ui/${ECHO_ID}/${path}`);
+    expect([400, 404], path).toContain(res.status());
+  }
+});
+
 test("the admin console lists the instance and stops it", async () => {
   await page.goto("/admin/plugins");
   const table = page.getByRole("table", { name: "Plugin instances" });

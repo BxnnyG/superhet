@@ -199,6 +199,12 @@ pub fn check_static(dir: &Path) -> Result<Package, Vec<String>> {
             program.display()
         ));
     }
+    if let Some(ui) = &package.manifest.ui
+        && let Some((root, page)) = crate::ui::split_entry(&ui.entry)
+        && !package.dir.join(root).join(page).is_file()
+    {
+        problems.push(format!("ui.entry {} does not exist", ui.entry));
+    }
     if problems.is_empty() {
         Ok(package)
     } else {

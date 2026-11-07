@@ -39,6 +39,7 @@ http-body-util.workspace = true
 tokio-tungstenite = "0.30"
 sqlx.workspace = true
 ring = "0.17"
+superhet-plugin-protocol.workspace = true
 
 [lints]
 workspace = true

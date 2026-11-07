@@ -16,14 +16,14 @@ use serde_json::Value;
 use superhet_bus::subjects;
 use superhet_plugin_protocol::PROTOCOL_VERSION;
 use superhet_plugin_protocol::ctl::{
-    ControlRequest, ErrorReply, InstallRequest, InstanceRef, InstanceReply, InstancesReply,
-    MediaReplyHeader, MediaRequest, OkReply, PluginInfo, PluginReply, PluginsReply,
+    AssetRequest, ControlRequest, ErrorReply, InstallRequest, InstanceRef, InstanceReply,
+    InstancesReply, MediaReplyHeader, MediaRequest, OkReply, PluginInfo, PluginReply, PluginsReply,
     ReconfigureRequest, RemoveRequest, RemovedReply, StartRequest, StatusReply, cmd, code,
 };
 use superhet_plugin_protocol::event::HostEvent;
 use tokio::sync::mpsc;
 
-use crate::registry::{Registry, RegistryError};
+use crate::registry::{AssetError, Registry, RegistryError};
 use crate::store::InstanceStore;
 use crate::supervisor::{EventSink, StartError, StartSpec, Supervisor};
 
@@ -100,6 +100,9 @@ fn start_error(err: &StartError) -> Value {
 /// Handle one request and encode the reply: JSON for every command, except that a successful
 /// `media` reply is `MediaReplyHeader` JSON, a newline and the object bytes.
 pub async fn handle_bytes(host: &Host, command: &str, payload: &[u8]) -> Vec<u8> {
+    if command == cmd::ASSET {
+        return asset_reply(host, payload).await;
+    }
     if command != cmd::MEDIA {
         return serde_json::to_vec(&handle(host, command, payload).await).unwrap_or_default();
     }
@@ -119,6 +122,38 @@ pub async fn handle_bytes(host: &Host, command: &str, payload: &[u8]) -> Vec<u8>
             None if host.supervisor.get(&req.id).is_none() => start_error(&StartError::NotFound),
             None => error(code::NOT_FOUND, "no such media object"),
         },
+    };
+    serde_json::to_vec(&reply).unwrap_or_default()
+}
+
+/// `asset`: one file of a plugin's web panel (`MediaReplyHeader`, newline, bytes) or an error.
+async fn asset_reply(host: &Host, payload: &[u8]) -> Vec<u8> {
+    let reply = match parse::<AssetRequest>(payload) {
+        Err(reply) => reply,
+        Ok(req) => {
+            let registry = Arc::clone(&host.registry);
+            let (plugin_id, path) = (req.plugin_id, req.path.clone());
+            let read =
+                tokio::task::spawn_blocking(move || registry.read_asset(&plugin_id, &path)).await;
+            match read {
+                Ok(Ok(asset)) => {
+                    return MediaReplyHeader {
+                        v: PROTOCOL_VERSION,
+                        ok: true,
+                        key: req.path,
+                        mime: asset.mime.to_owned(),
+                        revision: 0,
+                    }
+                    .encode(&asset.bytes);
+                }
+                Ok(Err(AssetError::NotFound)) => error(code::NOT_FOUND, "no such asset"),
+                Ok(Err(err @ (AssetError::Invalid | AssetError::TooLarge))) => {
+                    error(code::INVALID, err.to_string())
+                }
+                Ok(Err(AssetError::Io(msg))) => error(code::INTERNAL, msg),
+                Err(err) => error(code::INTERNAL, err.to_string()),
+            }
+        }
     };
     serde_json::to_vec(&reply).unwrap_or_default()
 }

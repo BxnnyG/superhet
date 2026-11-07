@@ -47,6 +47,7 @@ pub fn router(state: DevicesState) -> Router {
             get(list_instances).post(start_instance).layer(limit),
         )
         .route("/api/v1/plugin-streams", get(list_streams))
+        .route("/api/v1/plugin-panels", get(list_panels))
         .route("/api/v1/plugin-instances/{id}", get(get_instance))
         .route("/api/v1/plugin-instances/{id}/stop", post(stop_instance))
         .route(
@@ -243,6 +244,57 @@ async fn list_streams(State(state): State<DevicesState>) -> Response {
     };
     match host_call(client, "instances", json!({})).await {
         Ok(value) => reply(StatusCode::OK, &listen_view(&value)),
+        Err(response) => *response,
+    }
+}
+
+/// The panel view of the host's `list` reply: for every installed plugin with a `[ui]` section
+/// what the web app needs to show it (never the runtime, install or config sections). `entry` is
+/// the page below the UI root, i.e. the last part of `/api/v1/plugin-ui/<id>/<entry>`.
+fn panels_view(reply: &Value) -> Value {
+    let panels: Vec<Value> = reply["plugins"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+        .filter_map(|p| {
+            let manifest = &p["manifest"];
+            let ui = manifest.get("ui").filter(|u| u.is_object())?;
+            let id = manifest["plugin"]["id"].as_str()?;
+            let entry = ui["entry"].as_str()?.rsplit('/').next()?;
+            let mut reads: Vec<Value> = ui["reads"]
+                .as_array()
+                .map_or(&[][..], Vec::as_slice)
+                .iter()
+                .filter(|r| r.is_string())
+                .cloned()
+                .collect();
+            if reads.is_empty() {
+                reads.push(json!(id));
+            }
+            Some(json!({
+                "plugin_id": id,
+                "name": manifest["plugin"]["name"],
+                "version": manifest["plugin"]["version"],
+                "title": ui["title"],
+                "placement": ui.get("placement").cloned().unwrap_or_else(|| json!("inspector")),
+                "entry": entry,
+                "reads": reads,
+                "tune": ui["tune"] == true,
+            }))
+        })
+        .collect();
+    json!({"ok": true, "panels": panels})
+}
+
+/// `GET /api/v1/plugin-panels` – the web panels installed plugins ship (listeners and guests
+/// with decoder access included: a panel only shows decoder output, ADR-0022).
+async fn list_panels(State(state): State<DevicesState>) -> Response {
+    let client = match connected(state.nats.as_ref()) {
+        Ok(client) => client,
+        Err(err) => return err.into_response(),
+    };
+    match host_call(client, "list", json!({})).await {
+        Ok(value) => reply(StatusCode::OK, &panels_view(&value)),
         Err(response) => *response,
     }
 }
@@ -715,6 +767,42 @@ mod tests {
             status,
             serde_json::from_slice(&bytes).unwrap_or(Value::Null),
         )
+    }
+
+    #[test]
+    fn the_panel_list_carries_only_what_the_web_app_needs() {
+        let reply = json!({"ok": true, "plugins": [
+            {"manifest": {
+                "plugin": {"id": "org.superhet.example.echo", "name": "Echo", "version": "1.0.0",
+                    "type": "decoder"},
+                "runtime": {"command": ["bin/secret-tool", "--key", "k"]},
+                "install": {"build": ["make"]},
+                "ui": {"entry": "ui/index.html", "title": "Echo view", "tune": true}
+            }},
+            {"manifest": {
+                "plugin": {"id": "org.superhet.ui.view", "name": "View", "version": "2.0.0",
+                    "type": "ui"},
+                "ui": {"entry": "web/panel/p.html", "title": "View", "placement": "inspector",
+                    "reads": ["org.superhet.decoder.aprs", 7]}
+            }},
+            {"manifest": {"plugin": {"id": "org.superhet.decoder.aprs", "name": "APRS",
+                "version": "1.0.0", "type": "decoder"}, "runtime": {"command": ["x"]}}}
+        ]});
+        let view = panels_view(&reply);
+        let panels = view["panels"].as_array().expect("array");
+        assert_eq!(panels.len(), 2, "plugins without [ui] are not listed");
+        assert_eq!(panels[0]["plugin_id"], "org.superhet.example.echo");
+        assert_eq!(panels[0]["entry"], "index.html");
+        assert_eq!(panels[0]["reads"], json!(["org.superhet.example.echo"]));
+        assert_eq!(panels[0]["tune"], true);
+        assert_eq!(panels[1]["entry"], "p.html");
+        assert_eq!(panels[1]["reads"], json!(["org.superhet.decoder.aprs"]));
+        assert_eq!(panels[1]["tune"], false);
+        let text = view.to_string();
+        for secret in ["secret-tool", "install", "runtime", "make"] {
+            assert!(!text.contains(secret), "{secret} leaked: {text}");
+        }
+        assert_eq!(panels_view(&json!({})), json!({"ok": true, "panels": []}));
     }
 
     #[tokio::test]

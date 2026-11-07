@@ -29,6 +29,7 @@ import { DecoderEventStore } from "../decoders/store";
 import { useM17Audio } from "../m17/audio";
 import { claimOwner } from "../plugins/claim";
 import { createPluginApi } from "../plugins/api";
+import { PanelStore } from "../panels/store";
 import { PluginStore } from "../plugins/store";
 import { createProfileApi } from "../profiles/api";
 import type { StateDoc } from "../state/doc";
@@ -123,6 +124,8 @@ export function useReceiver(device: string) {
   const manageable = perms.canUsePlugins;
   const plugins = useMemo(() => new PluginStore(createPluginApi(), !manageable), [manageable]);
   const pluginSnap = useSyncExternalStore(plugins.subscribe, plugins.getSnapshot);
+  // Panels plugins ship (ADR-0022); shown to everyone who may see decoder output.
+  const panels = useMemo(() => new PanelStore(), []);
   const dab = useMemo(() => new DabStore(device), [device]);
   const dabSnap = useSyncExternalStore(dab.subscribe, dab.getSnapshot);
   const adsb = useMemo(() => new AdsbStore(), []);
@@ -269,7 +272,9 @@ export function useReceiver(device: string) {
     if (canSeeDecoders) dab.start();
     if (canSeeDecoders) adsb.start();
     if (canUsePlugins || canSeeDecoders) plugins.start();
+    if (canSeeDecoders) panels.start();
     return () => {
+      panels.stop();
       dab.stop();
       adsb.stop();
       plugins.stop();
@@ -288,6 +293,7 @@ export function useReceiver(device: string) {
     canSeeDecoders,
     plugins,
     canUsePlugins,
+    panels,
     dab,
     adsb,
   ]);
@@ -457,6 +463,7 @@ export function useReceiver(device: string) {
     stepChannels,
     decoderEvents,
     plugins,
+    panels,
     dab,
     dabSnap,
     adsb,

@@ -8,6 +8,8 @@ import type { DabApi } from "../dab/api";
 import { DabStore } from "../dab/store";
 import type { EventApi } from "../decoders/api";
 import type { PluginApi } from "../plugins/api";
+import type { PanelApi } from "../panels/api";
+import { PanelStore } from "../panels/store";
 import { PluginStore } from "../plugins/store";
 import type { DeviceState, LockHolder } from "../spectrum/api";
 import type { Vfo } from "../vfo/api";
@@ -80,6 +82,7 @@ export function fake(vfos: Vfo[], selectedId: number | null, locks: LockHolder[]
     channels: { setStepByChannel: vi.fn() },
     // Never started: the snapshot stays empty.
     plugins: new PluginStore({} as PluginApi),
+    panels: new PanelStore({} as PanelApi),
     dab: new DabStore("dev0", {} as DabApi, {} as EventApi),
     adsb: new AdsbStore({} as AdsbApi),
     stepChannels: () => false,

@@ -40,6 +40,7 @@ pub fn all() -> Vec<(&'static str, Value)> {
         ("ctl-instance-reply", schema_of::<ctl::InstanceReply>()),
         ("ctl-control-request", schema_of::<ctl::ControlRequest>()),
         ("ctl-media-request", schema_of::<ctl::MediaRequest>()),
+        ("ctl-asset-request", schema_of::<ctl::AssetRequest>()),
         ("ctl-ok-reply", schema_of::<ctl::OkReply>()),
         ("ctl-status-reply", schema_of::<ctl::StatusReply>()),
         (

@@ -29,6 +29,59 @@ fn manifest_is_valid_and_simple() {
 }
 
 #[test]
+fn the_example_ships_a_panel_the_static_checks_find() {
+    use superhet_plugin_protocol::manifest::UiPlacement;
+    use superhet_plugin_protocol::ui;
+    let package = load();
+    let section = package.manifest.ui.as_ref().expect("[ui] section");
+    assert_eq!(section.placement, UiPlacement::Inspector);
+    assert!(section.tune && section.reads.is_empty());
+    let (root, page) = ui::split_entry(&section.entry).expect("entry in a subdirectory");
+    assert_eq!((root, page), ("ui", "index.html"));
+    // Every file of the panel is a served type within the size limit, and the page uses no
+    // inline code or styles and no external origins (the panel's CSP would block them).
+    let dir = plugin_dir().join(root);
+    let mut seen = 0;
+    for entry in std::fs::read_dir(&dir).expect("ui dir") {
+        let entry = entry.expect("entry");
+        let name = entry.file_name().to_string_lossy().into_owned();
+        assert!(ui::valid_asset_path(&name), "{name}");
+        assert!(ui::mime_for(&name).is_some(), "{name} would not be served");
+        assert!(entry.metadata().expect("meta").len() as usize <= ui::MAX_ASSET_BYTES);
+        seen += 1;
+    }
+    assert!(seen >= 3, "page, script and style");
+    let html = std::fs::read_to_string(dir.join(page)).expect("page");
+    assert!(!html.contains("http://") && !html.contains("https://"));
+    assert!(!html.contains("<style") && !html.contains(" style="));
+    assert!(!html.contains("onclick") && !html.contains("<script>"));
+}
+
+#[test]
+fn a_missing_panel_page_fails_the_static_checks() {
+    let tmp = std::env::temp_dir().join(format!("superhet-nopage-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    for sub in ["ui", "schema", "bin"] {
+        std::fs::create_dir_all(tmp.join(sub)).expect("mkdir");
+    }
+    std::fs::copy(plugin_dir().join("plugin.toml"), tmp.join("plugin.toml")).expect("copy");
+    std::fs::copy(
+        plugin_dir().join("schema/events.json"),
+        tmp.join("schema/events.json"),
+    )
+    .expect("copy");
+    std::fs::write(tmp.join("bin/example-echo"), "").expect("write");
+    let problems = check_static(&tmp).expect_err("page is missing");
+    assert!(
+        problems.iter().any(|p| p.contains("ui.entry")),
+        "{problems:?}"
+    );
+    std::fs::write(tmp.join("ui/index.html"), "<p>x</p>").expect("write");
+    assert!(check_static(&tmp).is_ok());
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn well_behaved_run_passes_the_contract() {
     let package = load();
     let input = vec![0u8; 10_000];

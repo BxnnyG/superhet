@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`asset`: read one file of a plugin's web panel. The reply is a [`MediaReplyHeader`] (`key` =\n`path`, `revision` 0), a newline and the bytes; a failure is a plain [`ErrorReply`].",
+  "properties": {
+    "path": {
+      "description": "File below the panel's UI root (`crate::ui::valid_asset_path`).",
+      "type": "string"
+    },
+    "plugin_id": {
+      "description": "Plugin that ships the panel.",
+      "type": "string"
+    },
+    "v": {
+      "description": "Contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "plugin_id",
+    "path"
+  ],
+  "title": "AssetRequest",
+  "type": "object"
+}

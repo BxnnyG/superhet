@@ -5,7 +5,10 @@ import { tabIcon } from "./tabIcons";
 import { chooseTabMode, scrollHints } from "./tabLayout";
 import { TabStrip } from "./TabStrip";
 
-const LABELS = INSPECTOR_TABS.map((t) => INSPECTOR_LABEL[t]);
+// The Plugins tab exists only while a plugin ships a panel; the thresholds below are for the usual
+// set, the full set has its own test.
+const USUAL_TABS = INSPECTOR_TABS.filter((t) => t !== "panels");
+const LABELS = USUAL_TABS.map((t) => INSPECTOR_LABEL[t]);
 
 describe("chooseTabMode", () => {
   it("keeps every label when there is room", () => {
@@ -46,11 +49,15 @@ describe("scrollHints", () => {
 describe("TabStrip", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  function strip(selected: (typeof INSPECTOR_TABS)[number], onSelect = vi.fn()) {
+  function strip(
+    selected: (typeof INSPECTOR_TABS)[number],
+    onSelect = vi.fn(),
+    tabs: readonly (typeof INSPECTOR_TABS)[number][] = USUAL_TABS,
+  ) {
     return render(
       <TabStrip
         label="Inspector"
-        tabs={INSPECTOR_TABS.map((t) => ({
+        tabs={tabs.map((t) => ({
           id: t,
           label: INSPECTOR_LABEL[t],
           icon: tabIcon(t),
@@ -80,6 +87,16 @@ describe("TabStrip", () => {
     expect(display.querySelector("span")).toHaveClass("sr-only");
     // Icon-only tabs carry a tooltip bubble.
     expect(display.parentElement?.textContent).toContain("Display");
+  });
+
+  it("keeps every tab reachable with the Plugins tab added", () => {
+    width(350);
+    strip("panels", vi.fn(), INSPECTOR_TABS);
+    // Nine tabs in the desktop column: icons with tooltips, every name still accessible.
+    expect(screen.getByRole("tablist")).toHaveAttribute("data-mode", "icons");
+    for (const t of INSPECTOR_TABS) {
+      expect(screen.getByRole("tab", { name: INSPECTOR_LABEL[t] })).toBeInTheDocument();
+    }
   });
 
   it("icon-only below the compact threshold", () => {

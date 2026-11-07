@@ -28,7 +28,7 @@ export function PaletteHost({ r, inspector, shortcutCtx, onClose }: Props) {
   const recent = useMemo(() => loadRecent(), []);
   const perms = usePermissions();
   const deps: PaletteDeps = {
-    tabs: visibleTabs(perms),
+    tabs: visibleTabs(perms, r.panels.getSnapshot().panels.length > 0),
     canBookmark: perms.canEditBookmarks,
     vfos: r.vfoSnap.vfos,
     selectedId: r.vfoSnap.selectedId,

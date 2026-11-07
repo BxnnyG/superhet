@@ -213,8 +213,9 @@ events_schema = "schema/events.json"  # JSON Schema (draft 2020-12)
 audio = false                         # or { sample_rate = 8000, channels = 1 }
 voice_frames = []                     # e.g. ["ambe2+-3600x2450"], ["tetra-acelp"]
 
-[ui]                                  # optional, see 6.6
-widget = "ui/dist/widget.js"
+[ui]                                  # optional (required for type "ui"), see 6.6
+entry = "ui/index.html"
+title = "Echo view"
 
 [install]                             # optional
 build = ["scripts/build.sh"]          # shown to the user before running
@@ -250,7 +251,7 @@ The host validates against `events_schema` (invalid lines are counted and droppe
 
 ### 6.6 UI plugins
 
-ES module exporting `register(api)`; the host loads it dynamically. The API (versioned, documented in P5) gives: subscribe to events of the plugin's type, read tuning/VFO state, issue tune commands, register panels/widgets/command-palette entries. Single-user deployment → no hard sandbox; plugins are trusted code installed by the admin.
+A static web page in the plugin package (`[ui] entry`), served by the API from the plugin host (`GET /api/v1/plugin-ui/<id>/<path>`, public, CSP `sandbox allow-scripts`, no network) and shown by the web app in an `<iframe sandbox="allow-scripts">` as an inspector tab. The page has an opaque origin: no cookies, no API access. It talks to the app through a versioned `postMessage` bridge: the app sends a filtered copy of the instances and events of the plugins the panel declares plus theme tokens; the panel can ask for one thing, a tune request, honoured for operators/admins when the manifest allows it. ADR-0022, `docs/plugins-ui-panels.md`. (Replaces the earlier idea of ES modules running in the page.)
 
 ### 6.7 Lifecycle & supervision
 
