@@ -296,6 +296,9 @@ struct GainWire {
 struct StateWire<'a> {
     v: u32,
     device: &'a str,
+    /// Operator-chosen display name (`SUPERHET_DEVICE_LABEL`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    label: Option<&'a str>,
     driver: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     tuner: Option<&'a str>,
@@ -342,11 +345,11 @@ struct WindowWire {
     end_hz: i64,
 }
 
-/// Encode a device state, with its VFOs evaluated against the current tuning, as the JSON
+/// Encode a device state (`(id, label)` first), with its VFOs evaluated against the current tuning, as the JSON
 /// published on the state subject and stored in KV.
 #[must_use]
 pub fn state_json(
-    device: &str,
+    (device, label): (&str, Option<&str>),
     state: &DeviceState,
     vfos: &[Vfo],
     locks: &[Holder],
@@ -361,6 +364,7 @@ pub fn state_json(
     let wire = StateWire {
         v: VERSION,
         device,
+        label,
         driver: state.driver,
         tuner: state.tuner.as_deref(),
         center_hz: state.center_hz,
@@ -594,7 +598,7 @@ mod tests {
             gains_db: vec![0.0, 0.9, 28.0],
         };
         let json = state_json(
-            "rtl0",
+            ("rtl0", Some("Roof")),
             &state,
             &[],
             &[Holder::user_since(7)],
@@ -605,6 +609,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&json).expect("json");
         assert_eq!(value["v"], 1);
         assert_eq!(value["device"], "rtl0");
+        assert_eq!(value["label"], "Roof");
         assert_eq!(value["tuner"], "R820T/R820T2");
         assert_eq!(value["gain"]["mode"], "manual");
         assert_eq!(value["gain"]["db"], 28.0);
@@ -630,10 +635,18 @@ mod tests {
             gain: None,
             ..state
         };
-        let value: serde_json::Value =
-            serde_json::from_str(&state_json("f", &file, &[], &[], None, (0.0, false), 0))
-                .expect("json");
+        let value: serde_json::Value = serde_json::from_str(&state_json(
+            ("f", None),
+            &file,
+            &[],
+            &[],
+            None,
+            (0.0, false),
+            0,
+        ))
+        .expect("json");
         assert!(value.get("tuner").is_none());
+        assert!(value.get("label").is_none());
         assert!(value["gain"].is_null());
 
         let err: serde_json::Value =

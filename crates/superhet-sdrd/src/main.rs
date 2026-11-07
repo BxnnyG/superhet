@@ -216,7 +216,10 @@ async fn start_pipeline(
     });
     let service = service::start(
         client,
-        config.device_id.clone(),
+        service::Identity {
+            id: config.device_id.clone(),
+            label: config.label.clone(),
+        },
         pipeline.control(),
         vfos,
         zoom_handle,

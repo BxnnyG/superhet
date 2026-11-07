@@ -1,0 +1,31 @@
+# Second SDR: one more superhet-sdrd next to the one in compose.yaml. Nothing in compose.yaml
+# changes; put this file next to compose.yaml and .env (it keeps working across
+# `install.sh --update`, which only replaces compose.yaml) and layer it on top
+# (docs/multi-device.md):
+#
+#   curl -fsSLO https://raw.githubusercontent.com/BxnnyG/superhet/main/deploy/compose.device2.yaml
+#   echo 'COMPOSE_FILE=compose.yaml:compose.device2.yaml' >> .env
+#   docker compose up -d
+#   # in a repo checkout: cp deploy/compose.device2.yaml . first
+#
+# Both daemons see every USB stick, so pick each one by its EEPROM serial (not the index, which
+# changes with the plug order): SUPERHET_DEVICE=rtlsdr:<serial> in .env for the first daemon and
+# SUPERHET_DEVICE2=rtlsdr:<serial> for this one. Identical sticks need different serials first
+# (rtl_eeprom -s <serial>, then replug). The first daemon keeps `rtlsdr:0` by default; set it to
+# its serial as well when the second stick is plugged in.
+#
+# For a third stick copy the service block under a new name and give it its own id/serial.
+services:
+  superhet-sdrd2:
+    extends:
+      file: compose.yaml
+      service: superhet-sdrd
+    environment:
+      # Empty value = health-only daemon without a dongle (the device then lists as offline).
+      SUPERHET_DEVICE: ${SUPERHET_DEVICE2-rtlsdr:1}
+      # Id in API paths and bus subjects; must differ from every other daemon.
+      SUPERHET_DEVICE_ID: ${SUPERHET_DEVICE2_ID:-dev1}
+      # Name in the device picker (optional).
+      SUPERHET_DEVICE_LABEL: ${SUPERHET_DEVICE2_LABEL:-}
+    depends_on:
+      nats: { condition: service_healthy }

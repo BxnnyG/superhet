@@ -69,6 +69,7 @@ cp "$standalone" "$stage/compose.yaml"
 
 cp -r deploy/udev deploy/modprobe "$root/deploy/"
 cp deploy/compose.hostnet.yaml "$root/compose.hostnet.yaml"
+cp deploy/compose.device2.yaml "$root/compose.device2.yaml"
 install -m 0755 scripts/gen-secrets.sh "$root/scripts/gen-secrets.sh"
 cp .env.example "$root/.env.example"
 cp docs/setup-host.md "$root/docs/setup-host.md"
@@ -85,6 +86,7 @@ tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="$mtime" -C "$stage"
 # Standalone assets next to the tarball (what install.sh downloads).
 install -m 0644 "$stage/compose.yaml" "$out/compose.yaml"
 install -m 0644 deploy/compose.hostnet.yaml "$out/compose.hostnet.yaml"
+install -m 0644 deploy/compose.device2.yaml "$out/compose.device2.yaml"
 install -m 0755 "$stage/install.sh" "$out/install.sh"
 (cd "$out" && sha256sum compose.yaml >compose.yaml.sha256 && sha256sum install.sh >install.sh.sha256)
 echo "$archive"

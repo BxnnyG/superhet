@@ -57,7 +57,15 @@ pub struct Service {
     key: String,
 }
 
-/// Start serving control requests and publishing state for `device`.
+/// Who the daemon is: the id used in subjects and KV keys and the optional display name.
+pub struct Identity {
+    /// Device id (`SUPERHET_DEVICE_ID`).
+    pub id: String,
+    /// Display name (`SUPERHET_DEVICE_LABEL`).
+    pub label: Option<String>,
+}
+
+/// Start serving control requests and publishing state for the device `identity`.
 ///
 /// Before anything is published or served, the last saved state (tuning, VFOs, user lock) is
 /// restored from the KV bucket, waiting up to [`RESTORE_WAIT`] for the bus. If the bus stays
@@ -68,13 +76,14 @@ pub struct Service {
 /// Fails if the device id cannot be used in subjects or KV keys, or the subscription is refused.
 pub async fn start(
     client: Client,
-    device: String,
+    identity: Identity,
     control: Arc<dyn DeviceControl>,
     vfos: Arc<VfoShared>,
     zoom: ZoomHandle,
     overload: Arc<OverloadStatus>,
     taps: Arc<TapShared>,
 ) -> Result<Service, Box<dyn std::error::Error>> {
+    let Identity { id: device, label } = identity;
     let ctl_subject = subjects::ctl_all(&device)?;
     let state_subject = subjects::state(&device)?;
     let key = subjects::state_key(&device)?;
@@ -87,7 +96,9 @@ pub async fn start(
         taps,
     });
     let controller = Arc::new(
-        Controller::new(device, control, vfos, state_tx).with_overload(Arc::clone(&overload)),
+        Controller::new(device, control, vfos, state_tx)
+            .with_label(label)
+            .with_overload(Arc::clone(&overload)),
     );
     let restored = restore_saved_state(&client, &controller, &restore_key).await;
     let persist = restored.persist;

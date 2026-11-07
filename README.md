@@ -32,7 +32,7 @@ docker compose up --build
 
 Services: `superhet-api` (web UI, port 8073), `superhet-sdrd` (device + DSP), `superhet-pluginhost`, `superhet-worker`, PostgreSQL, NATS JetStream – see [ARCHITECTURE](docs/ARCHITECTURE.md).
 
-Host preparation for the RTL-SDR (kernel module blacklist, udev rules, USB group) is described in [docs/setup-host.md](docs/setup-host.md).
+Host preparation for the RTL-SDR (kernel module blacklist, udev rules, USB group) is described in [docs/setup-host.md](docs/setup-host.md). More than one stick: [docs/multi-device.md](docs/multi-device.md).
 
 ## Quick start
 

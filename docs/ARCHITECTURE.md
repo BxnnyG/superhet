@@ -83,7 +83,7 @@ Concurrency inside sdrd: tokio for I/O; DSP runs on dedicated OS threads (device
 |---|---|---|
 | `sh.v1.dev.<dev>.ctl.<cmd>` | request/reply | api/pluginhost → sdrd (tune, state, vfo.create/update/delete, lock.acquire/release, profile.load, tap.open/close, claim.acquire/release implemented; see `docs/api-devices.md`, `docs/plugin-contract.md`) |
 | `sh.v1.dev.<dev>.tap.<id>` | pub/sub (core NATS, lossy) | sdrd → pluginhost (raw sample bytes in the format a plugin instance asked for with `ctl.tap.open`; leases, see `docs/plugin-contract.md` "Feeding input") |
-| `sh.v1.dev.<dev>.state` | pub/sub + KV bucket `STATE` (key `dev.<dev>`) | sdrd → all (tuning, VFOs and lock holders implemented, one document per change; decoder bindings planned). The KV key `restore.<dev>` keeps the last state across restarts. Browsers receive the documents through `/api/v1/ws/state` (`docs/protocol-ws.md`) |
+| `sh.v1.dev.<dev>.state` | pub/sub + KV bucket `STATE` (key `dev.<dev>`) | sdrd → all (tuning, VFOs and lock holders implemented, one document per change; decoder bindings planned). The KV key `restore.<dev>` keeps the last state across restarts. Browsers receive the documents through `/api/v1/ws/state` (`docs/protocol-ws.md`); `GET /api/v1/devices` lists the devices found in the bucket (ADR-0020, `docs/multi-device.md`) |
 | `sh.v1.dev.<dev>.spectrum` | pub/sub | sdrd → api (quantised FFT frames, full band) |
 | `sh.v1.dev.<dev>.spectrum.zoom` | pub/sub | sdrd → api (frames of the leased zoom slice, same format; ADR-0009) |
 | `sh.v1.dev.<dev>.ctl.spectrum.zoom` | publish | api → sdrd (lease a zoom slice or release it; repeated every 3 s) |
