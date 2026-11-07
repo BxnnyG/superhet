@@ -1,5 +1,6 @@
 // Installed plugins and their instances as an external store for the receiver UI (operators and
-// admins; listeners and guests never start it). The host has no push channel for instance state
+// admins). Listeners and guests get the read-only variant (`listenOnly`): the running instances
+// without configuration from /plugin-streams, enough to find the decoder output and its audio. The host has no push channel for instance state
 // yet (docs/api-plugins.md: "poll"), so the store polls every few seconds while it is running and
 // the tab is visible; start/stop/restart refresh at once.
 
@@ -33,7 +34,10 @@ export class PluginStore {
   private running = false;
   private abort: AbortController | null = null;
 
-  constructor(private readonly api: PluginApi = createPluginApi()) {}
+  constructor(
+    private readonly api: PluginApi = createPluginApi(),
+    private readonly listenOnly = false,
+  ) {}
 
   readonly subscribe = (fn: () => void): (() => void) => {
     this.listeners.add(fn);
@@ -64,13 +68,17 @@ export class PluginStore {
     this.abort = null;
   }
 
+  private fetchInstances(signal?: AbortSignal): Promise<PluginInstance[]> {
+    return this.listenOnly ? this.api.listStreams(signal) : this.api.listInstances(signal);
+  }
+
   /** Reload plugins and instances. */
   async refresh(): Promise<void> {
     const signal = this.abort?.signal;
     try {
       const [plugins, instances] = await Promise.all([
-        this.api.listPlugins(signal),
-        this.api.listInstances(signal),
+        this.listenOnly ? Promise.resolve([]) : this.api.listPlugins(signal),
+        this.fetchInstances(signal),
       ]);
       if (signal?.aborted) return;
       this.set({ plugins, instances, loaded: true, error: null });
@@ -84,7 +92,7 @@ export class PluginStore {
   async refreshInstances(): Promise<void> {
     const signal = this.abort?.signal;
     try {
-      const instances = await this.api.listInstances(signal);
+      const instances = await this.fetchInstances(signal);
       if (signal?.aborted) return;
       // A recovering host also brings the plugin list back.
       if (this.snap.error !== null) await this.refresh();

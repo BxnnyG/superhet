@@ -60,8 +60,10 @@ change settings with `.../reconfigure`:
   RTL-SDR with an uncorrected clock is several kHz off at 430 MHz; click-tune onto the signal.
 - **Voice streams only.** Packet-mode M17 (SMS, APRS gateways) is ignored; extended callsign data
   and multi-block text messages are not decoded.
-- **No audio for listeners yet.** The audio stream is announced through the plugin instance, which
-  only operators can list; listeners and guests do not get the voice (open point).
+- **Listeners can hear it.** The instance and its audio stream are announced to listeners (and to
+  guests while the guest policy shows decoder output) through the read-only
+  `GET /api/v1/plugin-streams` (no configuration); the web UI then shows the call log and mixes the
+  voice like any VFO, without start / stop / settings. Only operators start and control it.
 - Codec2 3200 is narrow-band speech at 8 kHz; do not expect more than a good telephone.
 
 ## How it is built

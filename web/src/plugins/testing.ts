@@ -171,6 +171,7 @@ export function fakePluginApi(
     install: vi.fn(() => Promise.resolve(pocsag)),
     remove: vi.fn(() => Promise.resolve()),
     listInstances: vi.fn(() => Promise.resolve(state.instances)),
+    listStreams: vi.fn(() => Promise.resolve(state.instances)),
     start: vi.fn((req: { pluginId: string; vfo?: number; device?: string; config?: Rec }) => {
       const created = instance({
         id: `i-${state.instances.length + 1}`,

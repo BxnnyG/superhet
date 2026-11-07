@@ -4,6 +4,9 @@
 //!
 //! Who may do what is decided in `access::RULES`: installing and removing plugins is `admin`,
 //! listing plugins and starting, stopping and restarting instances is `operator` or better.
+//! Listening is open wider: `GET /api/v1/plugin-streams` is a read-only, secret-free view of the
+//! running instances (what is on the air and under which audio stream), for listeners and for
+//! guests while the guest policy shows decoder output.
 //! Every change is written to the audit log (`plugin.install`, `plugin.remove`, `plugin.start`,
 //! `plugin.stop`, `plugin.restart`).
 
@@ -43,6 +46,7 @@ pub fn router(state: DevicesState) -> Router {
             "/api/v1/plugin-instances",
             get(list_instances).post(start_instance).layer(limit),
         )
+        .route("/api/v1/plugin-streams", get(list_streams))
         .route("/api/v1/plugin-instances/{id}", get(get_instance))
         .route("/api/v1/plugin-instances/{id}/stop", post(stop_instance))
         .route(
@@ -193,6 +197,54 @@ async fn list_plugins(State(state): State<DevicesState>) -> Response {
 
 async fn list_instances(State(state): State<DevicesState>) -> Response {
     simple_get(&state, "instances").await
+}
+
+/// Instance fields a listener may see: what runs where and under which audio stream. Never the
+/// configuration (callsigns, paths, keys), the process id, error text or counters.
+const LISTEN_FIELDS: &[&str] = &[
+    "id",
+    "plugin_id",
+    "device",
+    "vfo",
+    "freq_hz",
+    "exclusive",
+    "state",
+    "audio_vfo",
+    "updated_unix_ms",
+];
+
+/// The listener view of the host's `instances` reply: a whitelist of fields, and only instances
+/// that are not stopped.
+fn listen_view(reply: &Value) -> Value {
+    let streams: Vec<Value> = reply["instances"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+        .filter(|i| i["state"] != "stopped")
+        .map(|i| {
+            let mut out = serde_json::Map::new();
+            for key in LISTEN_FIELDS {
+                if let Some(value) = i.get(*key) {
+                    out.insert((*key).to_owned(), value.clone());
+                }
+            }
+            Value::Object(out)
+        })
+        .collect();
+    json!({"ok": true, "instances": streams})
+}
+
+/// `GET /api/v1/plugin-streams` – running plugin instances without their configuration, so a
+/// listener can find the decoder output and its audio. Control stays with the operator routes.
+async fn list_streams(State(state): State<DevicesState>) -> Response {
+    let client = match connected(state.nats.as_ref()) {
+        Ok(client) => client,
+        Err(err) => return err.into_response(),
+    };
+    match host_call(client, "instances", json!({})).await {
+        Ok(value) => reply(StatusCode::OK, &listen_view(&value)),
+        Err(response) => *response,
+    }
 }
 
 async fn simple_get(state: &DevicesState, cmd: &str) -> Response {
@@ -725,6 +777,7 @@ mod tests {
             ("GET", "/api/v1/plugins", ""),
             ("GET", "/api/v1/plugin-instances", ""),
             ("GET", "/api/v1/plugin-instances/i-1", ""),
+            ("GET", "/api/v1/plugin-streams", ""),
             ("POST", "/api/v1/plugins", r#"{"path":"/x"}"#),
             ("DELETE", "/api/v1/plugins/a.b.c", ""),
             (
@@ -761,6 +814,30 @@ mod tests {
         assert!(valid_media_key("slide.c224") && valid_media_key("a_b-1"));
         assert!(!valid_media_key("") && !valid_media_key("../x") && !valid_media_key("A"));
         assert!(!valid_media_key(&"a".repeat(65)));
+    }
+
+    #[test]
+    fn the_listener_view_leaves_out_secrets_and_stopped_instances() {
+        let reply = json!({"ok": true, "instances": [
+            {"id": "i-1", "plugin_id": "org.superhet.decoder.m17", "device": "rtl0", "vfo": 3,
+             "freq_hz": 433_475_000u64, "exclusive": false, "state": "running", "pid": 99,
+             "config": {"callsign": "N0CALL", "key": "s3cret"}, "last_error": "/home/x failed",
+             "events_ok": 5, "audio_vfo": 4_000_000_001u64, "updated_unix_ms": 7},
+            {"id": "i-2", "plugin_id": "a.b.c", "state": "stopped", "config": {}},
+        ]});
+        let view = listen_view(&reply);
+        let list = view["instances"].as_array().expect("list");
+        assert_eq!(list.len(), 1, "stopped instances are not listed");
+        assert_eq!(list[0]["audio_vfo"], 4_000_000_001u64);
+        assert_eq!(list[0]["plugin_id"], "org.superhet.decoder.m17");
+        for hidden in ["config", "pid", "last_error", "events_ok"] {
+            assert!(list[0].get(hidden).is_none(), "{hidden} must not leak");
+        }
+        assert!(!view.to_string().contains("s3cret"));
+        assert_eq!(
+            listen_view(&json!({})),
+            json!({"ok": true, "instances": []})
+        );
     }
 
     #[test]

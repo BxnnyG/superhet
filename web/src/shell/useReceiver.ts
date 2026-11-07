@@ -28,6 +28,7 @@ import { ChannelStore } from "../channels/store";
 import { DecoderEventStore } from "../decoders/store";
 import { useM17Audio } from "../m17/audio";
 import { claimOwner } from "../plugins/claim";
+import { createPluginApi } from "../plugins/api";
 import { PluginStore } from "../plugins/store";
 import { createProfileApi } from "../profiles/api";
 import type { StateDoc } from "../state/doc";
@@ -118,7 +119,9 @@ export function useReceiver(device: string) {
 
   const [overlay] = useState(() => new OverlayStore());
   const decoderEvents = useMemo(() => new DecoderEventStore({ device }), [device]);
-  const plugins = useMemo(() => new PluginStore(), []);
+  // Operators manage instances; everybody else gets the read-only view needed for listening.
+  const manageable = perms.canUsePlugins;
+  const plugins = useMemo(() => new PluginStore(createPluginApi(), !manageable), [manageable]);
   const pluginSnap = useSyncExternalStore(plugins.subscribe, plugins.getSnapshot);
   const dab = useMemo(() => new DabStore(device), [device]);
   const dabSnap = useSyncExternalStore(dab.subscribe, dab.getSnapshot);
@@ -265,7 +268,7 @@ export function useReceiver(device: string) {
     if (canSeeDecoders) decoderEvents.start();
     if (canSeeDecoders) dab.start();
     if (canSeeDecoders) adsb.start();
-    if (canUsePlugins) plugins.start();
+    if (canUsePlugins || canSeeDecoders) plugins.start();
     return () => {
       dab.stop();
       adsb.stop();
