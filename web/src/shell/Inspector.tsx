@@ -7,6 +7,7 @@ import { ChannelsPanel } from "../channels/ChannelsPanel";
 import { AdsbPanel } from "../adsb/AdsbPanel";
 import { DabPanel } from "../dab/DabPanel";
 import { DecodersTab } from "../decoders/DecodersTab";
+import { PanelsTab } from "../panels/PanelsTab";
 import { ProfilesPanel } from "../profiles/ProfilesPanel";
 import { DisplayControls } from "../spectrum/DisplayControls";
 import { CloseIcon, IconButton, Section, cn } from "../ui";
@@ -35,7 +36,9 @@ interface Props {
 export function Inspector({ r, inspector }: Props) {
   const { open, docked, setTab, close } = inspector;
   const perms = usePermissions();
-  const tabs = visibleTabs(perms);
+  const hasPanels =
+    useSyncExternalStore(r.panels.subscribe, r.panels.getSnapshot).panels.length > 0;
+  const tabs = visibleTabs(perms, hasPanels);
   // A tab the role cannot see (guests: bookmarks) falls back to the receiver.
   const tab: InspectorTab = tabs.includes(inspector.tab) ? inspector.tab : "receiver";
   const phoneUp = useMediaQuery(PHONE_QUERY);
@@ -108,7 +111,7 @@ export function Inspector({ r, inspector }: Props) {
           className={cn(
             "min-h-0 flex-1 overflow-x-hidden",
             // The Decoders tab pins its cards and scrolls the log itself.
-            tab === "decoders" ? "overflow-y-hidden" : "overflow-y-auto",
+            tab === "decoders" || tab === "panels" ? "overflow-y-hidden" : "overflow-y-auto",
           )}
         >
           {open && <TabBody r={r} tab={tab} phoneUp={phoneUp} />}
@@ -173,6 +176,8 @@ function TabBody({ r, tab, phoneUp }: { r: Receiver; tab: InspectorTab; phoneUp:
       return <DabPanel r={r} />;
     case "adsb":
       return <AdsbPanel r={r} />;
+    case "panels":
+      return <PanelsTab r={r} />;
     case "display":
       return (
         <>

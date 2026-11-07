@@ -39,6 +39,8 @@ export function App({ device = "dev0" }: Props) {
   const togglePalette = useCallback(() => setPaletteOpen((o) => !o), []);
 
   const adsbOpen = useSyncExternalStore(r.adsb.subscribe, r.adsb.getSnapshot).viewOpen;
+  const panelsShown =
+    useSyncExternalStore(r.panels.subscribe, r.panels.getSnapshot).panels.length > 0;
 
   const shortcutCtx: ShortcutContext = {
     vfoCtl: r.vfoCtl,
@@ -112,7 +114,7 @@ export function App({ device = "dev0" }: Props) {
         </main>
         <Inspector r={r} inspector={inspector} />
       </div>
-      <MobileTabBar inspector={inspector} />
+      <MobileTabBar inspector={inspector} hasPanels={panelsShown} />
       <StatusBar audio={r.audio} metrics={r.metrics} />
       {adsbOpen && <AdsbView r={r} />}
       <BookmarkEditorHost store={r.bookmarks} />

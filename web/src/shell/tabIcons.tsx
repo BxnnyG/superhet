@@ -5,6 +5,7 @@ import {
   GlobeIcon,
   ListIcon,
   PlaneIcon,
+  PlugIcon,
   SettingsIcon,
   SignalIcon,
   SlidersIcon,
@@ -26,6 +27,8 @@ export function tabIcon(tab: InspectorTab, size = 16): ReactNode {
       return <GlobeIcon size={size} />;
     case "adsb":
       return <PlaneIcon size={size} />;
+    case "panels":
+      return <PlugIcon size={size} />;
     case "display":
       return <SlidersIcon size={size} />;
     case "source":

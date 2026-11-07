@@ -197,6 +197,9 @@ pub const RULES: &[Rule] = &[
     // Read-only view for listening (no configuration, see plugins::listen_view): the running
     // instances and their audio streams. The streams themselves are on the audio WebSocket.
     rule("GET", "/api/v1/plugin-streams", GuestDecoder),
+    // Web panels that installed plugins ship (ADR-0022); their files come from the public,
+    // sandboxed `/api/v1/plugin-ui/...` route, which is not listed here.
+    rule("GET", "/api/v1/plugin-panels", GuestDecoder),
     rule("POST", "/api/v1/plugin-instances/{id}/stop", Operator),
     rule("POST", "/api/v1/plugin-instances/{id}/restart", Operator),
     // What a running plugin reports (DAB services, now playing) is decoder output: same
@@ -399,6 +402,7 @@ mod tests {
         // What a listener needs to find and hear a decoder.
         for (method, path) in [
             ("GET", "/api/v1/plugin-streams"),
+            ("GET", "/api/v1/plugin-panels"),
             ("GET", "/api/v1/plugin-instances/{id}/status"),
             ("GET", "/api/v1/ws/audio"),
         ] {
@@ -410,6 +414,8 @@ mod tests {
         assert!(passes(&guest(), false, "GET", "/api/v1/ws/audio"));
         assert!(!passes(&guest(), false, "GET", "/api/v1/plugin-streams"));
         assert!(passes(&guest(), true, "GET", "/api/v1/plugin-streams"));
+        assert!(!passes(&guest(), false, "GET", "/api/v1/plugin-panels"));
+        assert!(passes(&guest(), true, "GET", "/api/v1/plugin-panels"));
         assert!(!passes(
             &guest(),
             false,

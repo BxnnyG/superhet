@@ -69,7 +69,8 @@ events_schema = "schema/events.json" # JSON Schema (2020-12) for the whole event
 
 # [codec]  frames = ["tetra-acelp"], pcm = { sample_rate = 8000, channels = 1 }   (codec plugins)
 # [lookup] keys = ["callsign"], cache_ttl_s = 3600, rate_limit_per_min = 60       (lookup plugins)
-# [ui]     widget = "ui/dist/widget.js"                                           (ui plugins)
+# [ui]     entry = "ui/index.html", title = "Echo view", reads = [...], tune = false
+#          a sandboxed web panel (required for ui plugins, optional otherwise; docs/plugins-ui-panels.md)
 
 [install]
 build = ["scripts/build.sh"]         # shown to the admin before install; not run by this host yet
@@ -77,11 +78,13 @@ acknowledge = { text = "licence / patent notice", url = "https://..." }
 ```
 
 Rules the host enforces (`Manifest::from_toml`): paths (`command[0]` when it contains `/`,
-`events_schema`, `config.schema`, `widget`, build programs) stay inside the plugin directory (no absolute paths, no
+`events_schema`, `config.schema`, build programs) stay inside the plugin directory (no absolute paths, no
 `..`); decoders and codecs need `[input]`; `iq` needs a complex format and `discriminator` /
 `audio` a real one; codec and lookup plugins and anything with audio or voice-frame output need the
-framed transport; `[codec]` / `[lookup]` / `[ui]` belong to their type only; ui plugins have no
-command.
+framed transport; `[codec]` / `[lookup]` belong to their type only; `[ui]` is required for ui plugins (which have
+no command) and optional for the other types; `ui.entry` is an `.html` file in a subdirectory of the
+plugin, `ui.title` 1-32 plain characters, `ui.reads` at most 8 plugin ids (at least one for a ui
+plugin).
 
 ### Exclusive device claims
 
@@ -286,6 +289,7 @@ Request/reply JSON on `sh.v1.plugin.ctl.<cmd>`. Requests carry `"v":1`; replies 
 | `control` | `{"v":1,"id":"...","message":{...}}` | `{}`; the object is sent to a framed plugin as a `control` frame (`conflict` while it has no session, `invalid` for a non-object or more than 64 KiB) |
 | `status` | `{"v":1,"id":"..."}` | `{"plugin_id","device","state","freq_hz","audio_vfo","status":{...}\|null,"updated_unix_ms","media":[{"key","mime","size","revision"}]}` |
 | `media` | `{"v":1,"id":"...","key":"slide.d210"}` | success: one line of JSON (`ok`, `key`, `mime`, `revision`), a newline, the object bytes; failure: the usual JSON error reply |
+| `asset` | `{"v":1,"plugin_id":"...","path":"index.html"}` | one file of the plugin's web panel (`[ui]`, `docs/plugins-ui-panels.md`) in the shape of `media`: header line (`key` = path, `mime`, `revision` 0), newline, bytes. `invalid` for a path that is not a plain relative path below the UI root or a file over 640 KiB, `not_found` for an unknown plugin, no panel, a file type that is not served, a missing file or a link below the root |
 | `reconfigure` | `{"v":1,"id":"...","config":{...}}` | `{"instance":InstanceInfo}` with the new config; `config` is the complete new configuration (object or `null`), `invalid` for anything else, `not_found` for unknown ids |
 
 Every state change of an instance is also published as `InstanceInfo` JSON on

@@ -17,6 +17,7 @@ mod maintenance;
 mod map;
 mod metrics;
 mod origin;
+mod plugin_ui;
 mod plugins;
 mod profiles;
 mod registry;
@@ -54,6 +55,9 @@ fn app(
     audio: audio_ws::AudioState,
     devices: devices::DevicesState,
 ) -> Router {
+    // Public by design (opaque-origin frames cannot send the session cookie, the files are plugin
+    // code): the sandboxed panel assets, `plugin_ui` explains.
+    let panel_assets = plugin_ui::router(devices.clone());
     let protected = Router::new()
         .merge(ws::router(ws))
         .merge(audio_ws::router(audio))
@@ -87,6 +91,7 @@ fn app(
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .with_state(deps)
+        .merge(panel_assets)
         .merge(auth::router(auth.clone()))
         .merge(auth::protect(protected, auth.clone()))
         .layer(middleware::from_fn_with_state(web, web::layer));
@@ -278,6 +283,16 @@ mod tests {
             assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
             assert_eq!(&body[..], br#"{"error":"unauthenticated"}"#, "{path}");
         }
+    }
+
+    #[tokio::test]
+    async fn panel_assets_are_public_but_the_panel_list_is_not() {
+        // The sandboxed frame has no session cookie: its files answer without one (here: the
+        // plugin host is missing), while the list of panels needs a session.
+        let (status, _) = get_path("/api/v1/plugin-ui/org.superhet.example.echo/index.html").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        let (status, _) = get_path("/api/v1/plugin-panels").await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

@@ -24,3 +24,10 @@ format = "s16le"
 
 [output]
 events_schema = "schema/events.json"
+
+# Optional web panel (ADR-0022, docs/plugins-ui-panels.md): a static page the web app shows in a
+# sandboxed frame. It reads this plugin's instances and events through the postMessage bridge.
+[ui]
+entry = "ui/index.html"
+title = "Echo view"
+tune = true

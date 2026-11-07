@@ -207,6 +207,7 @@ async fn example_echo_on_a_vfo_reaches_the_decoder_history() {
         listed.json()["plugins"][0]["manifest"]["plugin"]["id"],
         PLUGIN
     );
+    web_panel_is_served_sandboxed(api, &operator);
     let again = req(
         api,
         "POST",
@@ -384,6 +385,76 @@ async fn example_echo_on_a_vfo_reaches_the_decoder_history() {
     drop(pluginhost);
     let _ = std::fs::remove_file(&tone);
     let _ = std::fs::remove_dir_all(&plugin_dir);
+}
+
+/// The reference plugin's web panel (ADR-0022): listed for a session, its files served without
+/// one under a sandboxing CSP, nothing outside its UI directory reachable.
+fn web_panel_is_served_sandboxed(api: u16, cookie: &str) {
+    assert_eq!(
+        common::http(api, "GET", "/api/v1/plugin-panels", &[], "").status,
+        401,
+        "the panel list needs a session"
+    );
+    let panels = req(api, "GET", "/api/v1/plugin-panels", Some(cookie), None);
+    assert_eq!(panels.status, 200, "{panels:?}");
+    let panel = &panels.json()["panels"][0];
+    assert_eq!(panel["plugin_id"], PLUGIN, "{panels:?}");
+    assert_eq!(panel["entry"], "index.html");
+    assert_eq!(panel["title"], "Echo view");
+    assert_eq!(panel["tune"], true);
+    assert!(!panels.body.contains("bin/example-echo"), "no runtime data");
+
+    // No cookie: a sandboxed frame has none.
+    let base = format!("/api/v1/plugin-ui/{PLUGIN}");
+    for (file, mime) in [
+        ("index.html", "text/html; charset=utf-8"),
+        ("panel.js", "text/javascript; charset=utf-8"),
+        ("panel.css", "text/css; charset=utf-8"),
+    ] {
+        let page = common::http(api, "GET", &format!("{base}/{file}"), &[], "");
+        assert_eq!(page.status, 200, "{file}: {page:?}");
+        assert_eq!(page.header("content-type"), Some(mime), "{file}");
+        let csp = page.header("content-security-policy").expect("csp");
+        assert!(csp.starts_with("sandbox allow-scripts;"), "{csp}");
+        assert!(csp.contains("connect-src 'none'") && !csp.contains("allow-same-origin"));
+        assert_eq!(page.header("x-content-type-options"), Some("nosniff"));
+        assert!(page.header("set-cookie").is_none());
+        assert!(!page.body.is_empty());
+    }
+    let page = common::http(api, "GET", &format!("{base}/index.html"), &[], "");
+    assert!(page.body.contains("Echo view"));
+
+    // Traversal and everything else outside the UI directory, raw on the wire.
+    for path in [
+        "../plugin.toml",
+        "%2e%2e/plugin.toml",
+        "..%2fplugin.toml",
+        "ui/../plugin.toml",
+        "%2e%2e%2f%2e%2e%2f1.0.0%2fplugin.toml",
+        "plugin.toml",
+        "bin/example-echo",
+        "schema/events.json",
+        ".hidden",
+    ] {
+        let reply = common::http(api, "GET", &format!("{base}/{path}"), &[], "");
+        assert!(
+            matches!(reply.status, 400 | 404),
+            "{path}: {} {reply:?}",
+            reply.status
+        );
+        assert!(!reply.body.contains("[plugin]") && !reply.body.contains("python"));
+    }
+    assert_eq!(
+        common::http(
+            api,
+            "GET",
+            "/api/v1/plugin-ui/org.superhet.nope.nope/index.html",
+            &[],
+            ""
+        )
+        .status,
+        404
+    );
 }
 
 async fn host_request(client: &async_nats::Client, cmd: &str, body: Value) -> Value {

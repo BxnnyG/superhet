@@ -603,17 +603,50 @@
         }
       ]
     },
+    "UiPlacement": {
+      "description": "Where a panel is shown in the web app.",
+      "oneOf": [
+        {
+          "const": "inspector",
+          "description": "A tab of the right-hand inspector.",
+          "type": "string"
+        }
+      ]
+    },
     "UiSection": {
       "additionalProperties": false,
-      "description": "UI plugin section (`[ui]`).",
+      "description": "Web panel section (`[ui]`, ADR-0022): a static page the web app shows in a sandboxed frame.\nRequired for `type = \"ui\"`, optional for the other types (a decoder with its own view).",
       "properties": {
-        "widget": {
-          "description": "ES module relative to the plugin directory.",
+        "entry": {
+          "description": "HTML page of the panel, relative to the plugin directory and inside a subdirectory\n(`ui/index.html`). The directory is the UI root: only files below it are served.",
           "type": "string"
+        },
+        "placement": {
+          "$ref": "#/$defs/UiPlacement",
+          "default": "inspector",
+          "description": "Where the web app shows it."
+        },
+        "reads": {
+          "default": [],
+          "description": "Plugin ids whose instance status and events the panel may read through the bridge. Empty\nmeans the plugin itself; a `ui` plugin has no instances of its own and must name some.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "description": "Label of the panel (1-32 characters).",
+          "type": "string"
+        },
+        "tune": {
+          "default": false,
+          "description": "Whether the panel may ask the web app to tune the selected receiver (operators and admins\nonly, and only when this is set).",
+          "type": "boolean"
         }
       },
       "required": [
-        "widget"
+        "entry",
+        "title"
       ],
       "type": "object"
     }

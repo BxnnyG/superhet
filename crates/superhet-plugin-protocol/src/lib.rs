@@ -13,6 +13,7 @@ pub mod framed;
 pub mod manifest;
 pub mod package;
 pub mod schema;
+pub mod ui;
 
 pub use config::{ConfigIssue, ConfigValidator};
 pub use event::{Event, EventError, EventValidator, Line};

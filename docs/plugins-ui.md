@@ -115,6 +115,15 @@ The tab "DAB" (operators, admins; everybody who sees the decoder history, read-o
 
 The tab "ADS-B" (same visibility as the DAB tab) belongs to the bundled ADS-B plugin. Idle: **Start ADS-B...** opens the takeover confirmation with an optional receiver position (kept in the browser for the next start). Running: aircraft, aircraft with a position and messages per second, and **Open map and table**, which opens a full-window overlay (`web/src/adsb/`): a Leaflet map on OpenStreetMap tiles next to a sortable, filterable table, aircraft fading out after 60 s without a message. The overlay opens by itself after a start and closes with its button or Esc. The inspector column is 352 px wide (it had 320 px before the eighth tab).
 
+## Plugins tab (plugin panels, `docs/plugins-ui-panels.md`)
+
+The tab "Plugins" (everybody who sees the decoder history) appears when an installed plugin ships a
+web panel (`[ui]` in its manifest) and shows it in a sandboxed frame; with several panels a picker
+above the frame chooses. The panel gets a read-only copy of the instances and events of the
+plugins it declared, the theme, and, if its manifest asks and the viewer is an operator or admin,
+may tune the selected receiver. It cannot call the API or see the session (ADR-0022). The
+reference plugin `example-echo` ships "Echo view".
+
 ## Events
 
 The log shows plugin events next to the built-in detectors (`source` = plugin id, `kind` = event

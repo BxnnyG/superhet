@@ -37,6 +37,8 @@ pub mod cmd {
     pub const STATUS: &str = "status";
     /// Read the latest `media` object of a framed instance.
     pub const MEDIA: &str = "media";
+    /// Read one static file of an installed plugin's web panel (`[ui]`).
+    pub const ASSET: &str = "asset";
 }
 
 /// First id of the pseudo VFOs under which plugin audio is published
@@ -240,6 +242,19 @@ pub struct MediaRequest {
     pub id: String,
     /// Object key (`MediaHeader::valid_key`).
     pub key: String,
+}
+
+/// `asset`: read one file of a plugin's web panel. The reply is a [`MediaReplyHeader`] (`key` =
+/// `path`, `revision` 0), a newline and the bytes; a failure is a plain [`ErrorReply`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AssetRequest {
+    /// Contract version.
+    pub v: u32,
+    /// Plugin that ships the panel.
+    pub plugin_id: String,
+    /// File below the panel's UI root (`crate::ui::valid_asset_path`).
+    pub path: String,
 }
 
 /// Reply to `control`.

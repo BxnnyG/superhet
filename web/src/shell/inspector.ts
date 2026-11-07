@@ -11,20 +11,29 @@ export const INSPECTOR_TABS = [
   "decoders",
   "dab",
   "adsb",
+  "panels",
   "display",
   "source",
 ] as const;
 export type InspectorTab = (typeof INSPECTOR_TABS)[number];
 
-/** Tabs the viewer may see: guests have no bookmarks, and decoder history only if the policy shows it. */
-export function visibleTabs(perms: {
-  canReadBookmarks: boolean;
-  canSeeDecoders: boolean;
-}): readonly InspectorTab[] {
+/**
+ * Tabs the viewer may see: guests have no bookmarks, and decoder history only if the policy shows
+ * it. The plugin panels tab exists only while a plugin ships a panel (`hasPanels`).
+ */
+export function visibleTabs(
+  perms: {
+    canReadBookmarks: boolean;
+    canSeeDecoders: boolean;
+  },
+  hasPanels = false,
+): readonly InspectorTab[] {
   return INSPECTOR_TABS.filter(
     (t) =>
       (t !== "bookmarks" || perms.canReadBookmarks) &&
-      ((t !== "decoders" && t !== "dab" && t !== "adsb") || perms.canSeeDecoders),
+      ((t !== "decoders" && t !== "dab" && t !== "adsb" && t !== "panels") ||
+        perms.canSeeDecoders) &&
+      (t !== "panels" || hasPanels),
   );
 }
 
@@ -35,6 +44,7 @@ export const INSPECTOR_LABEL: Record<InspectorTab, string> = {
   decoders: "Decoders",
   dab: "DAB",
   adsb: "ADS-B",
+  panels: "Plugins",
   display: "Display",
   source: "Source",
 };

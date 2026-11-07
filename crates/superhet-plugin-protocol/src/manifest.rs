@@ -234,12 +234,36 @@ pub struct LookupSection {
     pub rate_limit_per_min: Option<u32>,
 }
 
-/// UI plugin section (`[ui]`).
+/// Where a panel is shown in the web app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UiPlacement {
+    /// A tab of the right-hand inspector.
+    #[default]
+    Inspector,
+}
+
+/// Web panel section (`[ui]`, ADR-0022): a static page the web app shows in a sandboxed frame.
+/// Required for `type = "ui"`, optional for the other types (a decoder with its own view).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UiSection {
-    /// ES module relative to the plugin directory.
-    pub widget: String,
+    /// HTML page of the panel, relative to the plugin directory and inside a subdirectory
+    /// (`ui/index.html`). The directory is the UI root: only files below it are served.
+    pub entry: String,
+    /// Label of the panel (1-32 characters).
+    pub title: String,
+    /// Where the web app shows it.
+    #[serde(default)]
+    pub placement: UiPlacement,
+    /// Plugin ids whose instance status and events the panel may read through the bridge. Empty
+    /// means the plugin itself; a `ui` plugin has no instances of its own and must name some.
+    #[serde(default)]
+    pub reads: Vec<String>,
+    /// Whether the panel may ask the web app to tune the selected receiver (operators and admins
+    /// only, and only when this is set).
+    #[serde(default)]
+    pub tune: bool,
 }
 
 /// Instance configuration (`[config]`).
@@ -575,16 +599,7 @@ impl Manifest {
             }
             _ => {}
         }
-        match (&self.ui, ty) {
-            (None, PluginType::Ui) => out.push("[ui] is required for ui plugins".to_owned()),
-            (Some(ui), _) if !is_safe_relative(&ui.widget) => {
-                out.push(format!(
-                    "ui.widget {:?} must be a relative path inside the plugin directory",
-                    ui.widget
-                ));
-            }
-            _ => {}
-        }
+        self.check_ui(out);
         if let Some(install) = &self.install {
             for cmd in &install.build {
                 let program = cmd.split_whitespace().next().unwrap_or("");
@@ -594,6 +609,43 @@ impl Manifest {
                     ));
                 }
             }
+        }
+    }
+}
+
+impl Manifest {
+    fn check_ui(&self, out: &mut Vec<String>) {
+        let Some(ui) = &self.ui else {
+            if self.plugin.kind == PluginType::Ui {
+                out.push("[ui] is required for ui plugins".to_owned());
+            }
+            return;
+        };
+        if crate::ui::split_entry(&ui.entry).is_none() {
+            out.push(format!(
+                "ui.entry {:?} must be an .html file in a subdirectory of the plugin (for example ui/index.html)",
+                ui.entry
+            ));
+        }
+        if !crate::ui::valid_title(&ui.title) {
+            out.push(format!(
+                "ui.title must be 1-{} plain characters",
+                crate::ui::MAX_TITLE_CHARS
+            ));
+        }
+        if ui.reads.len() > crate::ui::MAX_READS {
+            out.push(format!(
+                "ui.reads names more than {} plugins",
+                crate::ui::MAX_READS
+            ));
+        }
+        for id in &ui.reads {
+            if !is_valid_plugin_id(id) {
+                out.push(format!("ui.reads entry {id:?} is not a plugin id"));
+            }
+        }
+        if self.plugin.kind == PluginType::Ui && ui.reads.is_empty() {
+            out.push("ui.reads must name at least one plugin for a ui plugin".to_owned());
         }
     }
 }
@@ -751,5 +803,75 @@ format = "s16le"
     fn semver_is_checked() {
         let p = problems(&GOOD.replace("0.1.0", "one"));
         assert!(p.iter().any(|m| m.contains("semantic")), "{p:?}");
+    }
+
+    const UI_SECTION: &str = "\n[ui]\nentry = \"ui/index.html\"\ntitle = \"Echo view\"\n";
+
+    #[test]
+    fn a_decoder_may_ship_a_panel() {
+        let m = Manifest::from_toml(&format!("{GOOD}{UI_SECTION}")).expect("valid");
+        let ui = m.ui.expect("ui section");
+        assert_eq!(ui.placement, UiPlacement::Inspector);
+        assert!(ui.reads.is_empty() && !ui.tune);
+    }
+
+    #[test]
+    fn panel_entries_stay_in_a_subdirectory_and_titles_are_plain() {
+        for entry in [
+            "index.html",
+            "../ui/index.html",
+            "/ui/index.html",
+            "ui/app.js",
+            "ui/.x.html",
+        ] {
+            let toml = format!("{GOOD}{}", UI_SECTION.replace("ui/index.html", entry));
+            let p = problems(&toml);
+            assert!(p.iter().any(|m| m.contains("ui.entry")), "{entry}: {p:?}");
+        }
+        let toml = format!("{GOOD}{}", UI_SECTION.replace("Echo view", ""));
+        assert!(problems(&toml).iter().any(|m| m.contains("ui.title")));
+        let toml = format!("{GOOD}{UI_SECTION}placement = \"dock\"\n");
+        assert!(!problems(&toml).is_empty(), "unknown placement is refused");
+        let toml = format!("{GOOD}{UI_SECTION}widget = \"x.js\"\n");
+        assert!(!problems(&toml).is_empty(), "the old widget key is gone");
+    }
+
+    #[test]
+    fn a_ui_plugin_has_no_process_and_must_name_what_it_reads() {
+        let ui = r#"
+[plugin]
+id = "org.superhet.ui.view"
+name = "View"
+version = "0.1.0"
+protocol = 1
+license = "AGPL-3.0-only"
+type = "ui"
+
+[runtime]
+
+[ui]
+entry = "ui/index.html"
+title = "View"
+"#;
+        let p = problems(ui);
+        assert!(p.iter().any(|m| m.contains("ui.reads")), "{p:?}");
+        let ok = ui.replace(
+            "title = \"View\"",
+            "title = \"View\"\nreads = [\"org.superhet.decoder.pocsag\"]\ntune = true",
+        );
+        assert!(problems(&ok).is_empty(), "{:?}", problems(&ok));
+        let bad = ui.replace(
+            "title = \"View\"",
+            "title = \"View\"\nreads = [\"Not An Id\"]",
+        );
+        assert!(problems(&bad).iter().any(|m| m.contains("not a plugin id")));
+        let ids: Vec<String> = (0..9).map(|i| format!("\"org.a.b{i}\"")).collect();
+        let many = ui.replace(
+            "title = \"View\"",
+            &format!("title = \"View\"\nreads = [{}]", ids.join(",")),
+        );
+        assert!(problems(&many).iter().any(|m| m.contains("more than")));
+        let none = ui.replace("[ui]", "[x]");
+        assert!(!problems(&none).is_empty());
     }
 }

@@ -1,0 +1,53 @@
+/* Colours come from the host's theme tokens (panel.js sets them as custom properties). */
+:root {
+  --sh-surface-1: #ffffff;
+  --sh-fg: #111827;
+  --sh-fg-muted: #6b7280;
+  --sh-border: #e5e7eb;
+  --sh-accent: #2563eb;
+  --sh-accent-fg: #ffffff;
+}
+body {
+  margin: 0;
+  padding: 12px 16px;
+  font: 13px/1.45 system-ui, sans-serif;
+  background: var(--sh-surface-1);
+  color: var(--sh-fg);
+}
+h1 {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+h2 {
+  font-size: 12px;
+  margin: 16px 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--sh-fg-muted);
+}
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--sh-border);
+}
+.muted {
+  color: var(--sh-fg-muted);
+}
+button {
+  font: inherit;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 0;
+  background: var(--sh-accent);
+  color: var(--sh-accent-fg);
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
