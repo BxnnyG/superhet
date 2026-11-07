@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Throwaway stack for the browser smoke tests (web/e2e): superhet-api + superhet-sdrd (file
+# Throwaway stack for the browser smoke tests (web/e2e): superhet-api + two superhet-sdrd (file
 # backend with a noise capture) + superhet-worker + superhet-pluginhost on loopback test ports,
 # serving web/dist. The plugin host seeds the first-party plugins (plugins/pocsag, aprs, rtl433, dab, adsb;
 # their tools are not needed until an instance starts) and gets a private plugin directory;
@@ -14,7 +14,7 @@
 # (pnpm -C web build).
 # scripts/e2e.sh sets all of that up locally.
 #
-# Ports (loopback only): api E2E_PORT (default 18073), sdrd +1, pluginhost +2, worker +3.
+# Ports (loopback only): api E2E_PORT (default 18073), sdrd +1, pluginhost +2, worker +3, second sdrd +4.
 # Never 8073.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -103,6 +103,15 @@ export RUST_LOG="${RUST_LOG:-error}"
 SUPERHET_LISTEN="127.0.0.1:$((port + 1))" \
     SUPERHET_DEVICE_ID=dev0 \
     SUPERHET_DEVICE="file:$work/noise.cu8?format=cu8&rate=2048000&freq=${E2E_IQ_FREQ:-100000000}&block=4096" \
+    "$bins/superhet-sdrd" &
+pids+=($!)
+
+# A second daemon on its own file device (another centre, a label): the multi-device scenario
+# (web/e2e/zz-devices.e2e.ts). The other scenarios stay on dev0.
+SUPERHET_LISTEN="127.0.0.1:$((port + 4))" \
+    SUPERHET_DEVICE_ID=dev1 \
+    SUPERHET_DEVICE_LABEL="Second stick" \
+    SUPERHET_DEVICE="file:$work/noise.cu8?format=cu8&rate=2048000&freq=145500000&block=4096" \
     "$bins/superhet-sdrd" &
 pids+=($!)
 

@@ -90,3 +90,4 @@ Acceptance criteria:
 4. `/metrics` exposes CPU, dropped blocks, USB overruns, decoder states, plugin restarts; example Grafana dashboard in `deploy/`.
 5. Security review: CSP, session hardening, rate-limited login, dependency audit (`cargo deny`, `pnpm audit`) in CI, plugin install warnings.
 6. Two device managers can run in the same process in tests (file backend ×2); SoapySDR backend works with at least the RTL-SDR via SoapyRTLSDR.
+   Done in advance: several local sticks, one `superhet-sdrd` each, device discovery and a web device picker (ADR-0020, `docs/multi-device.md`); the Playwright smoke test runs two file devices.

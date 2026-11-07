@@ -14,7 +14,18 @@ open to every signed-in caller including guests, subject to VFO ownership and th
 `vfo_limit`, `mode_not_allowed`, `frequency_not_allowed`, `locked` (guest policy), with the
 device error shape below. The state is prepared per viewer: each VFO gets `"mine"` and `"shared"`, `owner` is only
 shown to operators and admins, guests do not see lock holder names.
-`{dev}` is the device id (`SUPERHET_DEVICE_ID` of the daemon).
+`{dev}` is the device id (`SUPERHET_DEVICE_ID` of the daemon; default `dev0`). Every route below
+exists once per daemon, so several SDRs are independent (`docs/multi-device.md`).
+
+### `GET /api/v1/devices`
+
+Device discovery for the device picker (`docs/multi-device.md`). Any signed-in role. Reply:
+`{"v":1,"devices":[{"id","online","driver","center_hz","sample_rate","label"?,"tuner"?}]}`, sorted by
+id. A device is listed while the KV bucket `STATE` holds `dev.<id>` or `restore.<id>`; the API asks
+each one with `ctl.state` (in parallel): an answer means `"online":true` with the live values, no
+answer falls back to the stored document with `"online":false` (a stopped or crashed daemon, `driver`/
+`center_hz`/`sample_rate` are then `null` if nothing was stored). No VFOs or lock holders are
+included. `502` the state bucket cannot be read, `503` no bus. At most 64 devices.
 
 ### `GET /api/v1/devices/{dev}/state`
 
@@ -106,7 +117,7 @@ fields and limits: section "VFOs" below. Bodies are at most 4 KiB, `Content-Type
 
 ## State object
 
-`{"v":1,"device","driver","tuner"?,"center_hz","sample_rate","gain":{"mode":"auto"|"manual","db":null|number}|null,"ppm","bias_tee","tuning_epoch","gains_db":[...],"vfos":[...],"locks":[...],"window":{"start_hz","end_hz"},"overload":{"active","clipped_percent"},"dropped_blocks"}`
+`{"v":1,"device","label"?,"driver","tuner"?,"center_hz","sample_rate","gain":{"mode":"auto"|"manual","db":null|number}|null,"ppm","bias_tee","tuning_epoch","gains_db":[...],"vfos":[...],"locks":[...],"window":{"start_hz","end_hz"},"overload":{"active","clipped_percent"},"dropped_blocks"}`
 
 `vfos` lists the device's VFOs (see below) with their current `status`; it is re-published on
 every VFO change and every retune (status follows the tuning). VFOs live in the daemon's memory
@@ -117,7 +128,8 @@ lower edge can be negative for very low centres. `claim` (only while a plugin ho
 return to (`id`, `previous_center_hz`, `previous_sample_rate`); `locks` lists the lock holders (empty = tuning
 is free), see "Tuning lock".
 
-`gain` is `null` for devices without gain control (file replay); `gains_db` lists the selectable
+`label` is the operator's display name (`SUPERHET_DEVICE_LABEL`, at most 64 characters, omitted when
+unset). `gain` is `null` for devices without gain control (file replay); `gains_db` lists the selectable
 manual steps. `tuner` is omitted when unknown.
 
 `overload` is the ADC clipping report of the daemon: every 5 s it counts the samples at the

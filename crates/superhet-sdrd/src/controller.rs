@@ -30,6 +30,7 @@ pub type StateTx = watch::Sender<Option<Arc<str>>>;
 /// Owns the control path of one device.
 pub struct Controller {
     device: String,
+    label: Option<String>,
     control: Arc<dyn DeviceControl>,
     vfos: Arc<VfoShared>,
     locks: Mutex<LockSet>,
@@ -120,6 +121,7 @@ impl Controller {
     ) -> Self {
         Self {
             device,
+            label: None,
             control,
             vfos,
             locks: Mutex::new(LockSet::default()),
@@ -127,6 +129,13 @@ impl Controller {
             overload: Arc::default(),
             claim: Mutex::new(None),
         }
+    }
+
+    /// Sets the display name carried in the state document.
+    #[must_use]
+    pub fn with_label(mut self, label: Option<String>) -> Self {
+        self.label = label;
+        self
     }
 
     /// Takes the ADC overload state for the state document from `status`.
@@ -293,7 +302,7 @@ impl Controller {
     fn publish(&self, locks: &LockSet, device_state: &DeviceState) -> Arc<str> {
         let vfos = self.vfos.with(|r| r.list().to_vec());
         let json: Arc<str> = state_json(
-            &self.device,
+            (&self.device, self.label.as_deref()),
             device_state,
             &vfos,
             locks.holders(),

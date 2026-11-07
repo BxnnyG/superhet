@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { App } from "./App";
 import { AuthLayout } from "./auth/AuthLayout";
 import { usePermissions } from "./auth/context";
+import { DevicesProvider } from "./devices/DevicesProvider";
 import { adminSectionOf, navigate, usePath } from "./router";
 import { Button } from "./ui";
 
@@ -13,7 +14,8 @@ export function Root() {
   const path = usePath();
   const section = adminSectionOf(path);
   const perms = usePermissions();
-  if (section === null) return <App />;
+  if (section === null)
+    return <DevicesProvider>{(device) => <App device={device} />}</DevicesProvider>;
   if (!perms.canAdmin) {
     // Same as the server's answer to /api/v1/admin/*: no admin navigation, no data.
     return (

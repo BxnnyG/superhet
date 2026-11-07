@@ -17,6 +17,9 @@ pub enum ConfigError {
     },
 }
 
+/// Longest accepted `SUPERHET_DEVICE_LABEL`.
+const MAX_LABEL_CHARS: usize = 64;
+
 /// Spectrum pipeline settings.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpectrumSettings {
@@ -39,6 +42,8 @@ pub struct Config {
     pub device_spec: Option<String>,
     /// Device id used in subjects (`SUPERHET_DEVICE_ID`, default `dev0`).
     pub device_id: String,
+    /// Human-readable name shown in the device picker (`SUPERHET_DEVICE_LABEL`, optional).
+    pub label: Option<String>,
     /// Spectrum settings.
     pub spectrum: SpectrumSettings,
     /// Most VFOs the device runs at once (`SUPERHET_MAX_VFOS`, default 8, at most 64).
@@ -98,9 +103,21 @@ impl Config {
                 reason: format!("must be between 1 and {MAX_VFOS_LIMIT}"),
             });
         }
+        let label = get("SUPERHET_DEVICE_LABEL")
+            .map(|l| l.trim().to_owned())
+            .filter(|l| !l.is_empty());
+        if let Some(l) = &label
+            && (l.chars().count() > MAX_LABEL_CHARS || l.chars().any(char::is_control))
+        {
+            return Err(ConfigError::Invalid {
+                var: "SUPERHET_DEVICE_LABEL",
+                reason: format!("at most {MAX_LABEL_CHARS} printable characters"),
+            });
+        }
         Ok(Self {
             device_spec: get("SUPERHET_DEVICE").filter(|s| !s.trim().is_empty()),
             device_id,
+            label,
             spectrum,
             max_vfos,
         })
@@ -125,6 +142,7 @@ mod tests {
         let c = Config::from_lookup(lookup(&[])).expect("defaults");
         assert_eq!(c.device_spec, None);
         assert_eq!(c.device_id, "dev0");
+        assert_eq!(c.label, None);
         assert_eq!(c.spectrum.fft_size, 4096);
         assert_eq!(c.spectrum.bins, 2048);
         assert_eq!(c.max_vfos, 8);
@@ -138,6 +156,22 @@ mod tests {
             assert!(
                 Config::from_lookup(lookup(&[("SUPERHET_MAX_VFOS", bad)])).is_err(),
                 "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn label_is_trimmed_and_bounded() {
+        let c = Config::from_lookup(lookup(&[("SUPERHET_DEVICE_LABEL", "  Roof antenna ")]))
+            .expect("valid");
+        assert_eq!(c.label.as_deref(), Some("Roof antenna"));
+        let c = Config::from_lookup(lookup(&[("SUPERHET_DEVICE_LABEL", "  ")])).expect("blank");
+        assert_eq!(c.label, None);
+        let long = "x".repeat(65);
+        for bad in [long.as_str(), "a\nb"] {
+            assert!(
+                Config::from_lookup(lookup(&[("SUPERHET_DEVICE_LABEL", bad)])).is_err(),
+                "{bad:?}"
             );
         }
     }

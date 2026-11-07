@@ -23,3 +23,4 @@ Format: one file per decision, `NNNN-short-title.md`, sections *Status*, *Contex
 | [0017](0017-adsb-plugin-and-map.md) | ADS-B plugin (readsb) and the aircraft map | accepted |
 | [0018](0018-digital-voice-plan.md) | Digital voice plan: M17 bundled, everything encumbered stays external | accepted |
 | [0019](0019-oidc-login.md) | Optional OpenID Connect login | accepted |
+| [0020](0020-multi-device.md) | Several local SDRs, one daemon each | accepted |

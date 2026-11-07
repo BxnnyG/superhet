@@ -86,7 +86,8 @@ Goal: everything a SDR# user relies on daily exists in Superhet, reachable by mo
 | rtl_tcp / SpyServer **server** output (share a channel slice with SDR#, SDR++ etc.) | later | – |
 | REST + NATS API for automation | v1 | versioned |
 | TETRA network analysis for own cells (burst quality, neighbour map, subscriber activity) | v1 (P3) | – |
-| Multiple devices, remote devices via NATS leaf | later (P5+) | ADR-0007 |
+| Multiple local devices (one sdrd per stick, device picker) | v1 | ADR-0007, `docs/multi-device.md` |
+| Remote devices via NATS leaf | later (P5+) | ADR-0007 |
 | OIDC single sign-on | later (P5) | – |
 
 ## 2. Digital decoders (plugins)
@@ -185,7 +186,7 @@ All decoders are plugins (separate processes). Without a codec plugin, voice dec
 | Service split sdrd / api / pluginhost / worker + NATS JetStream | MVP | ADR-0007 |
 | Secrets generation, NATS per-service auth, non-root hardened containers | MVP | – |
 | Install script Debian/Arch VM with systemd | later (P5) | USB passthrough to VM must be documented |
-| Multi-device operation | later (P5 prep, then own phase) | – |
+| Multi-device operation (local sticks) | v1 | `docs/multi-device.md`; per-device access rules and remote devices later |
 
 ## 8. Users, roles, guest access, admin console (P1.5)
 

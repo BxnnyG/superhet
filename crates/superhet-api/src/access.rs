@@ -169,6 +169,7 @@ use Access::{Admin, Guest, GuestDecoder, Listener, Operator};
 /// The access table of every route behind the session check.
 pub const RULES: &[Rule] = &[
     // Device state, tuning and VFOs.
+    rule("GET", "/api/v1/devices", Guest),
     rule("GET", "/api/v1/devices/{dev}/state", Guest),
     rule("POST", "/api/v1/devices/{dev}/tune", Operator),
     rule("POST", "/api/v1/devices/{dev}/lock", Operator),
@@ -412,6 +413,7 @@ mod tests {
     fn registered_paths() -> Vec<String> {
         let sources = [
             include_str!("devices.rs"),
+            include_str!("device_list.rs"),
             include_str!("ws.rs"),
             include_str!("audio_ws.rs"),
             include_str!("state_ws.rs"),

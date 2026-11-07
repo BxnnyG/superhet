@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { AuthContext } from "./auth/context";
+import { DevicesContext } from "./devices/context";
 import { accountStatus, authValue, stubClient } from "./auth/testing";
 import { INSPECTOR_STORAGE_KEY } from "./shell/inspector";
 
@@ -120,4 +121,33 @@ it("shows the account section and signs out when rendered inside a session", () 
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
     expect(signOut).toHaveBeenCalledTimes(1);
   });
+});
+
+it("the device pill lists several devices and switches on a click", () => {
+  const select = vi.fn();
+  const info = (id: string, online: boolean, label: string | null) => ({
+    id,
+    label,
+    driver: "rtlsdr",
+    tuner: "R820T",
+    online,
+    centerHz: 100e6,
+    sampleRate: 2_048_000,
+  });
+  render(
+    <DevicesContext.Provider
+      value={{
+        devices: [info("dev0", true, "Roof"), info("dev1", false, null)],
+        device: "dev0",
+        select,
+      }}
+    >
+      <App device="dev0" />
+    </DevicesContext.Provider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Roof/ }));
+  const list = within(screen.getByRole("list", { name: "Devices" }));
+  expect(list.getByText("Offline")).toBeInTheDocument();
+  fireEvent.click(list.getByRole("button", { name: /dev1/ }));
+  expect(select).toHaveBeenCalledWith("dev1");
 });
