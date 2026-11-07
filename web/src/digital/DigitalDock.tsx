@@ -9,6 +9,16 @@ import { DsdNow } from "../dsd/DsdNow";
 import { DSD_CALL_END, DSD_PLUGIN_ID, sourceLabel, type DsdStatus } from "../dsd/model";
 import { useDsdStatus } from "../dsd/useDsdStatus";
 import { M17_CALL_END, M17_PLUGIN_ID, type M17Status } from "../m17/model";
+import { TetraNow } from "../tetra/TetraNow";
+import {
+  TETRA_CALL_END,
+  TETRA_PLUGIN_ID,
+  TETRA_SDS,
+  TETRA_STATUS,
+  sourceLabel as tetraSourceLabel,
+  type TetraStatus,
+} from "../tetra/model";
+import { useTetraStatus } from "../tetra/useTetraStatus";
 import { NowTalking } from "../m17/NowTalking";
 import { useM17Status } from "../m17/useM17Status";
 import { InstanceFacts } from "../plugins/InstanceFacts";
@@ -101,6 +111,12 @@ export function DigitalDock({ plugins, device, vfos, selectedId, createEvents }:
   );
 }
 
+const LISTENABLE_VOICE: ReadonlySet<string> = new Set([
+  M17_PLUGIN_ID,
+  DSD_PLUGIN_ID,
+  TETRA_PLUGIN_ID,
+]);
+
 /** Voice decoders (with a call log) that run on the device, for the read-only dock. */
 function listenableVoice(
   instances: readonly PluginInstance[],
@@ -109,7 +125,7 @@ function listenableVoice(
   const out: { mode: DigitalMode; instance: PluginInstance }[] = [];
   for (const instance of instances) {
     if (instance.device !== device || instance.state === "stopped") continue;
-    if (instance.pluginId !== M17_PLUGIN_ID && instance.pluginId !== DSD_PLUGIN_ID) continue;
+    if (!LISTENABLE_VOICE.has(instance.pluginId)) continue;
     const mode = digitalModeOfInstance(instance);
     if (mode !== null) out.push({ mode, instance });
   }
@@ -153,6 +169,12 @@ function DockPanel({
   const dsd = useDsdStatus(mode.pluginId === DSD_PLUGIN_ID ? instance.id : null);
   const dsdOnAir = dsd.stale ? undefined : dsd.status.now[0];
   const needsTool = !dsd.stale && dsd.status.tool.state === "missing";
+  // TETRA: the cell, the calls on the air, and whether tetra-rx and the user's ETSI codec are there.
+  const tetra = useTetraStatus(mode.pluginId === TETRA_PLUGIN_ID ? instance.id : null);
+  const tetraOnAir = tetra.stale ? undefined : tetra.status.now[0];
+  const needsCodec =
+    !tetra.stale &&
+    (tetra.status.codec.state === "missing" || tetra.status.codec.state === "failed");
 
   const setOpen = (next: boolean) => {
     setOpenState(next);
@@ -218,6 +240,21 @@ function DockPanel({
           </Badge>
         )}
         {needsTool && <Badge tone="warn">needs dsd-fme</Badge>}
+        {mode.pluginId === TETRA_PLUGIN_ID &&
+          !tetra.stale &&
+          tetra.status.tool.state === "missing" && <Badge tone="warn">needs tetra-rx</Badge>}
+        {mode.pluginId === TETRA_PLUGIN_ID && needsCodec && (
+          <Badge tone="neutral" title="Signalling works; install the ETSI codec to hear voice">
+            voice needs the ETSI codec
+          </Badge>
+        )}
+        {tetraOnAir !== undefined && (
+          <Badge tone={tetraOnAir.encrypted ? "warn" : "success"} dot pulse>
+            <span className="font-mono">
+              {tetraOnAir.talker !== null ? tetraOnAir.talker : tetraSourceLabel(tetraOnAir)}
+            </span>
+          </Badge>
+        )}
         {dsdOnAir !== undefined && (
           <Badge tone={dsdOnAir.encrypted ? "warn" : "success"} dot pulse>
             <span className="font-mono">{sourceLabel(dsdOnAir)}</span>
@@ -293,6 +330,7 @@ function DockPanel({
             readOnly={readOnly}
             m17={mode.id === "m17" ? m17 : null}
             dsd={mode.pluginId === DSD_PLUGIN_ID ? dsd : null}
+            tetra={mode.pluginId === TETRA_PLUGIN_ID ? tetra : null}
           />
         </div>
       )}
@@ -308,6 +346,7 @@ const COLUMNS: Record<DigitalMode["id"], readonly [string, string, string]> = {
   dmr: ["Call", "Slot · colour code", "Duration · encryption"],
   dpmr: ["Call", "Colour code", "Duration · encryption"],
   nxdn: ["Call", "RAN", "Duration · encryption"],
+  tetra: ["Call · message", "Channel · encryption", "Duration · text"],
 };
 
 function Output({
@@ -321,6 +360,7 @@ function Output({
   readOnly,
   m17,
   dsd,
+  tetra,
 }: {
   mode: DigitalMode;
   instance: PluginInstance;
@@ -334,6 +374,8 @@ function Output({
   m17: { status: M17Status; stale: boolean } | null;
   /** DMR / dPMR / NXDN only: the plugin's status poll. */
   dsd: { status: DsdStatus; stale: boolean } | null;
+  /** TETRA only: the plugin's status poll. */
+  tetra: { status: TetraStatus; stale: boolean } | null;
 }) {
   // A private event store for the panel: history of this plugin plus the live feed.
   const store = useMemo(
@@ -348,9 +390,19 @@ function Output({
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot);
   // The call logs (M17, DMR / dPMR / NXDN) have one row per finished call; the call on the air is
   // in the banner.
-  const callEnd = m17 !== null ? M17_CALL_END : dsd !== null ? DSD_CALL_END : null;
+  // TETRA adds its short messages and status values to the log.
+  const logKinds: readonly string[] | null =
+    m17 !== null
+      ? [M17_CALL_END]
+      : dsd !== null
+        ? [DSD_CALL_END]
+        : tetra !== null
+          ? [TETRA_CALL_END, TETRA_SDS, TETRA_STATUS]
+          : null;
   const rows = snap.events
-    .filter((e) => e.meta.instance === instance.id && (callEnd === null || e.kind === callEnd))
+    .filter(
+      (e) => e.meta.instance === instance.id && (logKinds === null || logKinds.includes(e.kind)),
+    )
     .slice(0, MAX_ROWS);
   const [h1, h2, h3] = COLUMNS[mode.id];
   const [view, setView] = useState<"list" | "map">("list");
@@ -384,6 +436,13 @@ function Output({
           status={m17.status}
           stale={m17.stale}
           running={instance.state === "running" && healthy}
+        />
+      )}
+      {tetra !== null && (
+        <TetraNow
+          status={tetra.status}
+          stale={tetra.stale}
+          running={instance.state === "running" && verdictTone === "success"}
         />
       )}
       {dsd !== null && (
@@ -422,9 +481,11 @@ function Output({
           <p className="font-medium text-fg">
             {dsd !== null && !dsd.stale && dsd.status.tool.state === "missing"
               ? "Waiting for dsd-fme"
-              : instance.state === "running"
-                ? "Listening…"
-                : "Waiting for the decoder"}
+              : tetra !== null && !tetra.stale && tetra.status.tool.state === "missing"
+                ? "Waiting for tetra-rx"
+                : instance.state === "running"
+                  ? "Listening…"
+                  : "Waiting for the decoder"}
           </p>
           <p className="mt-1 max-w-prose">{expectText(mode, vfo?.freqHz ?? instance.freqHz)}</p>
           {!snap.loaded && <p className="mt-1 text-xs text-fg-subtle">Loading history…</p>}

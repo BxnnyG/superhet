@@ -1,4 +1,4 @@
-//! `superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17|dsd>`: runs the external decoder for one of the
+//! `superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17|dsd|tetra>`: runs the external decoder for one of the
 //! first-party plugins (see the library docs). Samples arrive on stdin, events leave on stdout,
 //! the instance configuration is read from `SUPERHET_CONFIG`.
 
@@ -8,6 +8,7 @@ use serde_json::Value;
 use superhet_plugin_adapters::{
     adsb, aprs, dab, dsd, m17, pager, rtl433,
     run::{run, run_many},
+    tetra,
 };
 
 fn config() -> Result<Value, String> {
@@ -73,15 +74,21 @@ fn start(mode: &str) -> Result<ExitCode, String> {
             let dir = std::env::current_dir().map_err(|err| format!("working directory: {err}"))?;
             Ok(dsd::run(&config, &socket, &dir))
         }
+        "tetra" => {
+            // tetra-rx ships in the image; the ETSI codec is the user's (docs/plugins-tetra.md).
+            let socket = std::env::var("SUPERHET_SOCKET")
+                .map_err(|_| "SUPERHET_SOCKET is not set (framed plugin)".to_owned())?;
+            Ok(tetra::run(&config, &socket))
+        }
         other => Err(format!(
-            "unknown mode {other:?} (pocsag, aprs, rtl433, dab, adsb, m17, dsd)"
+            "unknown mode {other:?} (pocsag, aprs, rtl433, dab, adsb, m17, dsd, tetra)"
         )),
     }
 }
 
 fn main() -> ExitCode {
     let Some(mode) = std::env::args().nth(1) else {
-        eprintln!("usage: superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17|dsd>");
+        eprintln!("usage: superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17|dsd|tetra>");
         return ExitCode::from(2);
     };
     match start(&mode) {

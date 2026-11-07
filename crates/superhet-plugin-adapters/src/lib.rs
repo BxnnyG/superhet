@@ -17,3 +17,4 @@ pub mod m17;
 pub mod pager;
 pub mod rtl433;
 pub mod run;
+pub mod tetra;

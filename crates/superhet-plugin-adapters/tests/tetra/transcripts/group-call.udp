@@ -1,0 +1,26 @@
+# A group call, hand-written in the formats tetra-rx sends (tetra_upper_mac.c, tetra_lower_mac.c of
+# osmo-tetra-sq5bpf 4e9f1b2); not captured from a network. Lines: one UDP datagram each; `console:`
+# a line of tetra-rx's console; `TRA <usage>` a voice datagram on that traffic channel; `---` one step.
+TETMON_begin FUNC:BURST RX:0 TETMON_end
+TETMON_begin FUNC:NETINFO1 CCODE:00 MCC:0106 MNC:002a DLF:0 ULF:0 LA:0 CRYPT:0 RX:0 TETMON_end
+console: BNCH SYSINFO (DL 392012500 Hz, UL 382012500 Hz), service_details 0x0260 LA:1 Hyperframe 3
+TETMON_begin FUNC:NETINFO1 CCODE:00 MCC:0106 MNC:002a DLF:392012500 ULF:382012500 LA:1 CRYPT:1 RX:0 TETMON_end
+---
+TETMON_begin FUNC:DSETUPDEC IDX:5 SSI:9001 SSI2:2630001 CID:77 NID:0 RX:0 TETMON_end
+TETMON_begin FUNC:D-SETUP SSI:00009001 IDX:005 IDT:4 ENCR:0 RX:0 TETMON_end
+---
+TRA 5
+TRA 5
+TRA 5
+---
+TETMON_begin FUNC:DTXGRANTDEC SSI:9001 IDX:5 CID:77 TXGRANT:0 TXPERM:0 ENCC:0 TPTI:1 SSI2:2630002 RX:0 TETMON_end
+TRA 5
+TRA 5
+TRA 5
+---
+TRA 5
+TRA 5
+---
+TETMON_begin FUNC:DRELEASEDEC SSI:9001 CID:77 NID:12 [Call time-out] RX:0 TETMON_end
+---
+---

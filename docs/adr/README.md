@@ -24,4 +24,5 @@ Format: one file per decision, `NNNN-short-title.md`, sections *Status*, *Contex
 | [0018](0018-digital-voice-plan.md) | Digital voice plan: M17 bundled, everything encumbered stays external | accepted |
 | [0019](0019-oidc-login.md) | Optional OpenID Connect login | accepted |
 | [0020](0020-multi-device.md) | Several local SDRs, one daemon each | accepted |
+| [0021](0021-tetra-receive-plugin.md) | TETRA receive plugin: own demodulator, osmo-tetra's tetra-rx, the user's ETSI codec | accepted |
 | [0022](0022-plugin-ui-panels.md) | Plugin web panels in a sandboxed frame | accepted |

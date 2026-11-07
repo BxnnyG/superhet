@@ -1,0 +1,55 @@
+[
+  {
+    "data": {
+      "cc": 0,
+      "dl_hz": 392012500,
+      "encrypted_traffic_seen": false,
+      "encryption": "air-interface",
+      "la": 1,
+      "mcc": 262,
+      "mnc": 42,
+      "ul_hz": 382012500
+    },
+    "type": "tetra.cell",
+    "v": 1
+  },
+  {
+    "data": {
+      "cc": 0,
+      "dl_hz": 392012500,
+      "encrypted_traffic_seen": true,
+      "encryption": "air-interface",
+      "la": 1,
+      "mcc": 262,
+      "mnc": 42,
+      "ul_hz": 382012500
+    },
+    "type": "tetra.cell",
+    "v": 1
+  },
+  {
+    "data": {
+      "call": "1700000001800-u8",
+      "dst": 9002,
+      "encrypted": true,
+      "usage": 8
+    },
+    "type": "tetra.call.start",
+    "v": 1
+  },
+  {
+    "data": {
+      "audio_ms": 0,
+      "call": "1700000001800-u8",
+      "dst": 9002,
+      "duration_ms": 800,
+      "encrypted": true,
+      "muted": true,
+      "reason": "lost",
+      "usage": 8,
+      "voice_ms": 180
+    },
+    "type": "tetra.call.end",
+    "v": 1
+  }
+]

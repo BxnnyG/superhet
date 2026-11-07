@@ -104,3 +104,21 @@ fn dsd() {
     assert_eq!(field(json!({"frame_flag": "-o"})), "frame_flag");
     assert_eq!(field(json!({"x": 1})), "x");
 }
+
+#[test]
+fn tetra() {
+    assert_eq!(check("tetra", &json!({})), Ok(()));
+    assert_eq!(
+        check(
+            "tetra",
+            &json!({"audio": false, "mute_encrypted": false, "invert": true})
+        ),
+        Ok(())
+    );
+    let field = |config: Value| check("tetra", &config).expect_err("refused").0;
+    assert_eq!(field(json!({"audio": "yes"})), "audio");
+    assert_eq!(field(json!({"invert": 1})), "invert");
+    // The codec location is an environment variable of the host, never a per-instance setting.
+    assert_eq!(field(json!({"codec_dir": "/tmp"})), "codec_dir");
+    assert_eq!(field(json!({"x": 1})), "x");
+}

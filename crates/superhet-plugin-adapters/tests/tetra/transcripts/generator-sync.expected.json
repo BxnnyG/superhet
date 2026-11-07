@@ -1,0 +1,13 @@
+[
+  {
+    "data": {
+      "cc": 0,
+      "encrypted_traffic_seen": false,
+      "encryption": "unknown",
+      "mcc": 262,
+      "mnc": 42
+    },
+    "type": "tetra.cell",
+    "v": 1
+  }
+]

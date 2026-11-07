@@ -1,0 +1,81 @@
+[
+  {
+    "data": {
+      "cc": 0,
+      "encrypted_traffic_seen": false,
+      "encryption": "unknown",
+      "mcc": 262,
+      "mnc": 42
+    },
+    "type": "tetra.cell",
+    "v": 1
+  },
+  {
+    "data": {
+      "cc": 0,
+      "dl_hz": 392012500,
+      "encrypted_traffic_seen": false,
+      "encryption": "unknown",
+      "la": 1,
+      "mcc": 262,
+      "mnc": 42,
+      "services": [
+        "priority-cell",
+        "system-wide-services",
+        "voice"
+      ],
+      "ul_hz": 382012500
+    },
+    "type": "tetra.cell",
+    "v": 1
+  },
+  {
+    "data": {
+      "cc": 0,
+      "dl_hz": 392012500,
+      "encrypted_traffic_seen": false,
+      "encryption": "none",
+      "la": 1,
+      "mcc": 262,
+      "mnc": 42,
+      "services": [
+        "priority-cell",
+        "system-wide-services",
+        "voice"
+      ],
+      "ul_hz": 382012500
+    },
+    "type": "tetra.cell",
+    "v": 1
+  },
+  {
+    "data": {
+      "call": "1700000002000-77",
+      "cid": 77,
+      "dst": 9001,
+      "encrypted": false,
+      "src": 2630001,
+      "usage": 5
+    },
+    "type": "tetra.call.start",
+    "v": 1
+  },
+  {
+    "data": {
+      "audio_ms": 480,
+      "call": "1700000002000-77",
+      "cid": 77,
+      "detail": "Call time-out",
+      "dst": 9001,
+      "duration_ms": 3100,
+      "encrypted": false,
+      "reason": "release",
+      "src": 2630001,
+      "talker": 2630002,
+      "usage": 5,
+      "voice_ms": 480
+    },
+    "type": "tetra.call.end",
+    "v": 1
+  }
+]

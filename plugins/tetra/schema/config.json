@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TETRA instance configuration",
+  "type": "object",
+  "properties": {
+    "audio": {
+      "description": "Decode voice when the ETSI codec is installed. Off: signalling only, the codec is not started.",
+      "type": "boolean"
+    },
+    "mute_encrypted": {
+      "description": "Do not play the audio of calls flagged as encrypted.",
+      "type": "boolean"
+    },
+    "invert": {
+      "description": "Conjugate the input, for a receiver chain that mirrors the spectrum.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}

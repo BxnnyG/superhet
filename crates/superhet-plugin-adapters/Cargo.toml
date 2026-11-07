@@ -20,11 +20,9 @@ serde_json = "1"
 # Pure-Rust MP3 decoder (MPL-2.0): welle-cli hands the audio of a DAB service over as an MP3
 # stream, the DAB plugin decodes it to PCM for the host.
 symphonia = { version = "0.6", default-features = false, features = ["mp3"] }
+num-complex.workspace = true
 superhet-dsp.workspace = true
 superhet-plugin-protocol.workspace = true
-
-[dev-dependencies]
-num-complex.workspace = true
 
 [lints]
 workspace = true
