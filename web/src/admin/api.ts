@@ -194,6 +194,27 @@ export interface Limits {
   operatorMaxVfos: number;
 }
 
+/** Who may use one device (ADR-0023). Admins always may; guests count as listeners. */
+export interface DevicePolicy {
+  device: string;
+  /** Lowest role that may see and listen. */
+  viewRole: Role;
+  /** Lowest role that may tune, open receivers, lock, load profiles and run plugins. */
+  controlRole: Role;
+  guestsVisible: boolean;
+  /** When not empty: only these accounts (and admins), no guests. */
+  allowedUsers: number[];
+}
+
+/** The policy of a device nobody has restricted: today's open behaviour. */
+export const openPolicy = (device: string): DevicePolicy => ({
+  device,
+  viewRole: "listener",
+  controlRole: "listener",
+  guestsVisible: true,
+  allowedUsers: [],
+});
+
 // ---------- parsing ----------
 
 function bad(what: string): never {
@@ -608,6 +629,26 @@ export function parseLimits(raw: unknown): Limits {
   };
 }
 
+export function parseDevicePolicy(raw: unknown): DevicePolicy {
+  if (!isJson(raw) || typeof raw.device !== "string") return bad("device policy");
+  return {
+    device: raw.device,
+    viewRole: isRole(raw.view_role) ? raw.view_role : "listener",
+    controlRole: isRole(raw.control_role) ? raw.control_role : "listener",
+    guestsVisible: raw.guests_visible !== false,
+    allowedUsers: list(raw.allowed_users).filter((v): v is number => typeof v === "number"),
+  };
+}
+
+export function devicePolicyBody(p: DevicePolicy): Json {
+  return {
+    view_role: p.viewRole,
+    control_role: p.controlRole,
+    guests_visible: p.guestsVisible,
+    allowed_users: p.allowedUsers,
+  };
+}
+
 // ---------- queries ----------
 
 /** Query string of the audit filters (also used by the export link). */
@@ -671,6 +712,12 @@ export interface AdminApi {
   putAuditSettings(s: AuditSettings): Promise<AuditSettings>;
   getLimits(signal?: AbortSignal): Promise<Limits>;
   putLimits(l: Limits): Promise<Limits>;
+  /** The stored per-device policies; devices without an entry are open. */
+  getDevicePolicies(signal?: AbortSignal): Promise<DevicePolicy[]>;
+  /** Resolves with the saved policy and how many sessions lost the device and were ended. */
+  putDevicePolicy(p: DevicePolicy): Promise<{ policy: DevicePolicy; endedSessions: number }>;
+  /** Back to the open default. */
+  resetDevicePolicy(device: string): Promise<DevicePolicy>;
   getClientReportPolicy(signal?: AbortSignal): Promise<ClientReportPolicy>;
   putClientReportPolicy(p: ClientReportPolicy): Promise<ClientReportPolicy>;
   getOidc(signal?: AbortSignal): Promise<OidcView>;
@@ -815,6 +862,22 @@ export function createAdminApi(fetchImpl?: FetchLike): AdminApi {
     },
     async getLimits(signal) {
       return parseLimits((await call("GET", `${ADMIN}/limits`, undefined, signal)).body);
+    },
+    async getDevicePolicies(signal) {
+      const r = await call("GET", `${ADMIN}/device-policies`, undefined, signal);
+      return isJson(r.body) ? list(r.body.policies).map(parseDevicePolicy) : bad("device policies");
+    },
+    async putDevicePolicy(p) {
+      const r = await call("PUT", `${ADMIN}/device-policies/${id(p.device)}`, devicePolicyBody(p));
+      if (!isJson(r.body)) return bad("device policy");
+      return {
+        policy: parseDevicePolicy(r.body.policy),
+        endedSessions: num(r.body.ended_sessions),
+      };
+    },
+    async resetDevicePolicy(device) {
+      const r = await call("DELETE", `${ADMIN}/device-policies/${id(device)}`);
+      return isJson(r.body) ? parseDevicePolicy(r.body.policy) : bad("device policy");
     },
     async putLimits(l) {
       return parseLimits(

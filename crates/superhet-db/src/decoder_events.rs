@@ -91,6 +91,8 @@ pub struct Query {
     pub kinds: Vec<String>,
     /// Only this device.
     pub device: Option<String>,
+    /// Never these devices (per-device access policy: devices the caller may not see).
+    pub exclude_devices: Vec<String>,
     /// Only this VFO.
     pub vfo: Option<i32>,
     /// Only this source ([`CORE`] or a plugin id).
@@ -173,6 +175,7 @@ pub async fn list(pool: &PgPool, q: &Query) -> Result<Vec<Event>, Error> {
            AND ($6::text IS NULL OR strpos(lower(value), lower($6)) > 0) \
            AND ($7::bigint IS NULL OR (ts, id) < ({after}, $8::bigint)) \
            AND ($10::text IS NULL OR source = $10) \
+           AND (cardinality($11::text[]) = 0 OR NOT (device = ANY($11))) \
          ORDER BY ts DESC, id DESC LIMIT $9",
         from = ts_of("$4"),
         to = ts_of("$5"),
@@ -189,6 +192,7 @@ pub async fn list(pool: &PgPool, q: &Query) -> Result<Vec<Event>, Error> {
         .bind(q.after.map_or(0, |(_, id)| id))
         .bind(q.limit.clamp(1, 10_000))
         .bind(&q.source)
+        .bind(&q.exclude_devices)
         .fetch_all(pool)
         .await?;
     Ok(rows.iter().map(event).collect::<Result<_, _>>()?)
@@ -200,6 +204,18 @@ pub async fn list(pool: &PgPool, q: &Query) -> Result<Vec<Event>, Error> {
 /// Fails if the query fails.
 pub async fn clear(pool: &PgPool) -> Result<u64, Error> {
     let done = sqlx::query("DELETE FROM superhet.decoder_events")
+        .execute(pool)
+        .await?;
+    Ok(done.rows_affected())
+}
+
+/// Delete every event except those of the given devices. Returns how many rows went away.
+///
+/// # Errors
+/// Fails if the query fails.
+pub async fn clear_except(pool: &PgPool, keep_devices: &[String]) -> Result<u64, Error> {
+    let done = sqlx::query("DELETE FROM superhet.decoder_events WHERE NOT (device = ANY($1))")
+        .bind(keep_devices)
         .execute(pool)
         .await?;
     Ok(done.rows_affected())

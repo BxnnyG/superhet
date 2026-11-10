@@ -10,6 +10,7 @@ mod bookmarks;
 mod channel_plans;
 mod clientinfo;
 mod decoder_events;
+mod device_access;
 mod device_list;
 mod devices;
 mod hub;

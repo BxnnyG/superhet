@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { usePermissions } from "../auth/context";
-import { NOT_YOUR_VFO, canModifyVfo } from "../auth/permissions";
+import { canModifyVfo, notEditableReason } from "../auth/permissions";
 import type { AudioController, AudioSnapshot } from "../audio/controller";
 import { DigitalModeControl } from "../digital/DigitalModeControl";
 import { claimBadge, claimHint, type ClaimOwner } from "../plugins/claim";
@@ -84,7 +84,7 @@ export function ReceiverPanel({
           />
           <span className="text-sm font-medium">VFO {vfo.id}</span>
           <Badge tone="accent">{MODE_LABEL[vfo.mode]}</Badge>
-          {readOnly && <Badge title={NOT_YOUR_VFO}>read-only</Badge>}
+          {readOnly && <Badge title={notEditableReason(perms)}>read-only</Badge>}
           {vfo.status === "paused" &&
             (claim != null ? (
               <Badge tone="warn" title={claimHint(claim, centreHz ?? null, vfo.freqHz)}>

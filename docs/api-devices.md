@@ -26,6 +26,12 @@ answer falls back to the stored document with `"online":false` (a stopped or cra
 `center_hz`/`sample_rate` are then `null` if nothing was stored). No VFOs or lock holders are
 included. `502` the state bucket cannot be read, `503` no bus. At most 64 devices.
 
+Per-device access policies (ADR-0023, `docs/api-users.md`) apply: the list holds only devices the
+caller may see, each entry carries `"access":{"view":true,"control":bool}` (`control:false` = look and
+listen only; tuning, VFOs, lock, profiles and plugins are refused). Every `/devices/{dev}/...` route and
+every WebSocket (`dev=`) answers `403` with `code` `device_forbidden` (device closed to the caller) or
+`device_read_only` (a change on a read-only device); an invalid or repeated id is `400`.
+
 ### `GET /api/v1/devices/{dev}/state`
 
 Returns the state object (below). Read from the JetStream KV bucket `STATE` (key `dev.<dev>`),

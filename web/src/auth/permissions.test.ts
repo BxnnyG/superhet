@@ -8,7 +8,10 @@ import {
   modeAllowed,
   ownVfoCount,
   permissionsFor,
+  readOnlyOnDevice,
   roleLabel,
+  notEditableReason,
+  DEVICE_READ_ONLY,
 } from "./permissions";
 import { GUEST_LIMITS, accountStatus, guestStatus } from "./testing";
 
@@ -159,5 +162,35 @@ describe("guest policy", () => {
     expect(frequencyAllowed(ranged, 100e6)).toBe(true);
     expect(frequencyAllowed(ranged, 145e6)).toBe(false);
     expect(frequencyAllowed(guest, 145e6)).toBe(true);
+  });
+});
+
+describe("read-only device", () => {
+  it("takes away everything that changes the device, even from an admin", () => {
+    for (const p of [admin, operator, listener]) {
+      const ro = readOnlyOnDevice(p);
+      expect(ro).toMatchObject({
+        deviceReadOnly: true,
+        canTune: false,
+        canLock: false,
+        canForceUnlock: false,
+        canProfiles: false,
+        canClearHistory: false,
+        canUsePlugins: false,
+        seesAllVfos: false,
+      });
+      // Not even the own receivers can be changed, but they stay audible.
+      expect(canModifyVfo(ro, { mine: true })).toBe(false);
+      expect(canListenVfo(ro, { mine: true })).toBe(true);
+      expect(notEditableReason(ro)).toBe(DEVICE_READ_ONLY);
+    }
+  });
+
+  it("keeps what does not belong to a device", () => {
+    const ro = readOnlyOnDevice(operator);
+    expect(ro.canEditBookmarks).toBe(true);
+    expect(ro.role).toBe("operator");
+    expect(readOnlyOnDevice(admin).canAdmin).toBe(true);
+    expect(notEditableReason(operator)).toBe("This receiver belongs to someone else");
   });
 });

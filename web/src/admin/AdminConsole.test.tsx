@@ -8,6 +8,7 @@ import {
   DEFAULT_CLIENT_REPORT_POLICY,
   DEFAULT_GUEST_POLICY,
   DEFAULT_OIDC_SETTINGS,
+  openPolicy,
   type AdminApi,
   type AuditEvent,
   type Invite,
@@ -240,6 +241,11 @@ function fakeApi(over: Partial<AdminApi> = {}): AdminApi {
     putAuditSettings: vi.fn().mockImplementation((s) => Promise.resolve(s)),
     getLimits: vi.fn().mockResolvedValue({ listenerMaxVfos: 4, operatorMaxVfos: 0 }),
     putLimits: vi.fn().mockImplementation((l) => Promise.resolve(l)),
+    getDevicePolicies: vi.fn().mockResolvedValue([]),
+    putDevicePolicy: vi
+      .fn()
+      .mockImplementation((p) => Promise.resolve({ policy: p, endedSessions: 0 })),
+    resetDevicePolicy: vi.fn().mockImplementation((device) => Promise.resolve(openPolicy(device))),
     getClientReportPolicy: vi.fn().mockResolvedValue(DEFAULT_CLIENT_REPORT_POLICY),
     putClientReportPolicy: vi.fn().mockImplementation((p) => Promise.resolve(p)),
     getOidc: vi.fn().mockResolvedValue({
@@ -288,6 +294,7 @@ describe("console shell", () => {
       "Users and invites",
       "Live sessions",
       "Audit log",
+      "Device access",
       "Plugins",
       "Guest access",
       "Audit settings",

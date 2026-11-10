@@ -7,6 +7,7 @@
 
 mod audit_routes;
 mod bans;
+mod device_policies;
 mod oidc_routes;
 mod report;
 mod sessions;
@@ -108,6 +109,13 @@ pub fn router(state: AdminState) -> Router {
             get(oidc_routes::get).put(oidc_routes::put).layer(limit),
         )
         .route("/api/v1/admin/oidc/test", post(oidc_routes::test))
+        .route("/api/v1/admin/device-policies", get(device_policies::list))
+        .route(
+            "/api/v1/admin/device-policies/{device}",
+            axum::routing::put(device_policies::put)
+                .delete(device_policies::reset)
+                .layer(limit),
+        )
         .route(
             "/api/v1/admin/limits",
             get(settings_routes::get_limits)
