@@ -212,3 +212,98 @@ async fn an_oidc_admin_counts_only_while_enabled() {
         .expect("demote");
     assert!(!oidc::has_active_oidc_admin(&db.pool).await.expect("q"));
 }
+
+async fn session(pool: &superhet_db::PgPool, tag: &str, user: i64, oidc_sid: Option<(&str, &str)>) {
+    match oidc_sid {
+        Some((issuer, sid)) => oidc::create_session(
+            pool,
+            &key(tag),
+            user,
+            (None, None, None),
+            &oidc::SessionOidc {
+                issuer,
+                sid: Some(sid),
+                id_token: Some("header.payload.sig"),
+            },
+        )
+        .await
+        .expect("oidc session"),
+        None => superhet_db::auth::create_session(pool, &key(tag), user, None, None)
+            .await
+            .expect("password session"),
+    }
+}
+
+/// Session ids are 32 bytes.
+fn key(tag: &str) -> Vec<u8> {
+    let mut id = tag.as_bytes().to_vec();
+    id.resize(32, 0);
+    id
+}
+
+async fn alive(pool: &superhet_db::PgPool, tag: &str) -> bool {
+    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM superhet.sessions WHERE id = $1)")
+        .bind(key(tag))
+        .fetch_one(pool)
+        .await
+        .expect("query")
+}
+
+#[tokio::test]
+async fn logout_ends_exactly_the_matching_oidc_sessions() {
+    let db = db!("oidc_logout");
+    let p = &db.pool;
+    let anna = local_user(p, "anna", Role::Operator).await;
+    let bob = local_user(p, "bob", Role::Listener).await;
+    oidc::link(p, anna, ISS, "sub-a", None).await.expect("link");
+    oidc::link(p, bob, ISS, "sub-b", None).await.expect("link");
+    session(p, "a-sid1", anna, Some((ISS, "sid-1"))).await;
+    session(p, "a-sid2", anna, Some((ISS, "sid-2"))).await;
+    session(p, "a-pw", anna, None).await;
+    session(p, "b-sid1", bob, Some((ISS, "sid-1"))).await;
+    session(p, "b-other", bob, Some(("https://other.example", "sid-1"))).await;
+
+    // Nothing named: nothing ends.
+    let none = oidc::end_sessions_for_logout(p, ISS, None, None).await;
+    assert_eq!(none.expect("q").len(), 0);
+    // A sid ends that provider session for whoever holds it, at this issuer only.
+    let by_sid = oidc::end_sessions_for_logout(p, ISS, Some("sid-1"), None).await;
+    assert_eq!(by_sid.expect("q").len(), 2);
+    assert!(!alive(p, "a-sid1").await && !alive(p, "b-sid1").await);
+    assert!(alive(p, "a-sid2").await && alive(p, "b-other").await);
+    // sub and sid together must both match.
+    let mismatch = oidc::end_sessions_for_logout(p, ISS, Some("sid-2"), Some("sub-b")).await;
+    assert_eq!(mismatch.expect("q").len(), 0);
+    // A subject alone ends the user's OIDC sessions at that issuer, not the password session.
+    let by_sub = oidc::end_sessions_for_logout(p, ISS, None, Some("sub-a")).await;
+    assert_eq!(by_sub.expect("q").len(), 1);
+    assert!(!alive(p, "a-sid2").await && alive(p, "a-pw").await);
+    let unknown = oidc::end_sessions_for_logout(p, ISS, None, Some("unknown")).await;
+    assert_eq!(unknown.expect("q").len(), 0);
+}
+
+#[tokio::test]
+async fn ending_a_session_reports_its_oidc_login() {
+    let db = db!("oidc_end");
+    let p = &db.pool;
+    let anna = local_user(p, "anna", Role::Operator).await;
+    session(p, "oidc", anna, Some((ISS, "sid-1"))).await;
+    session(p, "pw", anna, None).await;
+    let ended = oidc::end_session(p, &key("oidc")).await.expect("end");
+    assert_eq!(
+        ended,
+        Some(oidc::EndedSession {
+            issuer: Some(ISS.to_owned()),
+            id_token: Some("header.payload.sig".to_owned()),
+        })
+    );
+    let ended = oidc::end_session(p, &key("pw")).await.expect("end");
+    assert_eq!(
+        ended,
+        Some(oidc::EndedSession {
+            issuer: None,
+            id_token: None
+        })
+    );
+    assert_eq!(oidc::end_session(p, &key("pw")).await.expect("again"), None);
+}

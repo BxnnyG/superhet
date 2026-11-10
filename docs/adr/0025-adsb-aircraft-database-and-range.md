@@ -1,4 +1,4 @@
-# ADR-0023: ADS-B aircraft database and range statistics
+# ADR-0025: ADS-B aircraft database and range statistics
 
 **Status:** accepted (2026-11-10)
 

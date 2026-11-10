@@ -19,7 +19,7 @@ as a live map and table in the web UI and as events in the decoder history.
   when an aircraft first shows a callsign or a position, when one of them first appears later,
   and then at most once per `event_interval_s` per aircraft. Sparse on purpose: a track log of
   every aircraft would be millions of rows a day.
-- **Aircraft database and range statistics** (ADR-0023): registration, type, airline and country
+- **Aircraft database and range statistics** (ADR-0025): registration, type, airline and country
   from an openly licensed database the admin imports, and the receiver's range per direction and
   altitude (sections below).
 - **Not done:** no route or flight-plan data, no MLAT, no UAT (978 MHz), no recording of tracks.
@@ -137,7 +137,7 @@ anything is fetched.
   Data Commons Attribution License: free to use and share with credit; the ADS-B view shows the
   source and licence link under the table). Other candidates were checked and not used: tar1090-db
   has no licence and mixes in the ADSBexchange database, the OpenSky aircraft database calls itself
-  "unlicensed" and out of date, ADSBexchange's file has no verifiable licence (ADR-0023).
+  "unlicensed" and out of date, ADSBexchange's file has no verifiable licence (ADR-0025).
 - **Download** (admin button): the API fetches `https://raw.githubusercontent.com/Mictronics/aircraft-database/main/indexedDB.zip`
   (about 3.5 MB, size-capped, redirects not followed), keeps it under `SUPERHET_AIRCRAFT_DB_DIR`
   (default `/data/aircraft-db`) and imports it in the background. Press it again to update.

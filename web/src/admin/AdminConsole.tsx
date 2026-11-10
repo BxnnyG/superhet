@@ -11,6 +11,7 @@ import {
   IconButton,
   KeyIcon,
   ListIcon,
+  LockIcon,
   Logo,
   MonitorIcon,
   PlaneIcon,
@@ -23,6 +24,7 @@ import {
   cn,
 } from "../ui";
 import { createAdsbApi, type AdsbApi } from "../adsb/api";
+import { createDeviceListApi, type DeviceListApi } from "../devices/api";
 import { createPluginApi, type PluginApi } from "../plugins/api";
 import { createAdminApi, type AdminApi } from "./api";
 import { AircraftDbSection } from "./AircraftDbSection";
@@ -30,6 +32,7 @@ import { AuditSection } from "./AuditSection";
 import { AuditSettingsSection } from "./AuditSettingsSection";
 import { BansSection } from "./BansSection";
 import { ClientReportSection } from "./ClientReportSection";
+import { DevicePoliciesSection } from "./DevicePoliciesSection";
 import { GuestSection } from "./GuestSection";
 import { LimitsSection } from "./LimitsSection";
 import { OidcSection } from "./OidcSection";
@@ -48,6 +51,7 @@ export const ADMIN_SECTIONS: readonly NavItem[] = [
   { id: "sessions", label: "Live sessions", Icon: ActivityIcon },
   { id: "audit", label: "Audit log", Icon: ListIcon },
   { id: "bans", label: "Address bans", Icon: BanIcon },
+  { id: "devices", label: "Device access", Icon: LockIcon },
   { id: "plugins", label: "Plugins", Icon: PlugIcon },
   { id: "adsb-data", label: "ADS-B data", Icon: PlaneIcon },
   { id: "guests", label: "Guest access", Icon: GlobeIcon },
@@ -72,6 +76,7 @@ interface Props {
   api?: AdminApi;
   pluginApi?: PluginApi;
   adsbApi?: AdsbApi;
+  deviceApi?: DeviceListApi;
 }
 
 /**
@@ -83,10 +88,12 @@ export default function AdminConsole({
   api: injected,
   pluginApi: injectedPlugins,
   adsbApi: injectedAdsb,
+  deviceApi: injectedDevices,
 }: Props) {
   const api = useMemo(() => injected ?? createAdminApi(), [injected]);
   const pluginApi = useMemo(() => injectedPlugins ?? createPluginApi(), [injectedPlugins]);
   const adsbApi = useMemo(() => injectedAdsb ?? createAdsbApi(), [injectedAdsb]);
+  const deviceApi = useMemo(() => injectedDevices ?? createDeviceListApi(), [injectedDevices]);
   const auth = useAuth();
   const current = resolveSection(section);
   // `/admin` and unknown sections canonicalise to the first section's path.
@@ -154,6 +161,7 @@ export default function AdminConsole({
               api={api}
               pluginApi={pluginApi}
               adsbApi={adsbApi}
+              deviceApi={deviceApi}
               selfId={auth?.userId ?? null}
             />
           </div>
@@ -200,12 +208,14 @@ function SectionBody({
   api,
   pluginApi,
   adsbApi,
+  deviceApi,
   selfId,
 }: {
   id: string;
   api: AdminApi;
   pluginApi: PluginApi;
   adsbApi: AdsbApi;
+  deviceApi: DeviceListApi;
   selfId: number | null;
 }) {
   switch (id) {
@@ -217,6 +227,8 @@ function SectionBody({
       return <AuditSection api={api} />;
     case "bans":
       return <BansSection api={api} />;
+    case "devices":
+      return <DevicePoliciesSection api={api} deviceApi={deviceApi} />;
     case "plugins":
       return <PluginsSection api={pluginApi} />;
     case "adsb-data":

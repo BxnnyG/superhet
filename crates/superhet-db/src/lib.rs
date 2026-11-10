@@ -7,6 +7,7 @@ pub mod bans;
 pub mod bookmarks;
 pub mod channel_plans;
 pub mod decoder_events;
+pub mod device_policies;
 pub mod oidc;
 pub mod plugin_instances;
 pub mod profiles;

@@ -48,6 +48,8 @@ while an instance of the plugin exists (stop it first).
 
 ## Instances
 
+Per-device access (ADR-0023): instance lists (`/plugin-instances`, `/plugin-streams`) leave out instances on devices the caller may not see; `GET` of one instance and its `status`/`media` need view access to the instance's device, starting an instance with a `device` and stop / restart / reconfigure / control need change access (`403 device_forbidden` / `device_read_only`). Instances without a device are not device-bound.
+
 `GET /api/v1/plugin-streams` – listening view for listeners (and for guests while the guest policy shows decoder output): `{"ok":true,"instances":[...]}` with only `id`, `plugin_id`, `device`, `vfo`, `freq_hz`, `exclusive`, `state`, `audio_vfo` and `updated_unix_ms` of every instance that is not stopped. Never the configuration, process id, error text or counters. The plugin's audio is the pseudo VFO `audio_vfo` on `/api/v1/ws/audio`, open to every role; the call log and "now talking" come from `/status` and the decoder history. Starting, stopping, reconfiguring and the full records below stay `operator`.
 
 `GET /api/v1/plugin-instances` – `{"instances":[InstanceInfo]}`;
@@ -115,7 +117,7 @@ plugin id, `kind` the event type; filter with `source=` and `kind=`. The live fe
 
 ## ADS-B aircraft database and range statistics
 
-Added by ADR-0023 (`docs/plugins-adsb.md`). Errors use the usual `{"v":1,"ok":false,"code","error"}`.
+Added by ADR-0025 (`docs/plugins-adsb.md`). Errors use the usual `{"v":1,"ok":false,"code","error"}`.
 
 | Route | Access | Purpose |
 |---|---|---|

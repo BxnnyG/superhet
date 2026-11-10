@@ -1,5 +1,5 @@
 import { usePermissions } from "../auth/context";
-import { NEEDS_OPERATOR } from "../auth/permissions";
+import { DEVICE_READ_ONLY, NEEDS_OPERATOR } from "../auth/permissions";
 import type { LockHolder } from "../spectrum/api";
 import { foreignUserLock, holdsUserLock, lockedBy, onlyUserLock } from "../state/locks";
 import { Badge, IconButton, LockIcon, UnlockIcon } from "../ui";
@@ -25,7 +25,8 @@ export function TuningLock({ holders, disabled, onToggle }: Props) {
   const force = !mine && foreign && perms.canForceUnlock;
   let tip: string;
   if (!perms.canLock) {
-    tip = locked ? `${lockedBy(holders)}. ${NEEDS_OPERATOR} can change it` : NEEDS_OPERATOR;
+    const why = perms.deviceReadOnly ? DEVICE_READ_ONLY : NEEDS_OPERATOR;
+    tip = locked ? `${lockedBy(holders)}. ${why}` : why;
   } else if (!locked) {
     tip = "Lock tuning: keep the centre and sample rate fixed";
   } else if (mine) {

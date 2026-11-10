@@ -103,7 +103,12 @@ export interface AuthClient {
   status(signal?: AbortSignal): Promise<AuthStatus>;
   setup(req: { username: string; password: string; setupToken: string }): Promise<void>;
   login(req: { username: string; password: string }): Promise<void>;
-  logout(): Promise<void>;
+  /**
+   * Ends the session. Resolves to the identity provider's end-session URL when the session came
+   * from single sign-on and the provider should end its session too; the caller sends the
+   * browser there.
+   */
+  logout(): Promise<string | null>;
   changePassword(req: { currentPassword: string; newPassword: string }): Promise<void>;
   /** Start (or resume) a guest session; the reply carries the policy limits. */
   guestStart(): Promise<GuestLimits>;
@@ -245,6 +250,17 @@ async function readBody(res: Response): Promise<Rec> {
   }
 }
 
+/** The provider's end-session URL if it is a plain http(s) URL, else null. */
+export function providerLogoutUrl(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  try {
+    const url = new URL(raw);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 function retryAfterSeconds(res: Response): number {
   const n = Number(res.headers.get("Retry-After"));
   return Number.isFinite(n) && n > 0 ? Math.ceil(n) : DEFAULT_RETRY_S;
@@ -338,7 +354,10 @@ export function createAuthClient(fetchImpl: typeof fetch = (...a) => fetch(...a)
       await expectOk(await call("/api/v1/auth/login", "POST", { username, password }));
     },
     async logout() {
-      await expectOk(await call("/api/v1/auth/logout", "POST", {}));
+      const res = await call("/api/v1/auth/logout", "POST", {});
+      await expectOk(res);
+      if (res.status === 204) return null;
+      return providerLogoutUrl((await readBody(res)).end_session_url);
     },
     async changePassword({ currentPassword, newPassword }) {
       const res = await call("/api/v1/auth/password", "POST", {

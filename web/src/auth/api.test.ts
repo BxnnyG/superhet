@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AuthError, createAuthClient, parseStatus } from "./api";
+import { AuthError, createAuthClient, parseStatus, providerLogoutUrl } from "./api";
 import { apiFetch, isSessionLost, onSessionLost, resetSession, verifySession } from "./session";
 import { passwordStrength } from "./password";
 
@@ -23,6 +23,25 @@ describe("auth client", () => {
       guest: { enabled: false, privacyText: null },
     });
     expect(() => parseStatus({})).toThrow(AuthError);
+  });
+
+  it("logs out without a provider redirect for password sessions", async () => {
+    const f = vi.fn().mockResolvedValue(reply(204));
+    expect(await createAuthClient(f).logout()).toBeNull();
+  });
+
+  it("returns the provider's end-session URL for single sign-on sessions", async () => {
+    const url = "https://idp.example/logout?state=s";
+    const f = vi.fn().mockResolvedValue(reply(200, { end_session_url: url }));
+    expect(await createAuthClient(f).logout()).toBe(url);
+  });
+
+  it("only follows plain http(s) provider URLs", () => {
+    expect(providerLogoutUrl("https://idp.example/x")).toBe("https://idp.example/x");
+    expect(providerLogoutUrl("javascript:alert(1)")).toBeNull();
+    expect(providerLogoutUrl("not a url")).toBeNull();
+    expect(providerLogoutUrl(42)).toBeNull();
+    expect(providerLogoutUrl(undefined)).toBeNull();
   });
 
   it("posts credentials as JSON with same-origin credentials", async () => {

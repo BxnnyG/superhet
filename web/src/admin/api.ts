@@ -194,6 +194,27 @@ export interface Limits {
   operatorMaxVfos: number;
 }
 
+/** Who may use one device (ADR-0023). Admins always may; guests count as listeners. */
+export interface DevicePolicy {
+  device: string;
+  /** Lowest role that may see and listen. */
+  viewRole: Role;
+  /** Lowest role that may tune, open receivers, lock, load profiles and run plugins. */
+  controlRole: Role;
+  guestsVisible: boolean;
+  /** When not empty: only these accounts (and admins), no guests. */
+  allowedUsers: number[];
+}
+
+/** The policy of a device nobody has restricted: today's open behaviour. */
+export const openPolicy = (device: string): DevicePolicy => ({
+  device,
+  viewRole: "listener",
+  controlRole: "listener",
+  guestsVisible: true,
+  allowedUsers: [],
+});
+
 // ---------- parsing ----------
 
 function bad(what: string): never {
@@ -408,6 +429,10 @@ export interface OidcSettings {
   linkByEmail: boolean;
   syncRoles: boolean;
   localLogin: boolean;
+  /** Signing out of Superhet also ends the session at the provider (when it supports that). */
+  rpLogout: boolean;
+  /** Accept the provider's back-channel logout requests. */
+  backchannelLogout: boolean;
 }
 
 export interface OidcView {
@@ -416,6 +441,10 @@ export interface OidcView {
   source: "env" | "database";
   /** To register at the provider; null until the public URL is set. */
   redirectUrl: string | null;
+  /** To register as post-logout redirect URI; null until the public URL is set. */
+  postLogoutUrl: string | null;
+  /** To register as back-channel logout URL; null until the public URL is set. */
+  backchannelUrl: string | null;
   clientSecretSet: boolean;
   oidcAdminExists: boolean;
   /** Password logins are accepted right now. */
@@ -427,6 +456,8 @@ export interface OidcTestResult {
   ok: boolean;
   issuer: string | null;
   error: string | null;
+  /** The provider advertises an end session endpoint (RP-initiated logout). */
+  endSession: boolean;
 }
 
 export const DEFAULT_OIDC_SETTINGS: OidcSettings = {
@@ -446,6 +477,8 @@ export const DEFAULT_OIDC_SETTINGS: OidcSettings = {
   linkByEmail: false,
   syncRoles: true,
   localLogin: true,
+  rpLogout: true,
+  backchannelLogout: true,
 };
 
 const strList = (v: unknown): string[] => list(v).filter((x): x is string => typeof x === "string");
@@ -473,9 +506,13 @@ export function parseOidcView(raw: unknown): OidcView {
       linkByEmail: o.link_by_email === true,
       syncRoles: o.sync_roles !== false,
       localLogin: o.local_login !== false,
+      rpLogout: o.rp_logout !== false,
+      backchannelLogout: o.backchannel_logout !== false,
     },
     source: raw.source === "env" ? "env" : "database",
     redirectUrl: strOrNull(raw.redirect_url),
+    postLogoutUrl: strOrNull(raw.post_logout_url),
+    backchannelUrl: strOrNull(raw.backchannel_url),
     clientSecretSet: raw.client_secret_set === true,
     oidcAdminExists: raw.oidc_admin_exists === true,
     localLoginActive: raw.local_login_active !== false,
@@ -501,12 +538,19 @@ export function oidcSettingsBody(s: OidcSettings): Json {
     link_by_email: s.linkByEmail,
     sync_roles: s.syncRoles,
     local_login: s.localLogin,
+    rp_logout: s.rpLogout,
+    backchannel_logout: s.backchannelLogout,
   };
 }
 
 export function parseOidcTest(raw: unknown): OidcTestResult {
   if (!isJson(raw)) return bad("oidc test");
-  return { ok: raw.ok === true, issuer: strOrNull(raw.issuer), error: strOrNull(raw.error) };
+  return {
+    ok: raw.ok === true,
+    issuer: strOrNull(raw.issuer),
+    error: strOrNull(raw.error),
+    endSession: raw.end_session === true,
+  };
 }
 
 export type CollectScope = "off" | "users" | "all";
@@ -585,6 +629,26 @@ export function parseLimits(raw: unknown): Limits {
   };
 }
 
+export function parseDevicePolicy(raw: unknown): DevicePolicy {
+  if (!isJson(raw) || typeof raw.device !== "string") return bad("device policy");
+  return {
+    device: raw.device,
+    viewRole: isRole(raw.view_role) ? raw.view_role : "listener",
+    controlRole: isRole(raw.control_role) ? raw.control_role : "listener",
+    guestsVisible: raw.guests_visible !== false,
+    allowedUsers: list(raw.allowed_users).filter((v): v is number => typeof v === "number"),
+  };
+}
+
+export function devicePolicyBody(p: DevicePolicy): Json {
+  return {
+    view_role: p.viewRole,
+    control_role: p.controlRole,
+    guests_visible: p.guestsVisible,
+    allowed_users: p.allowedUsers,
+  };
+}
+
 // ---------- queries ----------
 
 /** Query string of the audit filters (also used by the export link). */
@@ -648,6 +712,12 @@ export interface AdminApi {
   putAuditSettings(s: AuditSettings): Promise<AuditSettings>;
   getLimits(signal?: AbortSignal): Promise<Limits>;
   putLimits(l: Limits): Promise<Limits>;
+  /** The stored per-device policies; devices without an entry are open. */
+  getDevicePolicies(signal?: AbortSignal): Promise<DevicePolicy[]>;
+  /** Resolves with the saved policy and how many sessions lost the device and were ended. */
+  putDevicePolicy(p: DevicePolicy): Promise<{ policy: DevicePolicy; endedSessions: number }>;
+  /** Back to the open default. */
+  resetDevicePolicy(device: string): Promise<DevicePolicy>;
   getClientReportPolicy(signal?: AbortSignal): Promise<ClientReportPolicy>;
   putClientReportPolicy(p: ClientReportPolicy): Promise<ClientReportPolicy>;
   getOidc(signal?: AbortSignal): Promise<OidcView>;
@@ -792,6 +862,22 @@ export function createAdminApi(fetchImpl?: FetchLike): AdminApi {
     },
     async getLimits(signal) {
       return parseLimits((await call("GET", `${ADMIN}/limits`, undefined, signal)).body);
+    },
+    async getDevicePolicies(signal) {
+      const r = await call("GET", `${ADMIN}/device-policies`, undefined, signal);
+      return isJson(r.body) ? list(r.body.policies).map(parseDevicePolicy) : bad("device policies");
+    },
+    async putDevicePolicy(p) {
+      const r = await call("PUT", `${ADMIN}/device-policies/${id(p.device)}`, devicePolicyBody(p));
+      if (!isJson(r.body)) return bad("device policy");
+      return {
+        policy: parseDevicePolicy(r.body.policy),
+        endedSessions: num(r.body.ended_sessions),
+      };
+    },
+    async resetDevicePolicy(device) {
+      const r = await call("DELETE", `${ADMIN}/device-policies/${id(device)}`);
+      return isJson(r.body) ? parseDevicePolicy(r.body.policy) : bad("device policy");
     },
     async putLimits(l) {
       return parseLimits(

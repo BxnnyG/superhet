@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { AudioController } from "../audio/controller";
 import { usePermissions } from "../auth/context";
 import {
+  DEVICE_READ_ONLY,
   NEEDS_OPERATOR,
   canListenVfo,
   canModifyVfo,
@@ -70,6 +71,7 @@ export function createBlockReason(
   vfos: readonly { mine?: boolean }[],
   req: { freqHz: number; mode: string },
 ): string | null {
+  if (perms.deviceReadOnly) return DEVICE_READ_ONLY;
   const limit = knownVfoLimit(perms);
   if (limit !== null && ownVfoCount(vfos) >= limit) {
     return `You can open at most ${limit} ${limit === 1 ? "receiver" : "receivers"}. Close one first.`;

@@ -214,7 +214,7 @@ pub const RULES: &[Rule] = &[
     // Where the ADS-B map loads its tiles from, and the caching proxy that serves them.
     rule("GET", "/api/v1/map-config", GuestDecoder),
     rule("GET", "/api/v1/map/tiles/{z}/{x}/{y}", GuestDecoder),
-    // ADS-B aircraft database lookups and receiver range statistics (ADR-0023); importing the
+    // ADS-B aircraft database lookups and receiver range statistics (ADR-0025); importing the
     // database is an admin job (`/api/v1/admin/adsb/aircraft-db`, below).
     rule("GET", "/api/v1/adsb/aircraft-db", GuestDecoder),
     rule("GET", "/api/v1/adsb/lookup", GuestDecoder),
@@ -280,6 +280,9 @@ pub const RULES: &[Rule] = &[
     rule("GET", "/api/v1/admin/oidc", Admin),
     rule("PUT", "/api/v1/admin/oidc", Admin),
     rule("POST", "/api/v1/admin/oidc/test", Admin),
+    rule("GET", "/api/v1/admin/device-policies", Admin),
+    rule("PUT", "/api/v1/admin/device-policies/{device}", Admin),
+    rule("DELETE", "/api/v1/admin/device-policies/{device}", Admin),
     rule("GET", "/api/v1/admin/limits", Admin),
     rule("PUT", "/api/v1/admin/limits", Admin),
     rule("GET", "/api/v1/admin/client-report-policy", Admin),

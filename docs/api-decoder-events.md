@@ -10,6 +10,10 @@ Every row has a `source`: `core` for the built-in detectors above (kinds `dtmf, 
 rds_ps, rds_rt, rds_pi`), the plugin id (`org.superhet.decoder.pocsag`) for plugin events, whose
 `kind` is the plugin's event type (`pocsag.message`). See "Plugin events" below.
 
+## Device access
+
+Per-device access policies (ADR-0023) apply to reading: a `dev` filter on a device the caller may not see is `403 device_forbidden`; without a filter the list and the CSV export leave out the events of such devices, and `DELETE` removes only the events of devices the caller may change. `/api/v1/ws/events?dev=` needs view access to the device. Events of plugin instances without a device (stored with device `-`) are not device-bound.
+
 ## Write path
 
 `superhet-worker` subscribes to the live subjects of every device (`sh.v1.dev.*.tones.>`,

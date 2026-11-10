@@ -21,7 +21,7 @@ ADR-0008/0011 built local accounts, roles and server-side sessions. SCOPE and RO
 ## Consequences
 
 - `rsa`/`crypto-bigint` enter the tree with `openidconnect`; two timing advisories concern private-key operations Superhet never does, so `deny.toml` ignores them with a reason.
-- Logout is local only; there is no RP-initiated logout or back-channel logout. Sessions end by logout, expiry or revocation as before.
+- Logout was local only in this ADR; RP-initiated and back-channel logout were added in ADR-0024. Sessions end by logout, expiry, revocation or a provider logout.
 - Group changes at the provider apply at the next login, not instantly.
 - Pending logins do not survive an api restart or span several api replicas (single instance by design).
 - Tested against a mock provider in-process (`tests/oidc_live.rs`); real-provider quirks (e.g. groups in non-standard claims) are covered by the claim path setting only.

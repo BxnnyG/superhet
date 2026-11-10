@@ -83,6 +83,11 @@ export function DeviceSwitcher({ r }: { r: Receiver }) {
                         {describe(d) || "no state"}
                       </span>
                     </span>
+                    {!d.canControl && (
+                      <Badge tone="neutral" title="You can look and listen, not change it">
+                        Read-only
+                      </Badge>
+                    )}
                     {!d.online && <Badge tone="neutral">Offline</Badge>}
                   </RowButton>
                 </li>
@@ -96,9 +101,16 @@ export function DeviceSwitcher({ r }: { r: Receiver }) {
                 <span className="ml-2 font-mono text-xs text-fg-subtle">{r.device}</span>
               )}
             </span>
-            <Badge tone={st.tone} dot pulse={st.pulse}>
-              {st.label}
-            </Badge>
+            <span className="flex items-center gap-1.5">
+              {current && !current.canControl && (
+                <Badge tone="neutral" title="You can look and listen, not change it">
+                  Read-only
+                </Badge>
+              )}
+              <Badge tone={st.tone} dot pulse={st.pulse}>
+                {st.label}
+              </Badge>
+            </span>
           </div>
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
             <dt className="text-fg-subtle">Driver</dt>

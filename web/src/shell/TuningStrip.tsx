@@ -1,5 +1,5 @@
 import { usePermissions } from "../auth/context";
-import { NEEDS_OPERATOR, NOT_YOUR_VFO, canModifyVfo } from "../auth/permissions";
+import { NEEDS_OPERATOR, canModifyVfo, notEditableReason } from "../auth/permissions";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -115,7 +115,7 @@ function ActiveVfo({
         <span className="shrink-0 text-xs font-medium text-fg-muted num max-2xl:sr-only">
           VFO {vfo.id}
         </span>
-        {readOnly && <Badge title={NOT_YOUR_VFO}>read-only</Badge>}
+        {readOnly && <Badge title={notEditableReason(perms)}>read-only</Badge>}
         <IconButton
           label="Down one step"
           variant="secondary"

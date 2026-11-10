@@ -1,6 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createDeviceListApi, type DeviceInfo, type DeviceListApi } from "./api";
 import { DEVICE_STORAGE_KEY, requestedDevice, resolveDevice, validDeviceId } from "./choice";
+import { AuthContext, useAuth } from "../auth/context";
+import { readOnlyOnDevice } from "../auth/permissions";
 import { DevicesContext } from "./context";
 
 /** Refresh interval of the device list (online/offline). */
@@ -21,6 +23,7 @@ const defaultApi = createDeviceListApi();
  * device is gone) is not.
  */
 export function DevicesProvider({ children, api = defaultApi }: Props) {
+  const auth = useAuth();
   const [devices, setDevices] = useState<readonly DeviceInfo[]>([]);
   const [requested, setRequested] = useState<string | null>(() => {
     try {
@@ -71,9 +74,17 @@ export function DevicesProvider({ children, api = defaultApi }: Props) {
 
   const device = resolveDevice(requested, devices);
   const value = useMemo(() => ({ devices, device, select }), [devices, device, select]);
+  // A device the policy only lets this account look at: everything below sees read-only
+  // permissions (no tuning, VFOs, lock, profiles or plugins), the server refuses them anyway.
+  const readOnly = devices.some((d) => d.id === device && !d.canControl);
+  const scoped = useMemo(
+    () => (auth && readOnly ? { ...auth, permissions: readOnlyOnDevice(auth.permissions) } : auth),
+    [auth, readOnly],
+  );
+  const body = <Fragment key={device}>{children(device)}</Fragment>;
   return (
     <DevicesContext.Provider value={value}>
-      <Fragment key={device}>{children(device)}</Fragment>
+      {scoped ? <AuthContext.Provider value={scoped}>{body}</AuthContext.Provider> : body}
     </DevicesContext.Provider>
   );
 }

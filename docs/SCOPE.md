@@ -136,7 +136,7 @@ All decoders are plugins (separate processes). Without a codec plugin, voice dec
 | QRZ.com XML | v1 (P3) | Callsign lookup | Full data requires paid XML subscription | Optional, user's own account |
 | adsbdb.com | v1 (P3) | Aircraft by ICAO24, callsign → route | Free API, rate limited | – |
 | hexdb.io | v1 (P3) | Aircraft, routes, airports | Free API | Fallback for adsbdb |
-| Aircraft database (Mictronics, ODC-By 1.0) | v1 (P3) ✅ | ICAO24 → registration, type; airline by callsign | Admin-triggered download or file import, stored locally (ADR-0023) | OpenSky's database is unlicensed/out of date, tar1090-db and ADSBexchange have no verifiable licence |
+| Aircraft database (Mictronics, ODC-By 1.0) | v1 (P3) ✅ | ICAO24 → registration, type; airline by callsign | Admin-triggered download or file import, stored locally (ADR-0025) | OpenSky's database is unlicensed/out of date, tar1090-db and ADSBexchange have no verifiable licence |
 | planespotters.net photos | later | Aircraft photos | Free API, attribution required, non-commercial | – |
 | OurAirports | later | Airports, frequencies | Public domain CSV | – |
 | ITU MID table | v1 (P3) | MMSI → flag state | Public table, bundled as data | – |
@@ -186,7 +186,7 @@ All decoders are plugins (separate processes). Without a codec plugin, voice dec
 | Service split sdrd / api / pluginhost / worker + NATS JetStream | MVP | ADR-0007 |
 | Secrets generation, NATS per-service auth, non-root hardened containers | MVP | – |
 | Install script Debian/Arch VM with systemd | later (P5) | USB passthrough to VM must be documented |
-| Multi-device operation (local sticks) | v1 | `docs/multi-device.md`; per-device access rules and remote devices later |
+| Multi-device operation (local sticks) | v1 | `docs/multi-device.md`; per-device access policies: ADR-0023; remote devices later |
 
 ## 8. Users, roles, guest access, admin console (P1.5)
 
