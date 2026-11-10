@@ -33,6 +33,7 @@ maxminddb = "0.32.0"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 openidconnect = { version = "4", default-features = false }
+zip = { version = "9.5.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 http-body-util.workspace = true

@@ -214,6 +214,12 @@ pub const RULES: &[Rule] = &[
     // Where the ADS-B map loads its tiles from, and the caching proxy that serves them.
     rule("GET", "/api/v1/map-config", GuestDecoder),
     rule("GET", "/api/v1/map/tiles/{z}/{x}/{y}", GuestDecoder),
+    // ADS-B aircraft database lookups and receiver range statistics (ADR-0023); importing the
+    // database is an admin job (`/api/v1/admin/adsb/aircraft-db`, below).
+    rule("GET", "/api/v1/adsb/aircraft-db", GuestDecoder),
+    rule("GET", "/api/v1/adsb/lookup", GuestDecoder),
+    rule("GET", "/api/v1/adsb/range", GuestDecoder),
+    rule("DELETE", "/api/v1/adsb/range", Operator),
     rule(
         "POST",
         "/api/v1/plugin-instances/{id}/reconfigure",
@@ -255,6 +261,8 @@ pub const RULES: &[Rule] = &[
     rule("PATCH", "/api/v1/admin/users/{id}", Admin),
     rule("DELETE", "/api/v1/admin/users/{id}", Admin),
     rule("POST", "/api/v1/admin/users/{id}/password", Admin),
+    rule("POST", "/api/v1/admin/adsb/aircraft-db", Admin),
+    rule("DELETE", "/api/v1/admin/adsb/aircraft-db", Admin),
     rule("GET", "/api/v1/admin/invites", Admin),
     rule("POST", "/api/v1/admin/invites", Admin),
     rule("DELETE", "/api/v1/admin/invites/{id}", Admin),
@@ -504,6 +512,7 @@ mod tests {
             include_str!("bookmarks.rs"),
             include_str!("plugins.rs"),
             include_str!("map.rs"),
+            include_str!("adsb.rs"),
             include_str!("channel_plans.rs"),
             include_str!("admin/mod.rs"),
         ];

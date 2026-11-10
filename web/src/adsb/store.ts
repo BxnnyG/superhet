@@ -6,6 +6,7 @@
 
 import { describeHttpError } from "../http";
 import { createAdsbApi, type AdsbApi } from "./api";
+import { InfoCache } from "./info";
 import { ADSB_PLUGIN_ID, type AdsbReply } from "./model";
 
 export interface AdsbSnapshot {
@@ -39,7 +40,12 @@ export class AdsbStore {
   private abort: AbortController | null = null;
   private polling = false;
 
-  constructor(private readonly api: AdsbApi = createAdsbApi()) {}
+  /** Registration, type and airline of the aircraft in view (the imported database). */
+  readonly info: InfoCache;
+
+  constructor(readonly client: AdsbApi = createAdsbApi()) {
+    this.info = new InfoCache(client);
+  }
 
   readonly subscribe = (fn: () => void): (() => void) => {
     this.listeners.add(fn);
@@ -93,7 +99,7 @@ export class AdsbStore {
     if (id === null || this.polling) return;
     this.polling = true;
     try {
-      const reply = await this.api.status(id, this.abort?.signal);
+      const reply = await this.client.status(id, this.abort?.signal);
       if (this.snap.instanceId !== id) return;
       // Another plugin's claim (DAB) is none of ours.
       if (reply.pluginId !== ADSB_PLUGIN_ID) {

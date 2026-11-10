@@ -13,6 +13,7 @@ import {
   ListIcon,
   Logo,
   MonitorIcon,
+  PlaneIcon,
   PlugIcon,
   LogOutIcon,
   ShieldIcon,
@@ -21,8 +22,10 @@ import {
   UsersIcon,
   cn,
 } from "../ui";
+import { createAdsbApi, type AdsbApi } from "../adsb/api";
 import { createPluginApi, type PluginApi } from "../plugins/api";
 import { createAdminApi, type AdminApi } from "./api";
+import { AircraftDbSection } from "./AircraftDbSection";
 import { AuditSection } from "./AuditSection";
 import { AuditSettingsSection } from "./AuditSettingsSection";
 import { BansSection } from "./BansSection";
@@ -46,6 +49,7 @@ export const ADMIN_SECTIONS: readonly NavItem[] = [
   { id: "audit", label: "Audit log", Icon: ListIcon },
   { id: "bans", label: "Address bans", Icon: BanIcon },
   { id: "plugins", label: "Plugins", Icon: PlugIcon },
+  { id: "adsb-data", label: "ADS-B data", Icon: PlaneIcon },
   { id: "guests", label: "Guest access", Icon: GlobeIcon },
   { id: "sso", label: "Single sign-on", Icon: KeyIcon },
   { id: "client-info", label: "Client device info", Icon: MonitorIcon },
@@ -67,6 +71,7 @@ interface Props {
   section: string;
   api?: AdminApi;
   pluginApi?: PluginApi;
+  adsbApi?: AdsbApi;
 }
 
 /**
@@ -77,9 +82,11 @@ export default function AdminConsole({
   section,
   api: injected,
   pluginApi: injectedPlugins,
+  adsbApi: injectedAdsb,
 }: Props) {
   const api = useMemo(() => injected ?? createAdminApi(), [injected]);
   const pluginApi = useMemo(() => injectedPlugins ?? createPluginApi(), [injectedPlugins]);
+  const adsbApi = useMemo(() => injectedAdsb ?? createAdsbApi(), [injectedAdsb]);
   const auth = useAuth();
   const current = resolveSection(section);
   // `/admin` and unknown sections canonicalise to the first section's path.
@@ -146,6 +153,7 @@ export default function AdminConsole({
               id={current.id}
               api={api}
               pluginApi={pluginApi}
+              adsbApi={adsbApi}
               selfId={auth?.userId ?? null}
             />
           </div>
@@ -191,11 +199,13 @@ function SectionBody({
   id,
   api,
   pluginApi,
+  adsbApi,
   selfId,
 }: {
   id: string;
   api: AdminApi;
   pluginApi: PluginApi;
+  adsbApi: AdsbApi;
   selfId: number | null;
 }) {
   switch (id) {
@@ -209,6 +219,8 @@ function SectionBody({
       return <BansSection api={api} />;
     case "plugins":
       return <PluginsSection api={pluginApi} />;
+    case "adsb-data":
+      return <AircraftDbSection api={adsbApi} />;
     case "guests":
       return <GuestSection api={api} />;
     case "sso":

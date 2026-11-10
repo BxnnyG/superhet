@@ -255,6 +255,10 @@ pub async fn run(
                     }
                     Err(err) => tracing::warn!(%err, "pruning decoder events failed"),
                 }
+                // The ADS-B activity history (one row a minute) follows the same retention.
+                if let Err(err) = superhet_db::adsb::prune_activity(&me.pool, cutoff).await {
+                    tracing::warn!(%err, "pruning ADS-B activity failed");
+                }
             }
         }
     }

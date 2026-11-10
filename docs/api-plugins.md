@@ -112,3 +112,16 @@ What instances emit lands in the decoder history (`docs/api-decoder-events.md`):
 plugin id, `kind` the event type; filter with `source=` and `kind=`. The live feed
 `/api/v1/ws/events?dev=` carries them too. The web UI for all of this is described in
 `docs/plugins-ui.md`.
+
+## ADS-B aircraft database and range statistics
+
+Added by ADR-0023 (`docs/plugins-adsb.md`). Errors use the usual `{"v":1,"ok":false,"code","error"}`.
+
+| Route | Access | Purpose |
+|---|---|---|
+| `GET /api/v1/adsb/aircraft-db` | everybody who sees decoders | `database` (source, licence, version, counts, `imported_ms`, or `null`), `offer` (what the admin button fetches, `file` = `SUPERHET_AIRCRAFT_DB_FILE`, `archive` = a downloaded archive exists) and `job` (`state` idle / downloading / importing / done / failed, `message`) |
+| `GET /api/v1/adsb/lookup?icao=3c6444,..&operator=DLH,..` | same | Up to 400 six-digit hex addresses and airline designators; answers `aircraft` (`reg`, `type`, `type_desc`, `class`, `wake`, `military`, only known ones) and `operators` (`name`, `country`, `callsign`). A local query. `400` for malformed values |
+| `GET /api/v1/adsb/range?device=dev0&hours=24` | same | `receiver`, `since_ms`, `sector_deg` (5), `cells` (`[sector, band, km, icao]`), `bucket_s` and `series` (`[ts_ms, msgs_per_s, aircraft, with_position]`); `hours` 1 to 720 |
+| `DELETE /api/v1/adsb/range?device=dev0` | operator | Forget cells, receiver position and activity; `{"removed_cells": n}`; audited |
+| `POST /api/v1/admin/adsb/aircraft-db` `{"source":"download"\|"file"}` | admin | Start the import in the background (`202`; `409` while one runs; `400` when `file` has nothing to read); audited as `adsb.aircraft_db.update` |
+| `DELETE /api/v1/admin/adsb/aircraft-db` | admin | Remove the imported database; audited |
