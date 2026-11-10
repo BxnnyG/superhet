@@ -181,6 +181,7 @@ describe("inspector tabs", () => {
       "receiver",
       "bookmarks",
       "channels",
+      "scanner",
       "decoders",
       "dab",
       "adsb",
@@ -190,6 +191,7 @@ describe("inspector tabs", () => {
     expect(visibleTabs({ canReadBookmarks: false, canSeeDecoders: false })).toEqual([
       "receiver",
       "channels",
+      "scanner",
       "display",
       "source",
     ]);

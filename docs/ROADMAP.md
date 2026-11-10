@@ -78,6 +78,7 @@ Acceptance criteria:
 3. Event search over 1 M synthetic events returns filtered results in < 200 ms (benchmark test).
 4. SDR# frequency manager file round-trips (import → export → identical entries); CSV import/export round-trips.
 5. Scanner: list scan stops on squelch open, resumes after hold time, skips skipped channels, priority channel checked at the configured interval (integration test with file backend).
+   Done in advance: scanner in sdrd, detection on the spectrum (ADR-0025, `docs/scanner.md`); tests on a synthetic IQ file through the file backend.
 
 ## P5 – OIDC, UI plugins, install script, metrics, hardening, multi-device prep
 

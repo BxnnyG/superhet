@@ -19,6 +19,8 @@ pub const ALL_AUDIO: &str = "sh.v1.dev.*.audio.>";
 pub const ALL_RDS: &str = "sh.v1.dev.*.rds.>";
 /// Wildcard matching the tone state (CTCSS, DTMF) of every VFO of every device.
 pub const ALL_TONES: &str = "sh.v1.dev.*.tones.>";
+/// Wildcard matching the scanner hits of every device.
+pub const ALL_SCANNER_HITS: &str = "sh.v1.dev.*.scanner.hit";
 /// Wildcard matching the plugin input taps of every device.
 pub const ALL_TAP: &str = "sh.v1.dev.*.tap.>";
 /// Wildcard matching every plugin event.
@@ -116,6 +118,27 @@ pub fn ctl_claim(device: &str, action: &str) -> Result<String, InvalidToken> {
     check(device)?;
     check(action)?;
     Ok(format!("{PREFIX}.dev.{device}.ctl.claim.{action}"))
+}
+
+/// Scanner subject: `sh.v1.dev.<dev>.ctl.scanner.<action>` with `action` one of `start`, `stop`,
+/// `pause`, `resume`, `skip`, `lockout`, `unlock`.
+///
+/// # Errors
+/// Fails if a token is invalid.
+pub fn ctl_scanner(device: &str, action: &str) -> Result<String, InvalidToken> {
+    check(device)?;
+    check(action)?;
+    Ok(format!("{PREFIX}.dev.{device}.ctl.scanner.{action}"))
+}
+
+/// Scanner hit subject: `sh.v1.dev.<dev>.scanner.hit` (JSON, core NATS; the worker stores it in
+/// the decoder history with source `scanner`).
+///
+/// # Errors
+/// Fails if `device` is not a valid token.
+pub fn scanner_hit(device: &str) -> Result<String, InvalidToken> {
+    check(device)?;
+    Ok(format!("{PREFIX}.dev.{device}.scanner.hit"))
 }
 
 /// Profile subject: `sh.v1.dev.<dev>.ctl.profile.<action>` with `action` `load`.

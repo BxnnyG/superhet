@@ -11,6 +11,7 @@ import { ShortcutsDialog } from "./shell/ShortcutsDialog";
 import { StatusBar } from "./shell/StatusBar";
 import { TopBar } from "./shell/TopBar";
 import { TuningStrip } from "./shell/TuningStrip";
+import { usePermissions } from "./auth/context";
 import { useReceiver } from "./shell/useReceiver";
 import { useShortcuts, type ShortcutContext } from "./shell/useShortcuts";
 import { VfoTabs } from "./shell/VfoTabs";
@@ -31,6 +32,7 @@ export function App({ device = "dev0" }: Props) {
   const r = useReceiver(device);
   const [theme, setTheme] = useTheme();
   const inspector = useInspector();
+  const perms = usePermissions();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -58,6 +60,15 @@ export function App({ device = "dev0" }: Props) {
     openPalette,
     togglePalette,
     stepChannels: r.stepChannels,
+    scan: perms.canTune
+      ? {
+          toggle: () => r.scan.toggle(),
+          togglePause: () => r.scan.togglePause(),
+          skipNow: () => r.scan.skipNow(),
+          lockoutHeld: () => r.scan.lockoutHeld(),
+          showTab: () => inspector.show("scanner"),
+        }
+      : undefined,
   };
   useShortcuts(shortcutCtx);
 

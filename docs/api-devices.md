@@ -2,8 +2,7 @@
 
 Runtime control of an SDR: `superhet-sdrd` serves control requests on the bus and publishes the
 device state; `superhet-api` exposes both over REST. Architecture background: `docs/ARCHITECTURE.md`
-sections 2 and 3. Profiles: `docs/api-profiles.md`. Bookmarks: `docs/api-bookmarks.md`. Not covered yet: recording/decoder lock holders
-and exclusive claims.
+sections 2 and 3. Profiles: `docs/api-profiles.md`. Bookmarks: `docs/api-bookmarks.md`. Scanner: `docs/scanner.md` (lock holder kind `scanner`, `scanner` in the state). Not covered yet: recording/decoder lock holders.
 
 ## REST (superhet-api, port 8073)
 

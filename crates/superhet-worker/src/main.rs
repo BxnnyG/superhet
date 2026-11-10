@@ -8,6 +8,7 @@ mod consumer;
 mod metrics;
 mod plugin_events;
 mod recorder;
+mod scanner_events;
 
 use std::net::SocketAddr;
 

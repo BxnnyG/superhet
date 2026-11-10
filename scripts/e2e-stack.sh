@@ -97,6 +97,22 @@ else
     head -c 4096000 /dev/urandom >"$work/noise.cu8"
 fi
 
+# 1 s of noise plus one steady carrier 100 kHz above the centre of the second device: the scanner
+# scenario (web/e2e/zz-scanner.e2e.ts) finds it. A whole number of cycles per second, so the loop
+# has no click.
+python3 - "$work/carrier.cu8" <<'PY'
+import math, random, struct, sys
+rate, n = 2048000, 2048000
+random.seed(7)
+out = bytearray()
+for i in range(n):
+    ph = 2 * math.pi * 100000 * i / rate
+    re = 0.3 * math.cos(ph) + random.uniform(-0.01, 0.01)
+    im = 0.3 * math.sin(ph) + random.uniform(-0.01, 0.01)
+    out += struct.pack("BB", round(127.5 + 127 * re), round(127.5 + 127 * im))
+open(sys.argv[1], "wb").write(out)
+PY
+
 export SUPERHET_NATS_URL
 export RUST_LOG="${RUST_LOG:-error}"
 
@@ -111,7 +127,7 @@ pids+=($!)
 SUPERHET_LISTEN="127.0.0.1:$((port + 4))" \
     SUPERHET_DEVICE_ID=dev1 \
     SUPERHET_DEVICE_LABEL="Second stick" \
-    SUPERHET_DEVICE="file:$work/noise.cu8?format=cu8&rate=2048000&freq=145500000&block=4096" \
+    SUPERHET_DEVICE="file:$work/carrier.cu8?format=cu8&rate=2048000&freq=145500000&block=4096" \
     "$bins/superhet-sdrd" &
 pids+=($!)
 
