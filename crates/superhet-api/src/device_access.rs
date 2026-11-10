@@ -358,6 +358,7 @@ pub const DEVICE_RULES: &[DeviceRule] = &[
     dev("POST", "/api/v1/devices/{dev}/tune", Control),
     dev("POST", "/api/v1/devices/{dev}/lock", Control),
     dev("DELETE", "/api/v1/devices/{dev}/lock", Control),
+    dev("POST", "/api/v1/devices/{dev}/scanner/{action}", Control),
     dev("GET", "/api/v1/devices/{dev}/vfos", View),
     dev("POST", "/api/v1/devices/{dev}/vfos", Control),
     dev("PATCH", "/api/v1/devices/{dev}/vfos/{id}", Control),
