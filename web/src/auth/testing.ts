@@ -51,7 +51,7 @@ export function stubClient(over: Partial<AuthClient> = {}): AuthClient {
     status: () => Promise.resolve(SIGNED_OUT),
     setup: () => Promise.resolve(),
     login: () => Promise.resolve(),
-    logout: () => Promise.resolve(),
+    logout: () => Promise.resolve(null),
     changePassword: () => Promise.resolve(),
     guestStart: () => Promise.resolve(GUEST_LIMITS),
     previewInvite: reject,

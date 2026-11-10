@@ -7,21 +7,51 @@ pub(crate) mod client;
 pub(crate) mod config;
 pub(crate) mod flow;
 pub(crate) mod link;
+pub(crate) mod logout;
 mod routes;
+mod routes_logout;
+
+use std::time::Duration;
 
 use superhet_db::oidc as db;
 
 pub(crate) use config::{OidcEnv, OidcSettings, Source};
 pub use routes::router;
+pub(crate) use routes_logout::provider_logout_url;
 
 use super::AuthState;
+use super::limiter::{Limiter, Limits};
+
+/// Back-channel logout requests that failed validation, per client address, before further
+/// requests are refused for a while. Separate from the login limiter: a misconfigured provider
+/// must not be able to lock people out of password sign-in.
+const BACKCHANNEL_LIMITS: Limits = Limits {
+    window: Duration::from_secs(5 * 60),
+    per_ip: 20,
+    global: 200,
+    per_name: 0,
+    max_tracked_ips: 1000,
+};
 
 /// Per-process OIDC state inside the auth layer.
-#[derive(Default)]
 pub struct OidcState {
     pub(crate) env: OidcEnv,
     pub(crate) pending: flow::PendingStore,
     pub(crate) providers: client::ProviderCache,
+    pub(crate) replay: logout::ReplayStore,
+    pub(crate) backchannel_limiter: Limiter,
+}
+
+impl Default for OidcState {
+    fn default() -> Self {
+        Self {
+            env: OidcEnv::default(),
+            pending: flow::PendingStore::default(),
+            providers: client::ProviderCache::default(),
+            replay: logout::ReplayStore::default(),
+            backchannel_limiter: Limiter::new(BACKCHANNEL_LIMITS),
+        }
+    }
 }
 
 impl OidcState {
