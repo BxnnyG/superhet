@@ -61,7 +61,7 @@ All routes need a session (like the other `/api/v1` routes); `DELETE` also check
 
 `GET /api/v1/decoder-events` – newest first. Query parameters (all optional):
 `kind` (comma list of `dtmf,ctcss,dcs,rds_ps,rds_rt,rds_pi` and/or plugin event types such as
-`pocsag.message`), `source` (`core` or a plugin id), `dev`, `vfo`, `from` (Unix ms, inclusive),
+`pocsag.message`), `source` (`core`, `scanner` or a plugin id), `dev`, `vfo`, `from` (Unix ms, inclusive),
 `to` (Unix ms, exclusive), `q` (case-insensitive substring of `value`, max 100 characters),
 `limit` (1..=1000, default 100), `cursor` (the previous `next_cursor`).
 Unknown parameters and invalid values are `400 {"code":"invalid"}`.

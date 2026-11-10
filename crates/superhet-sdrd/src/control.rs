@@ -318,6 +318,9 @@ struct StateWire<'a> {
     overload: OverloadWire,
     /// IQ blocks dropped since start because a stage lagged (device to DSP, DSP to VFO).
     dropped_blocks: u64,
+    /// The scanner (`docs/scanner.md`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scanner: Option<&'a serde_json::Value>,
 }
 
 /// The exclusive claim in the state document: who holds it and what to restore on release.
@@ -348,6 +351,7 @@ struct WindowWire {
 /// Encode a device state (`(id, label)` first), with its VFOs evaluated against the current tuning, as the JSON
 /// published on the state subject and stored in KV.
 #[must_use]
+#[allow(clippy::too_many_arguments)]
 pub fn state_json(
     (device, label): (&str, Option<&str>),
     state: &DeviceState,
@@ -356,6 +360,7 @@ pub fn state_json(
     claim: Option<ClaimWire<'_>>,
     overload: (f64, bool),
     dropped_blocks: u64,
+    scanner: Option<&serde_json::Value>,
 ) -> String {
     let tuning = Tuning {
         center_hz: state.center_hz,
@@ -391,6 +396,7 @@ pub fn state_json(
             clipped_percent: overload.0,
         },
         dropped_blocks,
+        scanner,
         window: {
             let (start_hz, end_hz) = window::bounds(tuning);
             WindowWire { start_hz, end_hz }
@@ -605,6 +611,7 @@ mod tests {
             None,
             (7.3, true),
             5,
+            Some(&serde_json::json!({"state": "idle"})),
         );
         let value: serde_json::Value = serde_json::from_str(&json).expect("json");
         assert_eq!(value["v"], 1);
@@ -624,6 +631,7 @@ mod tests {
         assert_eq!(value["overload"]["active"], true);
         assert_eq!(value["overload"]["clipped_percent"], 7.3);
         assert_eq!(value["dropped_blocks"], 5);
+        assert_eq!(value["scanner"]["state"], "idle");
 
         let reply: serde_json::Value = serde_json::from_slice(&ok_reply(&json)).expect("json");
         assert_eq!(reply["ok"], true);
@@ -643,8 +651,10 @@ mod tests {
             None,
             (0.0, false),
             0,
+            None,
         ))
         .expect("json");
+        assert!(value.get("scanner").is_none());
         assert!(value.get("tuner").is_none());
         assert!(value.get("label").is_none());
         assert!(value["gain"].is_null());
