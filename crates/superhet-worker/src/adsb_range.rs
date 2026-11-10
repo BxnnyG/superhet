@@ -95,8 +95,8 @@ pub fn parse(payload: &[u8]) -> Option<Parsed> {
             cells,
             activity: Activity {
                 msgs_per_s: rate as f32,
-                aircraft: count("aircraft") as i16,
-                with_position: count("with_position") as i16,
+                aircraft: count("aircraft"),
+                with_position: count("with_position"),
             },
         },
     })

@@ -31,6 +31,7 @@ use superhet_db::{PgPool, adsb};
 
 use crate::access::Principal;
 use crate::aircraft_db::{self, LoadError};
+use crate::device_access::{self, Need};
 use crate::devices::{DevicesState, failure, guard_mutation, json};
 
 /// Longest accepted `icao` / `operator` query value.
@@ -284,12 +285,25 @@ struct RangeQuery {
     hours: Option<i64>,
 }
 
-async fn range(State(state): State<AdsbState>, Query(q): Query<RangeQuery>) -> Response {
+async fn range(
+    State(state): State<AdsbState>,
+    Extension(principal): Extension<Principal>,
+    Query(q): Query<RangeQuery>,
+) -> Response {
     let result = async {
         let device = q.device.as_deref().unwrap_or("dev0");
         if !valid_device(device) {
             return Err(invalid("invalid device id"));
         }
+        // The statistics belong to one device: whoever may not see it may not see them.
+        device_access::check(
+            &state.devices.auth,
+            &principal,
+            device,
+            Need::View,
+            "adsb.range",
+        )
+        .await?;
         let hours = q.hours.unwrap_or(24);
         if !(1..=MAX_HOURS).contains(&hours) {
             return Err(invalid(&format!("hours must be 1 to {MAX_HOURS}")));
@@ -346,6 +360,14 @@ async fn reset_range(
         if !valid_device(device) {
             return Err(invalid("invalid device id"));
         }
+        device_access::check(
+            &state.devices.auth,
+            &principal,
+            device,
+            Need::Control,
+            "adsb.range.reset",
+        )
+        .await?;
         let removed = adsb::reset_range(pool(&state)?, device)
             .await
             .map_err(|e| internal(&e))?;
