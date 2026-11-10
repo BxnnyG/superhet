@@ -7,6 +7,7 @@
 
 mod audit_routes;
 mod bans;
+mod notifications;
 mod oidc_routes;
 mod report;
 mod sessions;
@@ -113,6 +114,51 @@ pub fn router(state: AdminState) -> Router {
             get(settings_routes::get_limits)
                 .put(settings_routes::put_limits)
                 .layer(limit),
+        )
+        .route(
+            "/api/v1/admin/notification-targets",
+            get(notifications::list_targets)
+                .post(notifications::create_target)
+                .layer(limit),
+        )
+        .route(
+            "/api/v1/admin/notification-targets/{id}",
+            axum::routing::put(notifications::update_target)
+                .delete(notifications::delete_target)
+                .layer(limit),
+        )
+        .route(
+            "/api/v1/admin/notification-targets/{id}/test",
+            post(notifications::test_target),
+        )
+        .route(
+            "/api/v1/admin/notification-rules",
+            get(notifications::list_rules)
+                .post(notifications::create_rule)
+                .layer(limit),
+        )
+        .route(
+            "/api/v1/admin/notification-rules/{id}",
+            axum::routing::put(notifications::update_rule)
+                .delete(notifications::delete_rule)
+                .layer(limit),
+        )
+        .route(
+            "/api/v1/admin/notification-rules/{id}/test",
+            post(notifications::test_rule),
+        )
+        .route(
+            "/api/v1/admin/notification-deliveries",
+            get(notifications::list_deliveries),
+        )
+        .route("/api/v1/me/push", get(notifications::my_push))
+        .route(
+            "/api/v1/me/push/subscriptions",
+            post(notifications::subscribe).layer(limit),
+        )
+        .route(
+            "/api/v1/me/push/subscriptions/{id}",
+            delete(notifications::unsubscribe),
         )
         .with_state(state)
 }

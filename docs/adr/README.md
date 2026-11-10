@@ -26,3 +26,4 @@ Format: one file per decision, `NNNN-short-title.md`, sections *Status*, *Contex
 | [0020](0020-multi-device.md) | Several local SDRs, one daemon each | accepted |
 | [0021](0021-tetra-receive-plugin.md) | TETRA receive plugin: own demodulator, osmo-tetra's tetra-rx, the user's ETSI codec | accepted |
 | [0022](0022-plugin-ui-panels.md) | Plugin web panels in a sandboxed frame | accepted |
+| [0026](0026-notifications.md) | Notifications: rules, targets, outbox delivery | accepted |

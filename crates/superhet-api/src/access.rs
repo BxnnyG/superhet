@@ -276,6 +276,26 @@ pub const RULES: &[Rule] = &[
     rule("PUT", "/api/v1/admin/limits", Admin),
     rule("GET", "/api/v1/admin/client-report-policy", Admin),
     rule("PUT", "/api/v1/admin/client-report-policy", Admin),
+    // Notifications (ADR-0026): rules and targets are admin business; every account manages its
+    // own browser subscription.
+    rule("GET", "/api/v1/admin/notification-targets", Admin),
+    rule("POST", "/api/v1/admin/notification-targets", Admin),
+    rule("PUT", "/api/v1/admin/notification-targets/{id}", Admin),
+    rule("DELETE", "/api/v1/admin/notification-targets/{id}", Admin),
+    rule(
+        "POST",
+        "/api/v1/admin/notification-targets/{id}/test",
+        Admin,
+    ),
+    rule("GET", "/api/v1/admin/notification-rules", Admin),
+    rule("POST", "/api/v1/admin/notification-rules", Admin),
+    rule("PUT", "/api/v1/admin/notification-rules/{id}", Admin),
+    rule("DELETE", "/api/v1/admin/notification-rules/{id}", Admin),
+    rule("POST", "/api/v1/admin/notification-rules/{id}/test", Admin),
+    rule("GET", "/api/v1/admin/notification-deliveries", Admin),
+    rule("GET", "/api/v1/me/push", Listener),
+    rule("POST", "/api/v1/me/push/subscriptions", Listener),
+    rule("DELETE", "/api/v1/me/push/subscriptions/{id}", Listener),
 ];
 
 /// The rule for a matched route and method (HEAD counts as GET).

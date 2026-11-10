@@ -2,15 +2,26 @@ import { ChangePasswordDialog } from "../auth/ChangePasswordDialog";
 import { useAuth } from "../auth/context";
 import { roleLabel } from "../auth/permissions";
 import { MySessionsDialog } from "../auth/MySessionsDialog";
+import { PushDialog } from "../notifications/PushDialog";
 import { navigate } from "../router";
-import { Badge, Button, KeyIcon, LogOutIcon, ShieldIcon, UserIcon, UsersIcon, cn } from "../ui";
+import {
+  Badge,
+  BellIcon,
+  Button,
+  KeyIcon,
+  LogOutIcon,
+  ShieldIcon,
+  UserIcon,
+  UsersIcon,
+  cn,
+} from "../ui";
 
 /** Badge tone of a role. */
 export function roleTone(perms: { isAdmin: boolean; isOperator: boolean }) {
   return perms.isAdmin ? "danger" : perms.isOperator ? "accent" : "neutral";
 }
 
-export type AccountDialogKind = "password" | "sessions";
+export type AccountDialogKind = "password" | "sessions" | "push";
 
 /** The dialogs the account block opens; rendered outside the popover so closing it keeps them. */
 export function AccountDialogs({
@@ -22,6 +33,7 @@ export function AccountDialogs({
 }) {
   const auth = useAuth();
   if (!auth || kind === null) return null;
+  if (kind === "push") return <PushDialog onClose={onClose} />;
   return kind === "password" ? (
     <ChangePasswordDialog client={auth.client} onClose={onClose} />
   ) : (
@@ -95,6 +107,19 @@ export function AccountSection({
             }}
           >
             My sessions
+          </Button>
+        )}
+        {!perms.isGuest && (
+          <Button
+            variant="ghost"
+            icon={<BellIcon />}
+            className="justify-start"
+            onClick={() => {
+              onClose();
+              onDialog("push");
+            }}
+          >
+            Notifications
           </Button>
         )}
         {!perms.isGuest && (
