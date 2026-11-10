@@ -280,7 +280,7 @@ pub const RULES: &[Rule] = &[
     rule("PUT", "/api/v1/admin/limits", Admin),
     rule("GET", "/api/v1/admin/client-report-policy", Admin),
     rule("PUT", "/api/v1/admin/client-report-policy", Admin),
-    // Notifications (ADR-0026): rules and targets are admin business; every account manages its
+    // Notifications (ADR-0027): rules and targets are admin business; every account manages its
     // own browser subscription.
     rule("GET", "/api/v1/admin/notification-targets", Admin),
     rule("POST", "/api/v1/admin/notification-targets", Admin),

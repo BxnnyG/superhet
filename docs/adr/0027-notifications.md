@@ -1,4 +1,4 @@
-# ADR-0026: Notifications: rules, targets, outbox delivery
+# ADR-0027: Notifications: rules, targets, outbox delivery
 
 **Status:** accepted (2026-11-10)
 
@@ -14,7 +14,7 @@ lose or duplicate alerts silently.
 
 ## Decision
 
-1. **Rules and targets live in PostgreSQL** (migration `0016_notifications.sql`) and are managed
+1. **Rules and targets live in PostgreSQL** (migration `0017_notifications.sql`) and are managed
    by admins only (`/api/v1/admin/notification-*`, `docs/api-notifications.md`). A rule has a
    source and event type filter, field conditions (equals / contains / regex / numeric compare /
    exists over the event and its decoder payload `data.*`), a cooldown, an hourly cap, quiet

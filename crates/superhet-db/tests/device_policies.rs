@@ -57,7 +57,10 @@ async fn migration_15_adds_the_table_to_an_older_database_and_changes_nothing_el
         .fetch_one(&db.pool)
         .await
         .expect("version");
-    assert_eq!(after, 15);
+    assert!(
+        after >= 15,
+        "upgraded to at least migration 15, got {after}"
+    );
     // No rows after the upgrade: every device keeps the open default.
     assert!(
         device_policies::list(&db.pool)

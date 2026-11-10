@@ -167,7 +167,7 @@ services:
   superhet-worker:
     <<: *superhet
     command: ["superhet-worker"]
-    # Outbound access for notification webhooks, SMTP and Web Push (ADR-0026).
+    # Outbound access for notification webhooks, SMTP and Web Push (ADR-0027).
     networks: [backend, edge]
     environment:
       SUPERHET_DATABASE_URL: postgres://superhet:${POSTGRES_PASSWORD}@postgres:5432/superhet

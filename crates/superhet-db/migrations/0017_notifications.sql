@@ -1,4 +1,4 @@
--- Notifications (docs/adr/0026-notifications.md): rules that fire a webhook, an e-mail or a
+-- Notifications (docs/adr/0027-notifications.md): rules that fire a webhook, an e-mail or a
 -- browser push when a decoder event matches, plus the delivery outbox and log.
 
 -- Where a notification goes. `config` holds the non-secret settings (URL, templates, addresses);
@@ -91,4 +91,4 @@ CREATE TABLE superhet.push_subscriptions (
 );
 CREATE INDEX push_subscriptions_user_idx ON superhet.push_subscriptions (user_id);
 
-UPDATE superhet.schema_version SET version = 16, applied_at = now();
+UPDATE superhet.schema_version SET version = 17, applied_at = now();

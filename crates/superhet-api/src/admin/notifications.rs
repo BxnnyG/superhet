@@ -1,6 +1,6 @@
 //! Notification rules, targets and the delivery log (`/api/v1/admin/notification-*`, admin only)
 //! and the push subscription of one's own browser (`/api/v1/me/push*`, accounts). Contract:
-//! `docs/api-notifications.md`; design: ADR-0026.
+//! `docs/api-notifications.md`; design: ADR-0027.
 //!
 //! Secrets never leave through here: a target's secret is write-only (`has_secret` tells whether
 //! one is set), the webhook URL is replaced by its host, the VAPID private key is not exposed at

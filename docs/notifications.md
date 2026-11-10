@@ -1,6 +1,6 @@
 # Notifications
 
-Rules that send a webhook, an e-mail or a browser push when a decoder event matches (ADR-0026).
+Rules that send a webhook, an e-mail or a browser push when a decoder event matches (ADR-0027).
 Admins manage rules and targets under **Admin console > Notifications**; every account can turn
 on push notifications for its own browser (account menu > Notifications). REST contract:
 `api-notifications.md`.

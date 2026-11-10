@@ -1,6 +1,6 @@
 # Notifications API
 
-Design: ADR-0026, user guide: `notifications.md`. Errors use `{"error":"<code>","message":"..."}`;
+Design: ADR-0027, user guide: `notifications.md`. Errors use `{"error":"<code>","message":"..."}`;
 state-changing calls need an allowed `Origin` and `Content-Type: application/json`.
 
 ## Admin (role `admin`)

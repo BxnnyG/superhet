@@ -1,4 +1,4 @@
-//! Notifications (ADR-0026): which decoder events match a rule, what the message says, and how
+//! Notifications (ADR-0027): which decoder events match a rule, what the message says, and how
 //! it reaches a webhook, a mailbox or a browser. Pure logic and senders; storage lives in
 //! `superhet-db::notifications`, orchestration in `superhet-worker`, the admin API in
 //! `superhet-api`.

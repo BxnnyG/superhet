@@ -1,4 +1,4 @@
-//! Notifications (ADR-0026).
+//! Notifications (ADR-0027).
 //!
 //! Three loops share this module:
 //! - the matcher is a durable JetStream consumer of the decoder-event announcements the recorder

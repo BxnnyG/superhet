@@ -1,4 +1,4 @@
-//! Storage of the notification feature (ADR-0026): rules, targets, the delivery outbox / log, the
+//! Storage of the notification feature (ADR-0027): rules, targets, the delivery outbox / log, the
 //! server's VAPID key and the browser push subscriptions.
 //!
 //! Rule and target documents are validated by `superhet-notify` before they get here; this layer
