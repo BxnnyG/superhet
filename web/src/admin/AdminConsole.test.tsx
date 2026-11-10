@@ -252,13 +252,20 @@ function fakeApi(over: Partial<AdminApi> = {}): AdminApi {
       settings: DEFAULT_OIDC_SETTINGS,
       source: "database",
       redirectUrl: null,
+      postLogoutUrl: null,
+      backchannelUrl: null,
       clientSecretSet: false,
       oidcAdminExists: false,
       localLoginActive: true,
       keepLocalLogin: false,
     }),
     putOidc: vi.fn(),
-    testOidc: vi.fn().mockResolvedValue({ ok: true, issuer: "https://idp.example", error: null }),
+    testOidc: vi.fn().mockResolvedValue({
+      ok: true,
+      issuer: "https://idp.example",
+      error: null,
+      endSession: true,
+    }),
     ...over,
   };
 }

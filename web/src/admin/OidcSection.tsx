@@ -58,6 +58,37 @@ export function oidcProblem(s: OidcSettings): string | null {
   return null;
 }
 
+/** A URL derived from the public URL, to register at the provider, with a copy button. */
+function UrlLine({
+  label,
+  url,
+  copyLabel,
+}: {
+  label: string;
+  url: string | null;
+  copyLabel: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-medium text-fg-muted">{label}</span>
+      <div className="flex items-center gap-2">
+        <code className="min-w-0 flex-1 truncate rounded-md bg-surface-2 px-3 py-2 text-xs">
+          {url ?? "Set the public URL first."}
+        </code>
+        {url && (
+          <Button
+            size="sm"
+            onClick={() => void copyText(url, copyLabel)}
+            aria-label={`Copy the ${copyLabel.toLowerCase()}`}
+          >
+            Copy
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ListField({
   label,
   value,
@@ -130,7 +161,7 @@ export function OidcSection({ api }: { api: AdminApi }) {
     try {
       setTest(await api.testOidc());
     } catch (e) {
-      setTest({ ok: false, issuer: null, error: describeHttpError(e) });
+      setTest({ ok: false, issuer: null, error: describeHttpError(e), endSession: false });
     } finally {
       setTesting(false);
     }
@@ -193,25 +224,11 @@ export function OidcSection({ api }: { api: AdminApi }) {
                   value={s.publicUrl}
                   onChange={(e) => update({ publicUrl: e.target.value })}
                 />
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs font-medium text-fg-muted">
-                    Redirect URI to register at the provider
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <code className="min-w-0 flex-1 truncate rounded-md bg-surface-2 px-3 py-2 text-xs">
-                      {view.redirectUrl ?? "Set the public URL first."}
-                    </code>
-                    {view.redirectUrl && (
-                      <Button
-                        size="sm"
-                        onClick={() => void copyText(view.redirectUrl ?? "", "Redirect URI")}
-                        aria-label="Copy the redirect URI"
-                      >
-                        Copy
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                <UrlLine
+                  label="Redirect URI to register at the provider"
+                  url={view.redirectUrl}
+                  copyLabel="Redirect URI"
+                />
                 <p className="text-xs text-fg-subtle">
                   Client secret:{" "}
                   {view.clientSecretSet ? (
@@ -310,6 +327,41 @@ export function OidcSection({ api }: { api: AdminApi }) {
               </div>
             </Card>
 
+            <Card title="Sign-out">
+              <div className="flex flex-col gap-3 p-4">
+                <Toggle
+                  label="Signing out of Superhet also ends the provider session"
+                  checked={s.rpLogout}
+                  onChange={(rpLogout) => update({ rpLogout })}
+                />
+                <p className="-mt-2 text-xs text-fg-subtle">
+                  Only for sessions that came from single sign-on, and only if the provider
+                  advertises an end session endpoint. Register the post-logout redirect URI below at
+                  the provider.
+                </p>
+                <UrlLine
+                  label="Post-logout redirect URI to register at the provider"
+                  url={view.postLogoutUrl}
+                  copyLabel="Post-logout redirect URI"
+                />
+                <Toggle
+                  label="Accept back-channel logout from the provider"
+                  checked={s.backchannelLogout}
+                  onChange={(backchannelLogout) => update({ backchannelLogout })}
+                />
+                <p className="-mt-2 text-xs text-fg-subtle">
+                  When the user signs out at the provider (or an admin ends their session there),
+                  the matching Superhet sessions end too. Register the URL below as the client's
+                  back-channel logout URL; the provider must be able to reach it.
+                </p>
+                <UrlLine
+                  label="Back-channel logout URL to register at the provider"
+                  url={view.backchannelUrl}
+                  copyLabel="Back-channel logout URL"
+                />
+              </div>
+            </Card>
+
             <Card title="Password sign-in">
               <div className="flex flex-col gap-3 p-4">
                 <Toggle
@@ -333,7 +385,7 @@ export function OidcSection({ api }: { api: AdminApi }) {
           {test && (
             <Alert tone={test.ok ? "info" : "danger"}>
               {test.ok
-                ? `The provider answered. Issuer: ${test.issuer ?? ""}`
+                ? `The provider answered. Issuer: ${test.issuer ?? ""}. ${test.endSession ? "It supports ending its session on sign-out." : "It does not advertise an end session endpoint, so signing out here leaves the provider session alone."}`
                 : `The provider could not be used: ${test.error ?? "unknown error"}`}
             </Alert>
           )}

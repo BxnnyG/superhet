@@ -8,7 +8,7 @@ ADR-0011 gave the API three roles and a guest policy; ADR-0020 added several SDR
 
 ## Decision
 
-1. **A policy per device, stored in PostgreSQL** (`device_policies`, migration 0014; key = device id). A device without a row has the open default, so the migration adds no rows and changes nothing. Fields:
+1. **A policy per device, stored in PostgreSQL** (`device_policies`, migration 0015; key = device id). A device without a row has the open default, so the migration adds no rows and changes nothing. Fields:
    - `view_role` (`listener`|`operator`|`admin`): lowest role that may see and listen (state, spectrum, audio, decoder output, plugin streams).
    - `control_role`: lowest role that may change anything on the device (tune, lock, VFOs, profiles, plugin instances). It sits on top of the role a route already needs; it never loosens it. The default `listener` therefore means "no extra restriction", and tuning stays operator-only as before.
    - `guests_visible`: guests (listeners without an account) may see the device.

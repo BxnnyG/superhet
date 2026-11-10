@@ -23,4 +23,4 @@ CREATE TABLE superhet.device_policies (
     updated_by     text
 );
 
-UPDATE superhet.schema_version SET version = 14, applied_at = now();
+UPDATE superhet.schema_version SET version = 15, applied_at = now();

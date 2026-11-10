@@ -33,15 +33,15 @@ fn policy(device: &str) -> Record {
 }
 
 #[tokio::test]
-async fn migration_14_adds_the_table_to_an_older_database_and_changes_nothing_else() {
+async fn migration_15_adds_the_table_to_an_older_database_and_changes_nothing_else() {
     let Some(db) = TestDb::create("policy_upgrade", false).await else {
         eprintln!("DATABASE_URL not set; skipping");
         return;
     };
-    // The schema of the release before this one: migrations 1..=13.
+    // The schema of the release before this one: migrations 1..=14.
     let mut old = sqlx::migrate!("./migrations");
     let all = old.migrations.to_vec();
-    old.migrations = Cow::Owned(all.into_iter().filter(|m| m.version <= 13).collect());
+    old.migrations = Cow::Owned(all.into_iter().filter(|m| m.version <= 14).collect());
     old.create_schema("superhet");
     old.dangerous_set_table_name("superhet._sqlx_migrations");
     old.run(&db.pool).await.expect("old schema");
@@ -49,7 +49,7 @@ async fn migration_14_adds_the_table_to_an_older_database_and_changes_nothing_el
         .fetch_one(&db.pool)
         .await
         .expect("version");
-    assert_eq!(before, 13);
+    assert_eq!(before, 14);
 
     superhet_db::migrate(&db.pool).await.expect("upgrade");
     superhet_db::migrate(&db.pool).await.expect("idempotent");
@@ -57,7 +57,7 @@ async fn migration_14_adds_the_table_to_an_older_database_and_changes_nothing_el
         .fetch_one(&db.pool)
         .await
         .expect("version");
-    assert_eq!(after, 14);
+    assert_eq!(after, 15);
     // No rows after the upgrade: every device keeps the open default.
     assert!(
         device_policies::list(&db.pool)

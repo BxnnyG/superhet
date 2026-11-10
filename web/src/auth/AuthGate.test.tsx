@@ -3,15 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthError, type AuthClient, type AuthStatus } from "./api";
 import { AuthGate } from "./AuthGate";
 import { useAuth } from "./context";
+import { leaveTo } from "./leave";
 import { notifyUnauthorized } from "./session";
 import { GUEST_LIMITS, accountStatus, makeStatus } from "./testing";
+
+vi.mock("./leave", () => ({ leaveTo: vi.fn() }));
 
 function fakeClient(status: AuthStatus, over: Partial<AuthClient> = {}): AuthClient {
   return {
     status: vi.fn().mockResolvedValue(status),
     setup: vi.fn().mockResolvedValue(undefined),
     login: vi.fn().mockResolvedValue(undefined),
-    logout: vi.fn().mockResolvedValue(undefined),
+    logout: vi.fn().mockResolvedValue(null),
     changePassword: vi.fn().mockResolvedValue(undefined),
     guestStart: vi.fn().mockResolvedValue(GUEST_LIMITS),
     previewInvite: vi.fn(),
@@ -95,7 +98,10 @@ describe("AuthGate routing", () => {
 });
 
 describe("login errors", () => {
-  beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.mocked(leaveTo).mockClear();
+  });
   afterEach(() => vi.useRealTimers());
 
   async function openLogin(login: AuthClient["login"]) {
@@ -260,6 +266,32 @@ describe("session handling in the app", () => {
     fireEvent.click(await screen.findByRole("button", { name: "out" }));
     expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
     expect(client.logout).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends the browser to the provider after a single sign-on session ends", async () => {
+    const client = fakeClient(AUTHED, {
+      logout: vi.fn().mockResolvedValue("https://idp.example/logout?state=s"),
+    });
+    render(
+      <AuthGate client={client}>
+        <Probe />
+      </AuthGate>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "out" }));
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    expect(leaveTo).toHaveBeenCalledWith("https://idp.example/logout?state=s");
+  });
+
+  it("stays in the app when no provider logout is due", async () => {
+    const client = fakeClient(AUTHED);
+    render(
+      <AuthGate client={client}>
+        <Probe />
+      </AuthGate>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "out" }));
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    expect(leaveTo).not.toHaveBeenCalled();
   });
 
   it("signs out locally even when the logout request fails", async () => {

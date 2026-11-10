@@ -30,7 +30,8 @@ and exported through the admin API. Not tamper-proof evidence: see "Append-only"
 |---|---|---|
 | `auth.setup` | the first admin is created | |
 | `auth.login` / `auth.login_failed` | login ok / refused (also rate limited, disabled) | `reason`: `bad_credentials`, `disabled`, `rate_limited` |
-| `auth.logout` | logout | |
+| `auth.logout` | logout | `provider_logout`: the browser was sent to the OIDC provider's end session endpoint |
+| `auth.oidc_backchannel_logout` | the OIDC provider's back-channel logout request (refusals coalesced, `outcome:"denied"`) | `issuer`, `sid`, `sub`, `sessions` (ended), `reason` (refused: `malformed`, `algorithm`, `unknown_key`, `signature`, `issuer`, `audience`, `issued_at`, `expired`, `event`, `nonce`, `no_subject`, `no_jti`, `replay`, `missing_token`) |
 | `auth.password_change` | own password change | `revoked_sessions` |
 | `user.create`, `user.delete` | admin creates / deletes an account | `role` |
 | `user.role_change` | role changed (also refused with `outcome:"denied"`, `reason:"last_admin"`) | `from`, `to` |
