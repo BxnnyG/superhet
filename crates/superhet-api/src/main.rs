@@ -2,6 +2,8 @@
 
 mod access;
 mod admin;
+mod adsb;
+mod aircraft_db;
 mod audio_hub;
 mod audio_ws;
 mod audit;
@@ -87,6 +89,10 @@ fn app(
         )))
         .merge(plugins::router(devices.clone()))
         .merge(map::router())
+        .merge(adsb::router(adsb::AdsbState::new(
+            devices.clone(),
+            deps.db.clone(),
+        )))
         .merge(device_list::router(devices.clone()))
         .merge(scanner::router(devices.clone()))
         .merge(devices::router(devices));

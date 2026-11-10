@@ -4,6 +4,7 @@
 //! decoder plugins) into PostgreSQL (`docs/api-decoder-events.md`) and sends the notifications
 //! that rules ask for on those events (`docs/notifications.md`).
 
+mod adsb_range;
 mod audit;
 mod consumer;
 mod metrics;

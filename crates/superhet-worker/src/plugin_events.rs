@@ -170,6 +170,33 @@ pub async fn run(
                 None => return,
             },
         };
+        // ADS-B range statistics are not history (ADR-0026): store them in their own tables.
+        if crate::adsb_range::is_range_event(&message.message.payload) {
+            let stored = match crate::adsb_range::parse(&message.message.payload) {
+                // Unusable content: retrying would not help.
+                None => true,
+                Some(parsed) => {
+                    match superhet_db::adsb::record_range(&pool, &parsed.device, &parsed.update)
+                        .await
+                    {
+                        Ok(_) => true,
+                        Err(err) => {
+                            tracing::warn!(%err, "storing ADS-B range statistics failed");
+                            false
+                        }
+                    }
+                }
+            };
+            let ack = if stored {
+                message.ack().await
+            } else {
+                message.ack_with(AckKind::Nak(Some(RETRY_DELAY))).await
+            };
+            if let Err(err) = ack {
+                tracing::warn!(%err, "acknowledging a range event failed");
+            }
+            continue;
+        }
         let ack = match to_event(&message.message.payload) {
             // Not ours (decoder announcements, foreign payloads): nothing to store.
             None => message.ack().await,

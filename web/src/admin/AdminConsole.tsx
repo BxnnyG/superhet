@@ -15,6 +15,7 @@ import {
   LockIcon,
   Logo,
   MonitorIcon,
+  PlaneIcon,
   PlugIcon,
   LogOutIcon,
   ShieldIcon,
@@ -23,9 +24,11 @@ import {
   UsersIcon,
   cn,
 } from "../ui";
+import { createAdsbApi, type AdsbApi } from "../adsb/api";
 import { createDeviceListApi, type DeviceListApi } from "../devices/api";
 import { createPluginApi, type PluginApi } from "../plugins/api";
 import { createAdminApi, type AdminApi } from "./api";
+import { AircraftDbSection } from "./AircraftDbSection";
 import { AuditSection } from "./AuditSection";
 import { AuditSettingsSection } from "./AuditSettingsSection";
 import { BansSection } from "./BansSection";
@@ -52,6 +55,7 @@ export const ADMIN_SECTIONS: readonly NavItem[] = [
   { id: "bans", label: "Address bans", Icon: BanIcon },
   { id: "devices", label: "Device access", Icon: LockIcon },
   { id: "plugins", label: "Plugins", Icon: PlugIcon },
+  { id: "adsb-data", label: "ADS-B data", Icon: PlaneIcon },
   { id: "notifications", label: "Notifications", Icon: BellIcon },
   { id: "guests", label: "Guest access", Icon: GlobeIcon },
   { id: "sso", label: "Single sign-on", Icon: KeyIcon },
@@ -74,6 +78,7 @@ interface Props {
   section: string;
   api?: AdminApi;
   pluginApi?: PluginApi;
+  adsbApi?: AdsbApi;
   deviceApi?: DeviceListApi;
 }
 
@@ -85,10 +90,12 @@ export default function AdminConsole({
   section,
   api: injected,
   pluginApi: injectedPlugins,
+  adsbApi: injectedAdsb,
   deviceApi: injectedDevices,
 }: Props) {
   const api = useMemo(() => injected ?? createAdminApi(), [injected]);
   const pluginApi = useMemo(() => injectedPlugins ?? createPluginApi(), [injectedPlugins]);
+  const adsbApi = useMemo(() => injectedAdsb ?? createAdsbApi(), [injectedAdsb]);
   const deviceApi = useMemo(() => injectedDevices ?? createDeviceListApi(), [injectedDevices]);
   const auth = useAuth();
   const current = resolveSection(section);
@@ -156,6 +163,7 @@ export default function AdminConsole({
               id={current.id}
               api={api}
               pluginApi={pluginApi}
+              adsbApi={adsbApi}
               deviceApi={deviceApi}
               selfId={auth?.userId ?? null}
             />
@@ -202,12 +210,14 @@ function SectionBody({
   id,
   api,
   pluginApi,
+  adsbApi,
   deviceApi,
   selfId,
 }: {
   id: string;
   api: AdminApi;
   pluginApi: PluginApi;
+  adsbApi: AdsbApi;
   deviceApi: DeviceListApi;
   selfId: number | null;
 }) {
@@ -224,6 +234,8 @@ function SectionBody({
       return <DevicePoliciesSection api={api} deviceApi={deviceApi} />;
     case "plugins":
       return <PluginsSection api={pluginApi} />;
+    case "adsb-data":
+      return <AircraftDbSection api={adsbApi} />;
     case "notifications":
       return <NotificationsSection />;
     case "guests":
