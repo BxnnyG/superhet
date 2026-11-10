@@ -112,6 +112,12 @@ impl Tracker {
         self.entries.len()
     }
 
+    /// Messages decoded per second between the last two snapshots.
+    #[must_use]
+    pub fn messages_per_s(&self) -> Option<f64> {
+        self.messages_per_s
+    }
+
     /// The complete state for the host (`status` frame). `mode` is `starting` until readsb wrote
     /// its first file, then `running`; `error` names why the decoder stopped.
     #[must_use]

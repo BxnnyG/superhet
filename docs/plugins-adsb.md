@@ -19,8 +19,10 @@ as a live map and table in the web UI and as events in the decoder history.
   when an aircraft first shows a callsign or a position, when one of them first appears later,
   and then at most once per `event_interval_s` per aircraft. Sparse on purpose: a track log of
   every aircraft would be millions of rows a day.
-- **Not done:** no aircraft database (registration, type, operator, route), no MLAT, no UAT
-  (978 MHz), no range statistics, no recording of tracks.
+- **Aircraft database and range statistics** (ADR-0026): registration, type, airline and country
+  from an openly licensed database the admin imports, and the receiver's range per direction and
+  altitude (sections below).
+- **Not done:** no route or flight-plan data, no MLAT, no UAT (978 MHz), no recording of tracks.
 
 ## Using it
 
@@ -119,6 +121,72 @@ is the age when the document was written; the browser adds the time since it arr
 `alt_ft`, `on_ground`, `speed_kt`, `track_deg`, `vrate_fpm`, `lat`, `lon`, `rssi`, `squawk`,
 `category`. `adsb.error`: `summary`, `message` when readsb exited.
 
+`adsb.range` (once a minute) is not a history event: the worker diverts it into the range
+statistics (below) instead of `decoder_events`. It carries `minute_ms`, `msgs_per_s`, `aircraft`,
+`with_position`, `lat`/`lon` (when a receiver position is configured) and `sectors`, a list of
+`[sector, band, km, icao]` with the farthest position of that minute per sector and band.
+
+## Aircraft database
+
+Superhet ships no aircraft data. Registration, type and airline need a database; the admin
+console has a section **ADS-B data** (Admin, ADS-B data) that shows source and licence before
+anything is fetched.
+
+- **Source and licence:** the [Mictronics aircraft database](https://github.com/Mictronics/aircraft-database)
+  (`indexedDB.zip`: about 456,000 aircraft, 2,800 types, 6,300 airlines), **ODC-By 1.0** (Open
+  Data Commons Attribution License: free to use and share with credit; the ADS-B view shows the
+  source and licence link under the table). Other candidates were checked and not used: tar1090-db
+  has no licence and mixes in the ADSBexchange database, the OpenSky aircraft database calls itself
+  "unlicensed" and out of date, ADSBexchange's file has no verifiable licence (ADR-0026).
+- **Download** (admin button): the API fetches `https://raw.githubusercontent.com/Mictronics/aircraft-database/main/indexedDB.zip`
+  (about 3.5 MB, size-capped, redirects not followed), keeps it under `SUPERHET_AIRCRAFT_DB_DIR`
+  (default `/data/aircraft-db`) and imports it in the background. Press it again to update.
+- **Offline:** copy the export (the zip, or a folder holding `aircrafts.json`, `types.json`,
+  `operators.json`, `dbversion.json`, `LICENSE`) to the server, set `SUPERHET_AIRCRAFT_DB_FILE` on
+  `superhet-api` and press **Import from file** (without the variable, the archive of the last
+  download is re-imported). If the files do not carry the ODC-By text the import is labelled
+  "unknown licence (supplied by the operator)": the licence of a file you bring is your
+  responsibility. Only this export's format is read (tar1090 CSV and others are not).
+- **Lookup is local.** The table asks `GET /api/v1/adsb/lookup` (a query on the imported tables,
+  `docs/api-plugins.md`); nothing per aircraft goes to a third party, viewers' browsers never
+  contact a data source. The airline comes from the callsign's first three letters (`DLH123` ->
+  Lufthansa); aircraft without such a callsign show none.
+- **In the UI:** table columns type, registration (under the ICAO address), airline (under the
+  callsign) and a country flag from the ICAO address block (a fixed table from ICAO Annex 10; flags
+  are emoji, Windows shows the two letters of the country code); the map draws a symbol per kind
+  (jet, heavy jet, propeller, helicopter, glider, balloon, drone, ground vehicle) from the ICAO type
+  class, or from the emitter category for aircraft the database does not know; the details panel
+  adds type, operator, country, a military mark and **photo links** (Planespotters by ICAO
+  address, JetPhotos by registration). They are plain links that open in a new tab; the page loads
+  no image or script from those sites and does not use their APIs.
+- **Without a database** everything still works; the table shows callsign and address and the
+  note under it says an admin can import one. About 5 % of aircraft are missing from any
+  crowd-sourced database.
+
+## Range statistics
+
+Needs the receiver position (`lat`/`lon` in the start dialog). The plugin sees every snapshot and
+builds, per minute, the farthest position per **5 degree bearing sector** and **altitude band**
+(ground to 5,000 ft, 5-10, 10-20, 20-30, 30-40, above 40,000 ft); positions beyond 1000 km and
+non-ICAO addresses (TIS-B relays) are ignored. It sends one `adsb.range` event a minute with those
+maxima and the message rate and aircraft counts; the worker stores them in PostgreSQL
+(`adsb_range_cells`, `adsb_activity`), so they survive restarts and are kept while nobody watches.
+
+- **Range tab** of the ADS-B overlay: polar plot of the longest reception per direction (all
+  altitudes or one band), the farthest reception with direction, altitude and ICAO address, the
+  longest reception per altitude band, and message rate and aircraft count (heard / with
+  position) over 6 hours, 24 hours, 7 or 30 days (one point per minute, coarser for long spans).
+  **Coverage outline on the map** draws the polygon of the per-direction maxima around the
+  receiver.
+- **Reset** (operators): forgets the maxima, the stored receiver position and the history of that
+  device (`DELETE /api/v1/adsb/range?device=`, audited as `adsb.range.reset`). A receiver that
+  moved more than 2 km starts new statistics by itself.
+- History retention follows `SUPERHET_EVENT_RETENTION_DAYS` (default 30, `0` keeps everything);
+  the maxima are kept until reset. Without a receiver position only message rate and counts are
+  recorded.
+- Range depends on antenna, gain, location and what was in the air: compare receivers by the
+  longest reception at one altitude, not by a single record.
+
 ## Reception
 
 - Antenna: a 1090 MHz antenna makes the difference (a quarter-wave ground plane of 6.9 cm
@@ -145,7 +213,11 @@ countries. The history keeps aircraft identities and positions of third parties 
 - Image: the Dockerfile builds readsb (`READSB_COMMIT`); `scripts/check-plugin-image.sh` pipes a
   synthetic Mode S frame (`scripts/gen-adsb-iq.py`, KLM1023 / 4840D6) through it.
 - Web: `web/src/adsb/` (`model.ts` parsing, ageing and sorting, `store.ts` polling,
-  `AdsbPanel.tsx` the tab, `AdsbView.tsx` the overlay, `AdsbMap.tsx` Leaflet). Browser scenario:
+  `AdsbPanel.tsx` the tab, `AdsbView.tsx` the overlay, `AdsbMap.tsx` Leaflet, `info.ts` database
+  lookups, `icao.ts` / `icaoRanges.ts` country, airline code, symbols, photo links, `range.ts` /
+  `RangePanel.tsx` / `useRange.ts` statistics; admin section `web/src/admin/AircraftDbSection.tsx`).
+  Backend: `crates/superhet-api/src/{adsb,aircraft_db}.rs`, `crates/superhet-db/src/adsb.rs`,
+  `crates/superhet-worker/src/adsb_range.rs`, adapter `src/adsb/range.rs`. Browser scenario:
   `web/e2e/zz-adsb.e2e.ts` (tiles answered locally).
 - Manual check on hardware: with a dongle and a 1090 MHz antenna, start ADS-B from the tab and
   expect messages/s within seconds and aircraft within a minute; compare with a flight tracker for

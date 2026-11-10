@@ -9,7 +9,7 @@
 [plugin]
 id = "org.superhet.decoder.adsb"
 name = "ADS-B aircraft"
-version = "0.1.0"
+version = "0.2.0"
 protocol = 1
 license = "AGPL-3.0-only"
 type = "decoder"

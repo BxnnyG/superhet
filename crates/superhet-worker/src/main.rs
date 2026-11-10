@@ -3,6 +3,7 @@
 //! Today it records the decoder history (DTMF bursts, tone changes, RDS changes and the events of
 //! decoder plugins) into PostgreSQL (`docs/api-decoder-events.md`).
 
+mod adsb_range;
 mod audit;
 mod consumer;
 mod metrics;

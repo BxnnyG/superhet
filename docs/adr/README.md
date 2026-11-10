@@ -29,3 +29,4 @@ Format: one file per decision, `NNNN-short-title.md`, sections *Status*, *Contex
 | [0023](0023-device-access.md) | Per-device access policies | accepted |
 | [0024](0024-oidc-logout.md) | OIDC logout: RP-initiated and back-channel | accepted |
 | [0025](0025-scanner.md) | Scanner in the device daemon, detection on the spectrum | accepted |
+| [0026](0026-adsb-aircraft-database-and-range.md) | ADS-B aircraft database (Mictronics, ODC-By) and range statistics | accepted |

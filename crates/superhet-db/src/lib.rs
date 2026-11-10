@@ -1,5 +1,6 @@
 //! PostgreSQL access layer shared by Superhet services.
 
+pub mod adsb;
 pub mod audit;
 pub mod auth;
 pub mod bans;
