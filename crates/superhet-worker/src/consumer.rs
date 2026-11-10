@@ -173,6 +173,14 @@ impl Consumer {
                 let events = self.recorder.on_tones(dev, now_ms(), &parsed);
                 self.store(events).await;
             }
+            Kind::Scanner => {
+                let Some(dev) = crate::scanner_events::subject_device(subject) else {
+                    return;
+                };
+                if let Some(event) = crate::scanner_events::to_event(dev, &msg.payload) {
+                    self.store(vec![event]).await;
+                }
+            }
             Kind::Rds => {
                 let Some((dev, vfo)) = dev_vfo(subject) else {
                     return;
@@ -196,6 +204,7 @@ enum Kind {
     State,
     Tones,
     Rds,
+    Scanner,
 }
 
 /// Run until `shutdown` resolves. Returns early (with an error) if the subscriptions fail.
@@ -220,6 +229,7 @@ pub async fn run(
     let mut state = sub(subjects::ALL_STATE).await?;
     let mut tones = sub(subjects::ALL_TONES).await?;
     let mut rds = sub(subjects::ALL_RDS).await?;
+    let mut scanner = sub(subjects::ALL_SCANNER_HITS).await?;
     let mut me = Consumer {
         pool,
         client,
@@ -237,6 +247,7 @@ pub async fn run(
             Some(m) = state.next() => me.on_message(&m, Kind::State).await,
             Some(m) = tones.next() => me.on_message(&m, Kind::Tones).await,
             Some(m) = rds.next() => me.on_message(&m, Kind::Rds).await,
+            Some(m) = scanner.next() => me.on_message(&m, Kind::Scanner).await,
             _ = tick.tick() => {
                 let events = me.recorder.tick(now_ms());
                 me.store(events).await;

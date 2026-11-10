@@ -14,6 +14,11 @@ export interface DeviceInfo {
   online: boolean;
   centerHz: number | null;
   sampleRate: number | null;
+  /**
+   * False when the device policy lets this account see the device but not change it (ADR-0023):
+   * no tuning, VFOs, lock, profiles or plugins. Servers without device policies omit the field.
+   */
+  canControl: boolean;
 }
 
 export interface DeviceListApi {
@@ -35,6 +40,7 @@ export function parseDeviceInfo(raw: unknown): DeviceInfo {
     online: raw.online === true,
     centerHz: num(raw.center_hz),
     sampleRate: num(raw.sample_rate),
+    canControl: !isRec(raw.access) || raw.access.control !== false,
   };
 }
 

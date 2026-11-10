@@ -441,6 +441,29 @@ impl Registry {
         }
     }
 
+    /// Sessions that have a socket open on `device`, with the actor behind each (a policy change
+    /// re-checks them).
+    #[must_use]
+    pub fn sessions_on(&self, device: &str) -> Vec<(String, Who)> {
+        let inner = self.lock();
+        let mut keys: Vec<&str> = inner
+            .conns
+            .values()
+            .filter(|c| c.device == device)
+            .map(|c| c.session_key.as_str())
+            .collect();
+        keys.sort_unstable();
+        keys.dedup();
+        keys.into_iter()
+            .filter_map(|key| {
+                inner
+                    .sessions
+                    .get(key)
+                    .map(|s| (key.to_owned(), s.who.clone()))
+            })
+            .collect()
+    }
+
     /// The open connections of a session.
     #[must_use]
     pub fn connections_of(&self, session_key: &str) -> Vec<ConnInfo> {
@@ -611,5 +634,18 @@ mod tests {
                 .is_err()
         );
         assert_eq!(r.devices(), ["dev0"]);
+    }
+
+    #[tokio::test]
+    async fn sessions_are_found_by_device() {
+        let r = registry();
+        let _a = r.connect("s-a", &who(), "spectrum", "dev0").await;
+        let _a2 = r.connect("s-a", &who(), "audio", "dev0").await;
+        let _b = r.connect("s-b", &who(), "state", "rtl1").await;
+        let on_dev0 = r.sessions_on("dev0");
+        assert_eq!(on_dev0.len(), 1);
+        assert_eq!(on_dev0[0].0, "s-a");
+        assert_eq!(r.sessions_on("rtl1")[0].0, "s-b");
+        assert!(r.sessions_on("nowhere").is_empty());
     }
 }

@@ -16,6 +16,8 @@ describe("403 refusals", () => {
     ["mode_not_allowed", "Mode not allowed"],
     ["frequency_not_allowed", "Frequency not allowed"],
     ["locked", "Tuning is locked"],
+    ["device_read_only", "Device is read-only"],
+    ["device_forbidden", "Device not open to you"],
   ])("%s has its own wording", (code, title) => {
     expect(accessNotice(device(code))?.title).toBe(title);
   });

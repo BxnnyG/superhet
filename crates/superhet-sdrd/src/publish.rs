@@ -176,3 +176,32 @@ pub fn spawn_tap_publisher(
         }
     }))
 }
+
+/// Hits buffered between the scanner thread and the publisher task.
+const SCAN_HIT_QUEUE: usize = 32;
+
+/// Start a publisher task for the scanner hits of `device` (`sh.v1.dev.<dev>.scanner.hit`). The
+/// sink never blocks; hits are dropped while the bus is away.
+///
+/// # Errors
+/// Fails if `device` is not usable as a subject token.
+pub fn spawn_scan_hit_publisher(
+    client: Client,
+    device: &str,
+) -> Result<crate::scanner::HitSink, superhet_bus::subjects::InvalidToken> {
+    let subject = superhet_bus::subjects::scanner_hit(device)?;
+    let status = client.clone();
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(SCAN_HIT_QUEUE);
+    tokio::spawn(async move {
+        while let Some(hit) = rx.recv().await {
+            if let Err(e) = client.publish(subject.clone(), hit.into()).await {
+                tracing::warn!(error = %e, "scanner hit publish failed");
+            }
+        }
+    });
+    Ok(Box::new(move |hit| {
+        if status.connection_state() == State::Connected {
+            let _ = tx.try_send(hit);
+        }
+    }))
+}

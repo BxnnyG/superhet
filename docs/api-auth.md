@@ -53,8 +53,11 @@ setup token: ..."; `docker compose logs superhet-api`) or pinned via `SUPERHET_S
 - 401 `invalid_credentials` (same answer and similar timing for unknown user, wrong password and a disabled account)
 - 429 `rate_limited` with `Retry-After: <seconds>` (5 failures per client address, 10 per user name from any address and 50 globally per 15 minutes; also blocks correct passwords while active)
 
-`POST /api/v1/auth/logout` (no body) always answers 204, deletes the session (or ends the guest
-session) if there is one and clears both cookies.
+`POST /api/v1/auth/logout` (no body) deletes the session (or ends the guest session) if there is
+one and clears both cookies. It answers 204; for a session that came from single sign-on, when the
+admin left "also end the provider session" on and the provider advertises an `end_session_endpoint`,
+it answers 200 `{"end_session_url": "..."}` instead (cookies cleared the same way) and the browser
+is expected to navigate there (`docs/api-oidc.md`).
 
 `POST /api/v1/auth/password` with `{"current_password", "new_password"}` (session required).
 - 204; all other sessions of the user are revoked, the calling one stays; a one-time password

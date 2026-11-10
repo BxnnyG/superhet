@@ -33,6 +33,15 @@ export interface ShortcutContext {
    * false = not handled, step by frequency.
    */
   stepChannels?: (steps: number) => boolean;
+  /** Scanner commands; absent for roles that cannot control it. */
+  scan?: {
+    toggle: () => "started" | "stopped" | "setup";
+    togglePause: () => boolean;
+    skipNow: () => boolean;
+    lockoutHeld: () => boolean;
+    /** Open the Scanner tab (nothing to repeat yet). */
+    showTab: () => void;
+  };
 }
 
 /** Run one shortcut; true when it did something (the caller then swallows the key event). */
@@ -127,6 +136,17 @@ export function runShortcut(action: ShortcutAction, ctx: ShortcutContext): boole
     case "palette":
       ctx.openPalette();
       return true;
+    case "scan": {
+      const scan = ctx.scan;
+      if (!scan) return false;
+      if (action.command === "toggle") {
+        if (scan.toggle() === "setup") scan.showTab();
+        return true;
+      }
+      if (action.command === "pause") return scan.togglePause();
+      if (action.command === "skip") return scan.skipNow();
+      return scan.lockoutHeld();
+    }
   }
 }
 

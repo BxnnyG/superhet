@@ -10,6 +10,7 @@ const dev = (id: string, online = true): DeviceInfo => ({
   online,
   centerHz: null,
   sampleRate: null,
+  canControl: true,
 });
 
 const storage = (value: string | null) => ({ getItem: () => value });

@@ -10,6 +10,7 @@ mod bookmarks;
 mod channel_plans;
 mod clientinfo;
 mod decoder_events;
+mod device_access;
 mod device_list;
 mod devices;
 mod hub;
@@ -21,6 +22,7 @@ mod plugin_ui;
 mod plugins;
 mod profiles;
 mod registry;
+mod scanner;
 mod settings;
 mod state_ws;
 mod tiles;
@@ -86,6 +88,7 @@ fn app(
         .merge(plugins::router(devices.clone()))
         .merge(map::router())
         .merge(device_list::router(devices.clone()))
+        .merge(scanner::router(devices.clone()))
         .merge(devices::router(devices));
     let router = Router::new()
         .route("/healthz", get(healthz))

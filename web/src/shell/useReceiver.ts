@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { AudioController } from "../audio/controller";
 import { usePermissions } from "../auth/context";
 import {
+  DEVICE_READ_ONLY,
   NEEDS_OPERATOR,
   canListenVfo,
   canModifyVfo,
@@ -28,6 +29,7 @@ import { ChannelStore } from "../channels/store";
 import { DecoderEventStore } from "../decoders/store";
 import { useM17Audio } from "../m17/audio";
 import { claimOwner } from "../plugins/claim";
+import { ScanControls } from "../scanner/controls";
 import { createPluginApi } from "../plugins/api";
 import { PanelStore } from "../panels/store";
 import { PluginStore } from "../plugins/store";
@@ -70,6 +72,7 @@ export function createBlockReason(
   vfos: readonly { mine?: boolean }[],
   req: { freqHz: number; mode: string },
 ): string | null {
+  if (perms.deviceReadOnly) return DEVICE_READ_ONLY;
   const limit = knownVfoLimit(perms);
   if (limit !== null && ownVfoCount(vfos) >= limit) {
     return `You can open at most ${limit} ${limit === 1 ? "receiver" : "receivers"}. Close one first.`;
@@ -378,6 +381,17 @@ export function useReceiver(device: string) {
   );
 
   const selected = vfoSnap.vfos.find((v) => v.id === vfoSnap.selectedId) ?? null;
+  // The scanner moves the active VFO; its commands also back the keyboard shortcuts.
+  const scan = useMemo(
+    () =>
+      new ScanControls(device, () => {
+        const snap = vfoCtl.getSnapshot();
+        return (snap.vfos.find((v) => v.id === snap.selectedId) ?? snap.vfos[0])?.id ?? null;
+      }),
+    [device, vfoCtl],
+  );
+  const scannerState = tuningSnap.state?.scanner ?? null;
+  useEffect(() => scan.ingest(scannerState), [scan, scannerState]);
   const centerHz = tuningSnap.display?.centerHz ?? null;
   // The plan channel the active VFO sits on (drives the readout chip and channel stepping).
   const channelMatch = useMemo(
@@ -467,6 +481,7 @@ export function useReceiver(device: string) {
     dab,
     dabSnap,
     adsb,
+    scan,
     tuneTo,
     tuneNew,
     startBookmark,

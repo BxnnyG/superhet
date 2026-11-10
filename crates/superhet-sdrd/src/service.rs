@@ -27,6 +27,7 @@ use crate::control::{
 };
 use crate::controller::Controller;
 use crate::overload::OverloadStatus;
+use crate::scanner::{ScanProbe, Scanner};
 use crate::tap::TapShared;
 use crate::vfo::VfoShared;
 use crate::zoom::ZoomHandle;
@@ -74,6 +75,7 @@ pub struct Identity {
 ///
 /// # Errors
 /// Fails if the device id cannot be used in subjects or KV keys, or the subscription is refused.
+#[allow(clippy::too_many_arguments)]
 pub async fn start(
     client: Client,
     identity: Identity,
@@ -82,6 +84,7 @@ pub async fn start(
     zoom: ZoomHandle,
     overload: Arc<OverloadStatus>,
     taps: Arc<TapShared>,
+    scan_probe: Arc<ScanProbe>,
 ) -> Result<Service, Box<dyn std::error::Error>> {
     let Identity { id: device, label } = identity;
     let ctl_subject = subjects::ctl_all(&device)?;
@@ -95,11 +98,18 @@ pub async fn start(
         vfos: Arc::clone(&vfos),
         taps,
     });
+    let scan_device = device.clone();
     let controller = Arc::new(
         Controller::new(device, control, vfos, state_tx)
             .with_label(label)
             .with_overload(Arc::clone(&overload)),
     );
+    let scanner = Arc::new(Scanner::spawn(
+        Arc::clone(&controller),
+        scan_probe,
+        scan_device.clone(),
+        crate::publish::spawn_scan_hit_publisher(client.clone(), &scan_device)?,
+    ));
     let restored = restore_saved_state(&client, &controller, &restore_key).await;
     let persist = restored.persist;
     if !restored.applied {
@@ -135,7 +145,16 @@ pub async fn start(
         let client = client.clone();
         tokio::spawn(async move {
             while let Some(message) = subscription.next().await {
-                handle_message(&client, &controller, &plugin_input, &job_tx, &zoom, message).await;
+                handle_message(
+                    &client,
+                    &controller,
+                    &plugin_input,
+                    &scanner,
+                    &job_tx,
+                    &zoom,
+                    message,
+                )
+                .await;
             }
         })
     };
@@ -380,6 +399,7 @@ async fn handle_message(
     client: &Client,
     controller: &Arc<Controller>,
     input: &Arc<PluginInput>,
+    scanner: &Arc<Scanner>,
     jobs: &mpsc::Sender<TuneJob>,
     zoom: &ZoomHandle,
     message: Message,
@@ -475,6 +495,16 @@ async fn handle_message(
                         Ok(ok_reply(&controller.claim_release(&request.id)))
                     }
                 }
+            })
+            .await;
+            respond(client, &message, reply).await;
+        }
+        scan if scan.starts_with("scanner.") => {
+            let reply = run_blocking({
+                let scanner = Arc::clone(scanner);
+                let name = scan["scanner.".len()..].to_owned();
+                let payload = message.payload.clone();
+                move || scanner.execute(&name, &payload).map(|json| ok_reply(&json))
             })
             .await;
             respond(client, &message, reply).await;

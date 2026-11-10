@@ -2,8 +2,7 @@
 
 Runtime control of an SDR: `superhet-sdrd` serves control requests on the bus and publishes the
 device state; `superhet-api` exposes both over REST. Architecture background: `docs/ARCHITECTURE.md`
-sections 2 and 3. Profiles: `docs/api-profiles.md`. Bookmarks: `docs/api-bookmarks.md`. Not covered yet: recording/decoder lock holders
-and exclusive claims.
+sections 2 and 3. Profiles: `docs/api-profiles.md`. Bookmarks: `docs/api-bookmarks.md`. Scanner: `docs/scanner.md` (lock holder kind `scanner`, `scanner` in the state). Not covered yet: recording/decoder lock holders.
 
 ## REST (superhet-api, port 8073)
 
@@ -26,6 +25,12 @@ each one with `ctl.state` (in parallel): an answer means `"online":true` with th
 answer falls back to the stored document with `"online":false` (a stopped or crashed daemon, `driver`/
 `center_hz`/`sample_rate` are then `null` if nothing was stored). No VFOs or lock holders are
 included. `502` the state bucket cannot be read, `503` no bus. At most 64 devices.
+
+Per-device access policies (ADR-0023, `docs/api-users.md`) apply: the list holds only devices the
+caller may see, each entry carries `"access":{"view":true,"control":bool}` (`control:false` = look and
+listen only; tuning, VFOs, lock, profiles and plugins are refused). Every `/devices/{dev}/...` route and
+every WebSocket (`dev=`) answers `403` with `code` `device_forbidden` (device closed to the caller) or
+`device_read_only` (a change on a read-only device); an invalid or repeated id is `400`.
 
 ### `GET /api/v1/devices/{dev}/state`
 

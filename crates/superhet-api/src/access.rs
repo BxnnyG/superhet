@@ -178,6 +178,7 @@ pub const RULES: &[Rule] = &[
     rule("POST", "/api/v1/devices/{dev}/vfos", Guest),
     rule("PATCH", "/api/v1/devices/{dev}/vfos/{id}", Guest),
     rule("DELETE", "/api/v1/devices/{dev}/vfos/{id}", Guest),
+    rule("POST", "/api/v1/devices/{dev}/scanner/{action}", Operator),
     // WebSocket upgrades.
     rule("GET", "/api/v1/ws/spectrum", Guest),
     rule("GET", "/api/v1/ws/audio", Guest),
@@ -272,6 +273,9 @@ pub const RULES: &[Rule] = &[
     rule("GET", "/api/v1/admin/oidc", Admin),
     rule("PUT", "/api/v1/admin/oidc", Admin),
     rule("POST", "/api/v1/admin/oidc/test", Admin),
+    rule("GET", "/api/v1/admin/device-policies", Admin),
+    rule("PUT", "/api/v1/admin/device-policies/{device}", Admin),
+    rule("DELETE", "/api/v1/admin/device-policies/{device}", Admin),
     rule("GET", "/api/v1/admin/limits", Admin),
     rule("PUT", "/api/v1/admin/limits", Admin),
     rule("GET", "/api/v1/admin/client-report-policy", Admin),
@@ -516,6 +520,7 @@ mod tests {
         let sources = [
             include_str!("devices.rs"),
             include_str!("device_list.rs"),
+            include_str!("scanner.rs"),
             include_str!("ws.rs"),
             include_str!("audio_ws.rs"),
             include_str!("state_ws.rs"),

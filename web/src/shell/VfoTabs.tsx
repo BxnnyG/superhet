@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from "react";
 import { usePermissions } from "../auth/context";
 import {
-  NOT_YOUR_VFO,
+  DEVICE_READ_ONLY,
+  notEditableReason,
   canListenVfo,
   canModifyVfo,
   knownVfoLimit,
@@ -39,6 +40,7 @@ export function VfoTabs({ r }: { r: Receiver }) {
   // `vfo_limit` becomes a toast). Only a limit known up front, the guest policy, disables the button.
   const limit = knownVfoLimit(perms);
   const full = limit !== null && ownVfoCount(vfos) >= limit;
+  const deviceReadOnly = perms.deviceReadOnly;
   const locked = r.locks.length > 0;
   const centerHz = r.tuningSnap.display?.centerHz ?? null;
   const plugins = useSyncExternalStore(r.plugins.subscribe, r.plugins.getSnapshot);
@@ -78,14 +80,16 @@ export function VfoTabs({ r }: { r: Receiver }) {
       <IconButton
         label="Add VFO"
         tip={
-          full
-            ? `Receiver limit reached (${limit}). Close one first`
-            : "New VFO at the display centre (Ctrl/Alt-click on the spectrum creates one at the pointer)"
+          deviceReadOnly
+            ? DEVICE_READ_ONLY
+            : full
+              ? `Receiver limit reached (${limit}). Close one first`
+              : "New VFO at the display centre (Ctrl/Alt-click on the spectrum creates one at the pointer)"
         }
         variant="secondary"
         size="sm"
         className="max-phone:size-11"
-        disabled={full || !loaded || centerHz === null}
+        disabled={full || deviceReadOnly || !loaded || centerHz === null}
         onClick={() => r.createVfoAt(centerHz)}
       >
         <PlusIcon />
@@ -122,6 +126,7 @@ function VfoTab({
   onListen: (id: number, on: boolean) => void;
   onClose: () => void;
 }) {
+  const perms = usePermissions();
   const paused = vfo.status === "paused";
   const hint = ownershipHint(vfo);
   return (
@@ -170,7 +175,7 @@ function VfoTab({
           <CloseIcon size={14} />
         </IconButton>
       ) : (
-        <span title={NOT_YOUR_VFO} className="inline-block w-2" aria-hidden="true" />
+        <span title={notEditableReason(perms)} className="inline-block w-2" aria-hidden="true" />
       )}
     </div>
   );

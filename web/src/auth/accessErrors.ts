@@ -1,6 +1,6 @@
 // Wording for the 403 answers of the multi-user API (docs/api-users.md): the codes the device
 // routes put in `code` (`not_owner`, `vfo_limit`, `mode_not_allowed`, `frequency_not_allowed`,
-// `locked` for guests) and the access table's plain `forbidden` / `password_change_required`.
+// `locked` for guests, `device_forbidden` / `device_read_only` from the per-device policy) and the access table's plain `forbidden` / `password_change_required`.
 
 import { ApiError } from "../spectrum/api";
 import { toasts } from "../ui/toast";
@@ -30,6 +30,14 @@ const NOTICES: Record<string, AccessNotice> = {
   locked: {
     title: "Tuning is locked",
     body: "Guests cannot open receivers while an operator holds the tuning lock.",
+  },
+  device_read_only: {
+    title: "Device is read-only",
+    body: "Your account can look and listen on this device but not change it.",
+  },
+  device_forbidden: {
+    title: "Device not open to you",
+    body: "An admin has not opened this device to your account.",
   },
   forbidden: {
     title: "Not allowed",

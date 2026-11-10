@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { useEffect } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createDeviceListApi, parseDeviceInfo, type DeviceInfo, type DeviceListApi } from "./api";
+import { AuthContext, usePermissions } from "../auth/context";
+import { accountStatus, authValue } from "../auth/testing";
 import { DEVICE_STORAGE_KEY } from "./choice";
 import { useDevices } from "./context";
 import { DevicesProvider, POLL_MS } from "./DevicesProvider";
@@ -14,6 +16,7 @@ const dev = (id: string, online = true, label: string | null = null): DeviceInfo
   online,
   centerHz: 100e6,
   sampleRate: 2_048_000,
+  canControl: true,
 });
 
 function Probe() {
@@ -82,6 +85,36 @@ it("polls, and keeps the last list when a poll fails", async () => {
   expect(screen.getByTestId("count")).toHaveTextContent("2");
 });
 
+it("gives a device the account may only look at read-only permissions", async () => {
+  function Perms() {
+    const p = usePermissions();
+    return (
+      <span data-testid="perms">
+        {String(p.canTune)}/{String(p.canUsePlugins)}/{String(p.deviceReadOnly)}
+      </span>
+    );
+  }
+  const api: DeviceListApi = {
+    list: vi.fn().mockResolvedValue([dev("dev0"), { ...dev("dev1"), canControl: false }]),
+  };
+  render(
+    <AuthContext.Provider value={authValue(accountStatus("operator"))}>
+      <DevicesProvider api={api}>
+        {() => (
+          <>
+            <Probe />
+            <Perms />
+          </>
+        )}
+      </DevicesProvider>
+    </AuthContext.Provider>,
+  );
+  await waitFor(() => expect(screen.getByTestId("count")).toHaveTextContent("2"));
+  expect(screen.getByTestId("perms")).toHaveTextContent("true/true/false");
+  fireEvent.click(screen.getByRole("button", { name: "pick dev1" }));
+  expect(screen.getByTestId("perms")).toHaveTextContent("false/false/true");
+});
+
 it("parses the list reply and rejects malformed entries", async () => {
   const body = {
     v: 1,
@@ -90,6 +123,12 @@ it("parses the list reply and rejects malformed entries", async () => {
   const ok = vi.fn().mockResolvedValue(new Response(JSON.stringify(body)));
   const [d] = await createDeviceListApi(ok).list();
   expect(d).toMatchObject({ id: "dev1", label: "Roof", online: true, centerHz: 1, sampleRate: 2 });
+  expect(d?.canControl).toBe(true);
+  // The policy flag: only an explicit `control: false` makes a device read-only.
+  expect(parseDeviceInfo({ id: "a", access: { view: true, control: false } }).canControl).toBe(
+    false,
+  );
+  expect(parseDeviceInfo({ id: "a", access: { view: true, control: true } }).canControl).toBe(true);
   expect(() => parseDeviceInfo({ online: true })).toThrow();
   const bad = vi.fn().mockResolvedValue(new Response(JSON.stringify({ devices: 3 })));
   await expect(createDeviceListApi(bad).list()).rejects.toThrow();

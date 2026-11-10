@@ -3,7 +3,7 @@
 //!
 //! Holders are a list, not a flag, so recordings, decoders and exclusive claims can join later
 //! without changing the state document or the error shape. Today only the manual `user` lock
-//! exists (`ctl.lock.acquire` / `ctl.lock.release`).
+//! exists (`ctl.lock.acquire` / `ctl.lock.release`), plus the exclusive claims and the scanner.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -19,6 +19,8 @@ pub enum HolderKind {
     User,
     /// An exclusive device claim of a plugin instance (`ctl.claim.acquire`).
     Claim,
+    /// The scanner (`ctl.scanner.start`): it moves the centre itself, nobody else may.
+    Scanner,
 }
 
 /// One lock holder as shown in the state document and in `locked` errors.
@@ -59,6 +61,17 @@ impl Holder {
         Self {
             kind: HolderKind::Claim,
             id: id.to_owned(),
+            since_ms: unix_ms(),
+            name: None,
+        }
+    }
+
+    /// The scanner, taken now.
+    #[must_use]
+    pub fn scanner() -> Self {
+        Self {
+            kind: HolderKind::Scanner,
+            id: "scan".to_owned(),
             since_ms: unix_ms(),
             name: None,
         }
@@ -131,6 +144,18 @@ impl LockSet {
         self.holders.len() != before
     }
 
+    /// Whether the scanner is a holder.
+    #[must_use]
+    pub fn has_scanner(&self) -> bool {
+        self.holders.iter().any(|h| h.kind == HolderKind::Scanner)
+    }
+
+    /// Whether nobody but the scanner holds the lock (and the scanner does).
+    #[must_use]
+    pub fn only_scanner(&self) -> bool {
+        self.has_scanner() && self.holders.iter().all(|h| h.kind == HolderKind::Scanner)
+    }
+
     /// Whether any holder exists.
     #[must_use]
     pub fn is_locked(&self) -> bool {
@@ -153,6 +178,7 @@ impl LockSet {
                 (HolderKind::User, Some(name)) => format!("user {name}"),
                 (HolderKind::User, None) => "user".to_owned(),
                 (HolderKind::Claim, _) => format!("exclusive plugin {}", h.id),
+                (HolderKind::Scanner, _) => "scanner".to_owned(),
             })
             .collect();
         CtlError {
@@ -183,6 +209,22 @@ mod tests {
         assert!(locks.release(HolderKind::User, "user"));
         assert!(!locks.release(HolderKind::User, "user"));
         assert!(!locks.is_locked());
+    }
+
+    #[test]
+    fn scanner_holder_is_recognised_and_named() {
+        let mut locks = LockSet::default();
+        assert!(!locks.has_scanner() && !locks.only_scanner());
+        locks.acquire(Holder::scanner());
+        assert!(locks.only_scanner());
+        locks.acquire(Holder::user());
+        assert!(locks.has_scanner() && !locks.only_scanner());
+        assert_eq!(
+            locks.error("tuning").message,
+            "tuning is locked by: scanner, user"
+        );
+        assert!(locks.release_kind(HolderKind::Scanner));
+        assert!(!locks.has_scanner());
     }
 
     #[test]

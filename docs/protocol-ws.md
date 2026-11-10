@@ -9,7 +9,10 @@ browser-facing edge described in `docs/ARCHITECTURE.md` (section 2, step 3a). Th
 ## Connection
 
 - Upgrade is refused with `400` (invalid or missing `dev`), `403` (`Origin` not allowed) or `503`
-  (no bus, too many clients/devices, subscription failed).
+  (no bus, too many clients/devices, subscription failed). All WebSockets with a `dev` also answer
+  `403` with `code` `device_forbidden` when a device policy closes that device to the caller
+  (ADR-0023, `docs/api-users.md`); this check runs before the upgrade. A policy change that takes the
+  device away closes the caller's open sockets.
 - `Origin` check: with `SUPERHET_ALLOWED_ORIGINS` (comma separated, e.g. `https://sdr.example.org`)
   only exact matches pass; without it the origin must equal the `Host` header (same-origin).
   Requests without `Origin` (non-browser clients) pass the check.

@@ -26,7 +26,9 @@ export type ShortcutAction =
   /** Type a frequency into the active VFO's readout. */
   | { type: "focusFrequency" }
   | { type: "palette" }
-  | { type: "help" };
+  | { type: "help" }
+  /** Scanner: start / stop, pause / resume, skip, lock out the held channel. */
+  | { type: "scan"; command: "toggle" | "pause" | "skip" | "lockout" };
 
 /** Modes on keys 1-6. */
 export const MODE_KEYS: readonly { mode: VfoMode; label: string }[] = [
@@ -91,6 +93,14 @@ export function shortcutFor(e: KeyLike): ShortcutAction | null {
     return entry ? { type: "mode", ...entry } : null;
   }
   switch (e.key.toLowerCase()) {
+    case "g":
+      return { type: "scan", command: "toggle" };
+    case "p":
+      return { type: "scan", command: "pause" };
+    case "k":
+      return { type: "scan", command: "skip" };
+    case "l":
+      return { type: "scan", command: "lockout" };
     case "m":
       return { type: "listen" };
     case "s":
@@ -140,7 +150,7 @@ export function ignoresShortcuts(target: EventTarget | null, root: ParentNode = 
 export const PALETTE_KEY: string =
   typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform) ? "⌘K" : "Ctrl K";
 
-export type ShortcutGroupTitle = "Tuning" | "Receiver" | "Spectrum" | "Layout";
+export type ShortcutGroupTitle = "Tuning" | "Receiver" | "Scanner" | "Spectrum" | "Layout";
 
 export interface ShortcutDef {
   /** Stable id; command palette entries refer to it to show the key hint. */
@@ -184,6 +194,10 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
   },
   { id: "listen", group: "Receiver", keys: ["M"], label: "Mute / unmute the active VFO" },
   { id: "autoSquelch", group: "Receiver", keys: ["S"], label: "Squelch Auto on / off" },
+  { id: "scanToggle", group: "Scanner", keys: ["G"], label: "Start / stop the scanner (go)" },
+  { id: "scanPause", group: "Scanner", keys: ["P"], label: "Pause / resume the scanner" },
+  { id: "scanSkip", group: "Scanner", keys: ["K"], label: "Skip the held channel" },
+  { id: "scanLockout", group: "Scanner", keys: ["L"], label: "Lock out the held channel" },
   { id: "zoom", group: "Spectrum", keys: ["+", "−"], label: "Zoom in / out" },
   { id: "zoomReset", group: "Spectrum", keys: ["0"], label: "Reset zoom" },
   {
@@ -213,7 +227,13 @@ export function shortcutKeys(id: string): readonly string[] | null {
   return SHORTCUTS.find((s) => s.id === id)?.keys ?? null;
 }
 
-const GROUP_ORDER: readonly ShortcutGroupTitle[] = ["Tuning", "Receiver", "Spectrum", "Layout"];
+const GROUP_ORDER: readonly ShortcutGroupTitle[] = [
+  "Tuning",
+  "Receiver",
+  "Scanner",
+  "Spectrum",
+  "Layout",
+];
 
 /** The registry grouped for display. */
 export const SHORTCUT_GROUPS: readonly {

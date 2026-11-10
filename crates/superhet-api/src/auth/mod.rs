@@ -38,6 +38,7 @@ use crate::access::{self, Actor, Principal, Role};
 use crate::audit::Audit;
 use crate::clientinfo::Enricher;
 use crate::clientinfo::addr::{self, ProxyTrust};
+use crate::device_access::{self, DevicePolicies};
 use crate::origin::OriginPolicy;
 use crate::registry::Registry;
 use crate::settings::SettingsStore;
@@ -185,6 +186,7 @@ struct Inner {
     /// Failed logins per user name, across all addresses.
     name_limiter: limiter::NameLimiter,
     settings: Arc<SettingsStore>,
+    device_policies: Arc<DevicePolicies>,
     audit: Audit,
     registry: Registry,
     bans: Arc<bans::Bans>,
@@ -237,6 +239,7 @@ impl AuthState {
     ) -> Result<Self, String> {
         let dummy_hash = password::hash(DUMMY_PASSWORD)?;
         let settings = Arc::new(SettingsStore::new(db.clone()));
+        let device_policies = Arc::new(DevicePolicies::new(db.clone()));
         let audit = Audit::new(db.clone(), Arc::clone(&settings));
         let registry = Registry::new(audit.clone());
         let oidc = oidc::OidcState::new(config.oidc.clone());
@@ -251,6 +254,7 @@ impl AuthState {
             setup_token: Mutex::new(None),
             setup_done: AtomicBool::new(false),
             settings,
+            device_policies,
             audit,
             registry,
             bans: Arc::new(bans::Bans::default()),
@@ -288,6 +292,12 @@ impl AuthState {
     #[must_use]
     pub fn settings(&self) -> &SettingsStore {
         &self.0.settings
+    }
+
+    /// Per-device access policies (ADR-0023).
+    #[must_use]
+    pub fn device_policies(&self) -> &DevicePolicies {
+        &self.0.device_policies
     }
 
     /// Guest sessions and live connections.
@@ -614,6 +624,11 @@ async fn enforce(State(auth): State<AuthState>, mut request: Request, next: Next
             serde_json::json!({}),
         );
         return forbidden();
+    }
+    if let Err(response) =
+        device_access::gate(&auth, &principal, request.method(), &pattern, request.uri()).await
+    {
+        return *response;
     }
     request.extensions_mut().insert(principal);
     next.run(request).await
