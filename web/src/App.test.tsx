@@ -125,7 +125,7 @@ it("shows the account section and signs out when rendered inside a session", () 
 
 it("the device pill lists several devices and switches on a click", () => {
   const select = vi.fn();
-  const info = (id: string, online: boolean, label: string | null) => ({
+  const info = (id: string, online: boolean, label: string | null, canControl = true) => ({
     id,
     label,
     driver: "rtlsdr",
@@ -133,11 +133,12 @@ it("the device pill lists several devices and switches on a click", () => {
     online,
     centerHz: 100e6,
     sampleRate: 2_048_000,
+    canControl,
   });
   render(
     <DevicesContext.Provider
       value={{
-        devices: [info("dev0", true, "Roof"), info("dev1", false, null)],
+        devices: [info("dev0", true, "Roof"), info("dev1", false, null, false)],
         device: "dev0",
         select,
       }}
@@ -148,6 +149,8 @@ it("the device pill lists several devices and switches on a click", () => {
   fireEvent.click(screen.getByRole("button", { name: /Roof/ }));
   const list = within(screen.getByRole("list", { name: "Devices" }));
   expect(list.getByText("Offline")).toBeInTheDocument();
+  // A device this account may only look at says so in the picker.
+  expect(list.getByText("Read-only")).toBeInTheDocument();
   fireEvent.click(list.getByRole("button", { name: /dev1/ }));
   expect(select).toHaveBeenCalledWith("dev1");
 });

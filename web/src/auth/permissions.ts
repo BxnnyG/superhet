@@ -38,6 +38,8 @@ export interface Permissions {
   holderId: string | null | undefined;
   /** Policy of a guest session. */
   guestLimits: GuestLimits | null;
+  /** The shown device is read-only for this account (per-device policy, ADR-0023). */
+  deviceReadOnly: boolean;
 }
 
 function build(
@@ -74,6 +76,7 @@ function build(
     canAdmin: admin,
     holderId,
     guestLimits,
+    deviceReadOnly: false,
   };
 }
 
@@ -88,6 +91,25 @@ export function permissionsFor(status: AuthStatus, guestLimits: GuestLimits | nu
     guest ? null : status.userId,
     guest ? guestLimits : null,
   );
+}
+
+/**
+ * The permissions on a device whose policy only lets this account look and listen: nothing that
+ * changes the device (tuning, lock, VFOs, profiles, plugin instances, history clearing). Bookmarks
+ * and the console do not depend on a device and stay as they are.
+ */
+export function readOnlyOnDevice(p: Permissions): Permissions {
+  return {
+    ...p,
+    canTune: false,
+    canLock: false,
+    canForceUnlock: false,
+    canProfiles: false,
+    canClearHistory: false,
+    canUsePlugins: false,
+    seesAllVfos: false,
+    deviceReadOnly: true,
+  };
 }
 
 export const ROLE_LABEL: Record<Role, string> = {
@@ -105,6 +127,11 @@ export function roleLabel(p: Pick<Permissions, "role" | "isGuest">): string {
 export const NEEDS_OPERATOR = "Operators and admins only";
 export const NEEDS_ACCOUNT = "Sign in with an account to use this";
 export const NOT_YOUR_VFO = "This receiver belongs to someone else";
+export const DEVICE_READ_ONLY = "This device is read-only for your account";
+
+/** Why a receiver cannot be changed: the device policy, else somebody else owns it. */
+export const notEditableReason = (p: Pick<Permissions, "deviceReadOnly">): string =>
+  p.deviceReadOnly ? DEVICE_READ_ONLY : NOT_YOUR_VFO;
 
 interface VfoOwnership {
   mine?: boolean;
@@ -113,6 +140,7 @@ interface VfoOwnership {
 
 /** Own VFOs are editable for everybody; operators and admins may change any VFO. */
 export function canModifyVfo(p: Permissions, vfo: VfoOwnership): boolean {
+  if (p.deviceReadOnly) return false;
   return p.seesAllVfos || vfo.mine !== false;
 }
 

@@ -186,7 +186,7 @@ All decoders are plugins (separate processes). Without a codec plugin, voice dec
 | Service split sdrd / api / pluginhost / worker + NATS JetStream | MVP | ADR-0007 |
 | Secrets generation, NATS per-service auth, non-root hardened containers | MVP | – |
 | Install script Debian/Arch VM with systemd | later (P5) | USB passthrough to VM must be documented |
-| Multi-device operation (local sticks) | v1 | `docs/multi-device.md`; per-device access rules and remote devices later |
+| Multi-device operation (local sticks) | v1 | `docs/multi-device.md`; per-device access policies: ADR-0023; remote devices later |
 
 ## 8. Users, roles, guest access, admin console (P1.5)
 

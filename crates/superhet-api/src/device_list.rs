@@ -10,11 +10,13 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use async_nats::{Client, jetstream};
-use axum::{Router, extract::State, http::StatusCode, response::Response, routing::get};
+use axum::{Extension, Router, extract::State, http::StatusCode, response::Response, routing::get};
 use futures_util::{StreamExt, future::join_all};
 use serde_json::{Value, json};
 use superhet_bus::subjects;
 
+use crate::access::Principal;
+use crate::device_access::{DevicePolicy, Need, Subject};
 use crate::devices::{
     DevicesState, connected, ctl_request, failure, json as json_response, read_kv,
 };
@@ -106,7 +108,27 @@ async fn describe(client: &Client, id: String) -> Value {
     entry(&id, &Value::Null, false)
 }
 
-async fn list_devices(State(state): State<DevicesState>) -> Response {
+/// The ids `subject` may see, each with whether it may also control the device (ADR-0023).
+fn visible(
+    ids: BTreeSet<String>,
+    table: &std::collections::HashMap<String, DevicePolicy>,
+    subject: &Subject,
+) -> Vec<(String, bool)> {
+    let open = DevicePolicy::default();
+    ids.into_iter()
+        .filter_map(|id| {
+            let policy = table.get(&id).unwrap_or(&open);
+            policy
+                .allows(subject, Need::View)
+                .then(|| (id, policy.allows(subject, Need::Control)))
+        })
+        .collect()
+}
+
+async fn list_devices(
+    State(state): State<DevicesState>,
+    Extension(principal): Extension<Principal>,
+) -> Response {
     let client = match connected(state.nats.as_ref()) {
         Ok(client) => client,
         Err(e) => return e.into_response(),
@@ -118,10 +140,22 @@ async fn list_devices(State(state): State<DevicesState>) -> Response {
             "device registry unavailable",
         );
     };
+    let Ok(table) = state.auth.device_policies().table().await else {
+        return failure(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "unavailable",
+            "device policy unavailable",
+        );
+    };
+    let ids = visible(ids, &table, &Subject::from(&principal));
     let devices = join_all(
         ids.into_iter()
             .take(MAX_DEVICES)
-            .map(|id| describe(client, id)),
+            .map(|(id, control)| async move {
+                let mut item = describe(client, id).await;
+                item["access"] = json!({"view": true, "control": control});
+                item
+            }),
     )
     .await;
     json_response(
@@ -169,9 +203,66 @@ mod tests {
         assert!(bare["driver"].is_null());
     }
 
+    #[test]
+    fn the_list_holds_only_devices_the_caller_may_see() {
+        use crate::access::Role;
+        let ids = || ["dev0", "private", "ops", "ro"].map(str::to_owned).into();
+        let table = std::collections::HashMap::from([
+            (
+                "private".to_owned(),
+                DevicePolicy {
+                    allowed_users: vec![7],
+                    ..DevicePolicy::default()
+                },
+            ),
+            (
+                "ops".to_owned(),
+                DevicePolicy {
+                    view_role: Role::Operator,
+                    ..DevicePolicy::default()
+                },
+            ),
+            (
+                "ro".to_owned(),
+                DevicePolicy {
+                    control_role: Role::Operator,
+                    ..DevicePolicy::default()
+                },
+            ),
+        ]);
+        let subject = |guest, user_id, role| Subject {
+            guest,
+            user_id,
+            role,
+        };
+        let listener = visible(ids(), &table, &subject(false, Some(1), Role::Listener));
+        assert_eq!(
+            listener,
+            [("dev0".to_owned(), true), ("ro".to_owned(), false)]
+        );
+        let listed = visible(ids(), &table, &subject(false, Some(7), Role::Listener));
+        assert_eq!(
+            listed.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
+            ["dev0", "private", "ro"]
+        );
+        let guest = visible(ids(), &table, &subject(true, None, Role::Listener));
+        assert_eq!(guest.len(), 2);
+        let operator = visible(ids(), &table, &subject(false, Some(2), Role::Operator));
+        assert_eq!(
+            operator
+                .iter()
+                .map(|(id, _)| id.as_str())
+                .collect::<Vec<_>>(),
+            ["dev0", "ops", "ro"]
+        );
+        let admin = visible(ids(), &table, &subject(false, Some(3), Role::Admin));
+        assert_eq!(admin.len(), 4);
+        assert!(admin.iter().all(|(_, control)| *control));
+    }
+
     #[tokio::test]
     async fn without_a_bus_the_list_is_unavailable() {
-        let app = router(DevicesState::for_tests());
+        let app = crate::access::as_test_principal(router(DevicesState::for_tests()));
         let response = app
             .oneshot(
                 Request::get("/api/v1/devices")
