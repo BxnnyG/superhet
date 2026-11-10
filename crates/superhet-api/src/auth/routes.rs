@@ -190,6 +190,26 @@ pub(super) async fn start_session(
     user_id: i64,
     client: &ClientInfo,
 ) -> Result<String, Response> {
+    start_session_with(auth, user_id, client, None).await
+}
+
+/// [`start_session`] for a login through OIDC: the session remembers the provider, its session
+/// id and the ID token (docs/adr/0024-oidc-logout.md).
+pub(super) async fn start_oidc_session(
+    auth: &AuthState,
+    user_id: i64,
+    client: &ClientInfo,
+    oidc: &superhet_db::oidc::SessionOidc<'_>,
+) -> Result<String, Response> {
+    start_session_with(auth, user_id, client, Some(oidc)).await
+}
+
+async fn start_session_with(
+    auth: &AuthState,
+    user_id: i64,
+    client: &ClientInfo,
+    oidc: Option<&superhet_db::oidc::SessionOidc<'_>>,
+) -> Result<String, Response> {
     let db = auth.db()?;
     let raw = token::generate_session_token().map_err(|err| {
         tracing::error!(%err, "no randomness for a session token");
@@ -197,16 +217,25 @@ pub(super) async fn start_session(
     })?;
     let ip = client.ip.map(|ip| ip.to_string());
     let peer = client.peer.map(|ip| ip.to_string());
-    superhet_db::auth::create_session_from(
-        db,
-        &token::hash_token(&raw),
-        user_id,
-        client.user_agent.as_deref(),
-        ip.as_deref(),
-        peer.as_deref(),
-    )
-    .await
-    .map_err(db_failed)?;
+    let id = token::hash_token(&raw);
+    let stored = match oidc {
+        Some(oidc) => {
+            let who = (client.user_agent.as_deref(), ip.as_deref(), peer.as_deref());
+            superhet_db::oidc::create_session(db, &id, user_id, who, oidc).await
+        }
+        None => {
+            superhet_db::auth::create_session_from(
+                db,
+                &id,
+                user_id,
+                client.user_agent.as_deref(),
+                ip.as_deref(),
+                peer.as_deref(),
+            )
+            .await
+        }
+    };
+    stored.map_err(db_failed)?;
     Ok(token::session_cookie(&raw, client.secure))
 }
 
@@ -441,33 +470,48 @@ async fn logout_inner(auth: &AuthState, client: &ClientInfo, headers: &HeaderMap
     guard_origin(auth, headers)?;
     let db = auth.db()?;
     // Resolve first (it also refreshes a guest), then end whatever sessions the cookies name.
-    if let Some(principal) = auth
+    let principal = auth
         .resolve_principal(headers, client)
         .await
-        .map_err(db_failed)?
-    {
+        .map_err(db_failed)?;
+    let mut end_session_url = None;
+    if let Some(raw) = token::token_from_headers(headers) {
+        let ended = superhet_db::oidc::end_session(db, &token::hash_token(&raw))
+            .await
+            .map_err(db_failed)?;
+        // A session that came from OIDC also ends at the provider, when the admin wants that
+        // and the provider can: the browser is sent there with the reply.
+        if let Some(ended) = ended {
+            end_session_url = super::oidc::provider_logout_url(auth, &ended).await;
+        }
+    }
+    if let Some(principal) = principal {
         auth.audit()
             .log(
                 &principal.who(),
                 "auth.logout",
                 None,
                 Outcome::Ok,
-                serde_json::json!({}),
+                serde_json::json!({"provider_logout": end_session_url.is_some()}),
             )
             .await;
-    }
-    if let Some(raw) = token::token_from_headers(headers) {
-        superhet_db::auth::delete_session(db, &token::hash_token(&raw))
-            .await
-            .map_err(db_failed)?;
     }
     if let Some(raw) = token::guest_token_from_headers(headers) {
         auth.registry().guest_remove(&token::hash_token(&raw));
     }
-    no_content_cookies(&[
-        &token::clearing_cookie(client.secure),
-        &token::clearing_guest_cookie(client.secure),
-    ])
+    let cookies = [
+        token::clearing_cookie(client.secure),
+        token::clearing_guest_cookie(client.secure),
+    ];
+    let Some(url) = end_session_url else {
+        return no_content_cookies(&[&cookies[0], &cookies[1]]);
+    };
+    let mut response = json_reply(StatusCode::OK, &serde_json::json!({"end_session_url": url}));
+    for cookie in &cookies {
+        let value = HeaderValue::try_from(cookie.as_str()).map_err(|_| internal())?;
+        response.headers_mut().append(header::SET_COOKIE, value);
+    }
+    Ok(response)
 }
 
 async fn change_password(

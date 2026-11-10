@@ -249,6 +249,106 @@ pub async fn has_active_oidc_admin(pool: &PgPool) -> Result<bool, Error> {
     .await?)
 }
 
+/// What a session remembers about the OIDC login it came from (docs/adr/0024-oidc-logout.md).
+#[derive(Debug, Clone, Copy)]
+pub struct SessionOidc<'a> {
+    /// Issuer that authenticated the user.
+    pub issuer: &'a str,
+    /// The provider's session id (`sid` claim), if the ID token had one.
+    pub sid: Option<&'a str>,
+    /// The ID token, kept as `id_token_hint` for the provider logout.
+    pub id_token: Option<&'a str>,
+}
+
+/// Store a new session that came from an OIDC login. `client` is user agent, client address and
+/// TCP peer address.
+///
+/// # Errors
+/// Fails if the insert fails.
+pub async fn create_session(
+    pool: &PgPool,
+    id: &[u8],
+    user_id: i64,
+    client: (Option<&str>, Option<&str>, Option<&str>),
+    oidc: &SessionOidc<'_>,
+) -> Result<(), Error> {
+    let (user_agent, ip, peer) = client;
+    sqlx::query(
+        "INSERT INTO superhet.sessions \
+         (id, user_id, user_agent, ip, peer_ip, oidc_issuer, oidc_sid, oidc_id_token) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    )
+    .bind(id)
+    .bind(user_id)
+    .bind(user_agent)
+    .bind(ip)
+    .bind(peer)
+    .bind(oidc.issuer)
+    .bind(oidc.sid)
+    .bind(oidc.id_token)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// The OIDC part of a session that was just ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EndedSession {
+    /// Issuer of the login, `None` for a password session.
+    pub issuer: Option<String>,
+    /// The stored ID token (the `id_token_hint`).
+    pub id_token: Option<String>,
+}
+
+/// Delete one session (logout) and report what it knew about its OIDC login.
+///
+/// # Errors
+/// Fails if the query fails.
+pub async fn end_session(pool: &PgPool, id: &[u8]) -> Result<Option<EndedSession>, Error> {
+    let row = sqlx::query(
+        "DELETE FROM superhet.sessions WHERE id = $1 RETURNING oidc_issuer, oidc_id_token",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| EndedSession {
+        issuer: r.get("oidc_issuer"),
+        id_token: r.get("oidc_id_token"),
+    }))
+}
+
+/// End the OIDC sessions a back-channel logout names: those of `issuer` with provider session
+/// `sid` and/or belonging to the account linked to `subject`. With both, a session must match
+/// both. Without either nothing is deleted. Returns the ids of the sessions that ended (so open
+/// connections of them can be closed).
+///
+/// # Errors
+/// Fails if the query fails.
+pub async fn end_sessions_for_logout(
+    pool: &PgPool,
+    issuer: &str,
+    sid: Option<&str>,
+    subject: Option<&str>,
+) -> Result<Vec<Vec<u8>>, Error> {
+    if sid.is_none() && subject.is_none() {
+        return Ok(Vec::new());
+    }
+    let rows = sqlx::query(
+        "DELETE FROM superhet.sessions s WHERE s.oidc_issuer = $1 \
+           AND ($2::text IS NULL OR s.oidc_sid = $2) \
+           AND ($3::text IS NULL OR s.user_id IN \
+                (SELECT i.user_id FROM superhet.oidc_identities i \
+                 WHERE i.issuer = $1 AND i.subject = $3)) \
+         RETURNING s.id",
+    )
+    .bind(issuer)
+    .bind(sid)
+    .bind(subject)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(|r| r.get("id")).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

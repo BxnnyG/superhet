@@ -31,6 +31,8 @@ async fn view(state: &AdminState) -> Result<Value, Response> {
         "oidc": to_value(&settings),
         "source": source,
         "redirect_url": settings.redirect_url().ok(),
+        "post_logout_url": settings.post_logout_url().ok(),
+        "backchannel_url": settings.backchannel_url().ok(),
         "client_secret_set": env.client_secret.is_some(),
         "oidc_admin_exists": oidc_admin,
         "local_login_active": auth.local_login_allowed().await,
@@ -124,7 +126,11 @@ async fn test_inner(state: &AdminState) -> Reply {
     )
     .await;
     let body = match result {
-        Ok(provider) => json!({"ok": true, "issuer": provider.issuer()}),
+        Ok(provider) => json!({
+            "ok": true,
+            "issuer": provider.issuer(),
+            "end_session": provider.has_end_session(),
+        }),
         Err(err) => json!({"ok": false, "error": err.to_string()}),
     };
     Ok(json_reply(StatusCode::OK, &body))

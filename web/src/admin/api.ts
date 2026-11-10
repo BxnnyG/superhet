@@ -408,6 +408,10 @@ export interface OidcSettings {
   linkByEmail: boolean;
   syncRoles: boolean;
   localLogin: boolean;
+  /** Signing out of Superhet also ends the session at the provider (when it supports that). */
+  rpLogout: boolean;
+  /** Accept the provider's back-channel logout requests. */
+  backchannelLogout: boolean;
 }
 
 export interface OidcView {
@@ -416,6 +420,10 @@ export interface OidcView {
   source: "env" | "database";
   /** To register at the provider; null until the public URL is set. */
   redirectUrl: string | null;
+  /** To register as post-logout redirect URI; null until the public URL is set. */
+  postLogoutUrl: string | null;
+  /** To register as back-channel logout URL; null until the public URL is set. */
+  backchannelUrl: string | null;
   clientSecretSet: boolean;
   oidcAdminExists: boolean;
   /** Password logins are accepted right now. */
@@ -427,6 +435,8 @@ export interface OidcTestResult {
   ok: boolean;
   issuer: string | null;
   error: string | null;
+  /** The provider advertises an end session endpoint (RP-initiated logout). */
+  endSession: boolean;
 }
 
 export const DEFAULT_OIDC_SETTINGS: OidcSettings = {
@@ -446,6 +456,8 @@ export const DEFAULT_OIDC_SETTINGS: OidcSettings = {
   linkByEmail: false,
   syncRoles: true,
   localLogin: true,
+  rpLogout: true,
+  backchannelLogout: true,
 };
 
 const strList = (v: unknown): string[] => list(v).filter((x): x is string => typeof x === "string");
@@ -473,9 +485,13 @@ export function parseOidcView(raw: unknown): OidcView {
       linkByEmail: o.link_by_email === true,
       syncRoles: o.sync_roles !== false,
       localLogin: o.local_login !== false,
+      rpLogout: o.rp_logout !== false,
+      backchannelLogout: o.backchannel_logout !== false,
     },
     source: raw.source === "env" ? "env" : "database",
     redirectUrl: strOrNull(raw.redirect_url),
+    postLogoutUrl: strOrNull(raw.post_logout_url),
+    backchannelUrl: strOrNull(raw.backchannel_url),
     clientSecretSet: raw.client_secret_set === true,
     oidcAdminExists: raw.oidc_admin_exists === true,
     localLoginActive: raw.local_login_active !== false,
@@ -501,12 +517,19 @@ export function oidcSettingsBody(s: OidcSettings): Json {
     link_by_email: s.linkByEmail,
     sync_roles: s.syncRoles,
     local_login: s.localLogin,
+    rp_logout: s.rpLogout,
+    backchannel_logout: s.backchannelLogout,
   };
 }
 
 export function parseOidcTest(raw: unknown): OidcTestResult {
   if (!isJson(raw)) return bad("oidc test");
-  return { ok: raw.ok === true, issuer: strOrNull(raw.issuer), error: strOrNull(raw.error) };
+  return {
+    ok: raw.ok === true,
+    issuer: strOrNull(raw.issuer),
+    error: strOrNull(raw.error),
+    endSession: raw.end_session === true,
+  };
 }
 
 export type CollectScope = "off" | "users" | "all";
