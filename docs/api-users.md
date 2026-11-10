@@ -240,6 +240,34 @@ after the admin turns it on. Privacy: `docs/client-addresses.md`, "Client-report
 (0..64; `0` = only the daemon's cap). Admins have no per-user limit. The daemon cap itself is
 `SUPERHET_MAX_VFOS` (sdrd, default 8, at most 64).
 
+### Device access policies
+
+Who may use which device (ADR-0023). A device without a policy is open (the defaults below), so
+nothing changes until an admin sets one.
+
+- `GET /api/v1/admin/device-policies` -> `{"v":1,"policies":[{"device","view_role","control_role","guests_visible","allowed_users":[id,...]}]}`
+  (only devices that have a policy).
+- `PUT /api/v1/admin/device-policies/{device}` with the four fields (all optional, defaults
+  `listener`, `listener`, `true`, `[]`; unknown fields, unknown roles and unknown account ids are
+  `400`) -> `{"v":1,"policy":{...},"ended_sessions":n}`. `ended_sessions` counts sessions with a
+  WebSocket on the device that lost the right to see it; they were disconnected.
+- `DELETE /api/v1/admin/device-policies/{device}` -> the open default, `was_set` says whether a
+  policy existed. Both are audited (`device.policy_change`, `device.policy_reset`).
+
+| Field | Meaning |
+|---|---|
+| `view_role` | lowest role that may see and listen (state, spectrum, audio, decoder output, plugin streams) |
+| `control_role` | lowest role that may tune, lock, open or change VFOs, load or save profiles, start or steer plugin instances; a floor on top of the route's own role |
+| `guests_visible` | guests may see the device |
+| `allowed_users` | when not empty: only these accounts (and admins) may use the device, guests are out; at most 200 ids |
+
+Admins always pass; guests count as listeners. A closed device answers `403` with `code`
+`device_forbidden`, a change on a read-only one `403 device_read_only`. Device routes are listed
+in `crates/superhet-api/src/device_access.rs` (`DEVICE_RULES`) and checked right after the role
+check; a device route without an entry is refused. The plugin and decoder-history routes check the
+device they learn from the instance or the `dev` filter, and leave closed devices out of lists
+(`docs/api-plugins.md`, `docs/api-decoder-events.md`).
+
 ### Audit
 
 `GET /api/v1/admin/audit`, `GET /api/v1/admin/audit/export` and `GET|PUT
@@ -280,6 +308,9 @@ by the API from the session; a client-supplied `owner` is discarded. VFOs create
   `must_change_password` -> password-change page (every other route answers `403
   password_change_required`). Invite links open `/invite/<token>` and use the two public invite
   endpoints.
+- Per-device access: `GET /api/v1/devices` lists only usable devices with `access.control`; on a
+  read-only device present the receiver read-only (`web/src/auth/permissions.ts`,
+  `readOnlyOnDevice`). The console section is "Device access".
 - Hide what the role cannot do (tune, gain, lock, profiles, bookmark edits for listeners; guests
   also lose bookmarks and the sessions page); the server answers `403 forbidden` anyway.
 - A closed WebSocket may mean a kick or a disabled account: re-read `auth/status` and go to the

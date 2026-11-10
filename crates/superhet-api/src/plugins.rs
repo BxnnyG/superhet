@@ -26,6 +26,7 @@ use superhet_bus::audit::Outcome;
 use superhet_bus::subjects;
 
 use crate::access::Principal;
+use crate::device_access::{self, DevicePolicy, Need, Subject};
 use crate::devices::{DevicesState, connected, failure, guard_mutation, json};
 
 /// Request bodies are small JSON documents.
@@ -159,6 +160,85 @@ fn check_id(raw: &str) -> Result<(), Box<Response>> {
     }
 }
 
+/// Drop the instances on devices `subject` may not see (ADR-0023). Instances without a device
+/// are not device-bound and stay.
+fn restrict_instances(
+    reply: &mut Value,
+    table: &std::collections::HashMap<String, DevicePolicy>,
+    subject: &Subject,
+) {
+    if let Some(list) = reply.get_mut("instances").and_then(Value::as_array_mut) {
+        list.retain(|i| {
+            i["device"].as_str().is_none_or(|device| {
+                table
+                    .get(device)
+                    .is_none_or(|policy| policy.allows(subject, Need::View))
+            })
+        });
+    }
+}
+
+fn policy_unavailable() -> Box<Response> {
+    Box::new(failure(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "unavailable",
+        "device policy unavailable",
+    ))
+}
+
+/// The host's `instances` reply, reduced to what the caller may see.
+async fn visible_instances(
+    state: &DevicesState,
+    principal: &Principal,
+) -> Result<Value, Box<Response>> {
+    let client = connected(state.nats.as_ref()).map_err(|e| Box::new(e.into_response()))?;
+    let mut value = host_call(client, "instances", json!({})).await?;
+    let table = state
+        .auth
+        .device_policies()
+        .table()
+        .await
+        .map_err(|_| policy_unavailable())?;
+    restrict_instances(&mut value, &table, &Subject::from(principal));
+    Ok(value)
+}
+
+/// Whether the caller may act on the device an instance is bound to (instances without a device
+/// are not device-bound).
+async fn authorize_device(
+    state: &DevicesState,
+    principal: &Principal,
+    device: Option<&str>,
+    need: Need,
+    action: &str,
+) -> Result<(), Box<Response>> {
+    match device {
+        Some(device) => device_access::check(&state.auth, principal, device, need, action).await,
+        None => Ok(()),
+    }
+}
+
+/// Look up the device of instance `id` at the host and check the caller against it. An unknown
+/// instance gives the host's own error.
+async fn authorize_instance(
+    state: &DevicesState,
+    principal: &Principal,
+    id: &str,
+    need: Need,
+    action: &str,
+) -> Result<(), Box<Response>> {
+    let client = connected(state.nats.as_ref()).map_err(|e| Box::new(e.into_response()))?;
+    let found = host_call(client, "get", json!({"id": id})).await?;
+    authorize_device(
+        state,
+        principal,
+        found["instance"]["device"].as_str(),
+        need,
+        action,
+    )
+    .await
+}
+
 /// The audit outcome of a host call. (`Response` is not `Sync`, so the result itself must not be
 /// held by reference across an await.)
 fn outcome_of(result: &Result<Value, Box<Response>>) -> Outcome {
@@ -196,8 +276,14 @@ async fn list_plugins(State(state): State<DevicesState>) -> Response {
     simple_get(&state, "list").await
 }
 
-async fn list_instances(State(state): State<DevicesState>) -> Response {
-    simple_get(&state, "instances").await
+async fn list_instances(
+    State(state): State<DevicesState>,
+    Extension(principal): Extension<Principal>,
+) -> Response {
+    match visible_instances(&state, &principal).await {
+        Ok(value) => reply(StatusCode::OK, &value),
+        Err(response) => *response,
+    }
 }
 
 /// Instance fields a listener may see: what runs where and under which audio stream. Never the
@@ -237,12 +323,11 @@ fn listen_view(reply: &Value) -> Value {
 
 /// `GET /api/v1/plugin-streams` – running plugin instances without their configuration, so a
 /// listener can find the decoder output and its audio. Control stays with the operator routes.
-async fn list_streams(State(state): State<DevicesState>) -> Response {
-    let client = match connected(state.nats.as_ref()) {
-        Ok(client) => client,
-        Err(err) => return err.into_response(),
-    };
-    match host_call(client, "instances", json!({})).await {
+async fn list_streams(
+    State(state): State<DevicesState>,
+    Extension(principal): Extension<Principal>,
+) -> Response {
+    match visible_instances(&state, &principal).await {
         Ok(value) => reply(StatusCode::OK, &listen_view(&value)),
         Err(response) => *response,
     }
@@ -310,7 +395,11 @@ async fn simple_get(state: &DevicesState, cmd: &str) -> Response {
     }
 }
 
-async fn get_instance(State(state): State<DevicesState>, Path(id): Path<String>) -> Response {
+async fn get_instance(
+    State(state): State<DevicesState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> Response {
     if let Err(response) = check_id(&id) {
         return *response;
     }
@@ -318,8 +407,20 @@ async fn get_instance(State(state): State<DevicesState>, Path(id): Path<String>)
         Ok(client) => client,
         Err(err) => return err.into_response(),
     };
-    match host_call(client, "get", json!({"id": id})).await {
-        Ok(value) => reply(StatusCode::OK, &value),
+    let value = match host_call(client, "get", json!({"id": id})).await {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    match authorize_device(
+        &state,
+        &principal,
+        value["instance"]["device"].as_str(),
+        Need::View,
+        "GET plugin-instance",
+    )
+    .await
+    {
+        Ok(()) => reply(StatusCode::OK, &value),
         Err(response) => *response,
     }
 }
@@ -444,6 +545,14 @@ async fn start_instance(
             return Err(bad("invalid device"));
         }
         let plugin_id = plugin_id.to_owned();
+        authorize_device(
+            &state,
+            &principal,
+            map.get("device").and_then(Value::as_str),
+            Need::Control,
+            "POST plugin-instances",
+        )
+        .await?;
         let client = connected(state.nats.as_ref()).map_err(|e| Box::new(e.into_response()))?;
         let result = host_call(client, "start", Value::Object(map.clone())).await;
         let target = result
@@ -480,7 +589,11 @@ async fn start_instance(
 /// (service list, now playing, signal quality, ...), plus the instance's plugin id, device,
 /// frequency, state and audio stream, so a listener can tell what holds the device without
 /// being allowed to list instances.
-async fn instance_status(State(state): State<DevicesState>, Path(id): Path<String>) -> Response {
+async fn instance_status(
+    State(state): State<DevicesState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> Response {
     if let Err(response) = check_id(&id) {
         return *response;
     }
@@ -488,8 +601,20 @@ async fn instance_status(State(state): State<DevicesState>, Path(id): Path<Strin
         Ok(client) => client,
         Err(err) => return err.into_response(),
     };
-    match host_call(client, "status", json!({"id": id})).await {
-        Ok(value) => reply(StatusCode::OK, &value),
+    let value = match host_call(client, "status", json!({"id": id})).await {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    match authorize_device(
+        &state,
+        &principal,
+        value["device"].as_str(),
+        Need::View,
+        "GET plugin-instance status",
+    )
+    .await
+    {
+        Ok(()) => reply(StatusCode::OK, &value),
         Err(response) => *response,
     }
 }
@@ -531,6 +656,7 @@ const SERVED_MIME: &[&str] = &["image/jpeg", "image/png", "image/gif", "image/we
 /// labelled as such and `nosniff` is set.
 async fn instance_media(
     State(state): State<DevicesState>,
+    Extension(principal): Extension<Principal>,
     Path((id, key)): Path<(String, String)>,
 ) -> Response {
     let check = check_id(&id).and_then(|()| {
@@ -541,6 +667,17 @@ async fn instance_media(
         }
     });
     if let Err(response) = check {
+        return *response;
+    }
+    if let Err(response) = authorize_instance(
+        &state,
+        &principal,
+        &id,
+        Need::View,
+        "GET plugin-instance media",
+    )
+    .await
+    {
         return *response;
     }
     let client = match connected(state.nats.as_ref()) {
@@ -620,6 +757,14 @@ async fn instance_control(
         guard_mutation(&state, &headers, true)?;
         check_id(&id)?;
         let message = object(&body)?;
+        authorize_instance(
+            &state,
+            &principal,
+            &id,
+            Need::Control,
+            "POST plugin-instance control",
+        )
+        .await?;
         let client = connected(state.nats.as_ref()).map_err(|e| Box::new(e.into_response()))?;
         let result = host_call(
             client,
@@ -684,6 +829,14 @@ async fn reconfigure_instance(
             }
         }
         let config = map.get("config").cloned().unwrap_or(Value::Null);
+        authorize_instance(
+            &state,
+            &principal,
+            &id,
+            Need::Control,
+            "POST plugin-instance reconfigure",
+        )
+        .await?;
         let client = connected(state.nats.as_ref()).map_err(|e| Box::new(e.into_response()))?;
         let result = host_call(client, "reconfigure", json!({"id": id, "config": config})).await;
         let outcome = outcome_of(&result);
@@ -718,6 +871,14 @@ async fn change_instance(
     let result = async {
         guard_mutation(&state, &headers, false)?;
         check_id(&id)?;
+        authorize_instance(
+            &state,
+            &principal,
+            &id,
+            Need::Control,
+            &format!("POST plugin-instance {cmd}"),
+        )
+        .await?;
         let client = connected(state.nats.as_ref()).map_err(|e| Box::new(e.into_response()))?;
         let result = host_call(client, cmd, json!({"id": id})).await;
         let details = result.as_ref().map_or_else(
@@ -767,6 +928,61 @@ mod tests {
             status,
             serde_json::from_slice(&bytes).unwrap_or(Value::Null),
         )
+    }
+
+    #[test]
+    fn instances_on_closed_devices_are_left_out_of_the_lists() {
+        use crate::access::Role;
+        let table = std::collections::HashMap::from([
+            (
+                "ops".to_owned(),
+                DevicePolicy {
+                    view_role: Role::Operator,
+                    ..DevicePolicy::default()
+                },
+            ),
+            (
+                "private".to_owned(),
+                DevicePolicy {
+                    allowed_users: vec![7],
+                    ..DevicePolicy::default()
+                },
+            ),
+        ]);
+        let reply = || {
+            json!({"ok": true, "instances": [
+                {"id": "a", "device": "dev0"},
+                {"id": "b", "device": "ops"},
+                {"id": "c", "device": "private"},
+                {"id": "d", "device": null},
+                {"id": "e"},
+            ]})
+        };
+        let ids = |subject: Subject| {
+            let mut value = reply();
+            restrict_instances(&mut value, &table, &subject);
+            value["instances"]
+                .as_array()
+                .expect("list")
+                .iter()
+                .map(|i| i["id"].as_str().unwrap_or("").to_owned())
+                .collect::<Vec<_>>()
+        };
+        let user = |id, role| Subject {
+            guest: false,
+            user_id: Some(id),
+            role,
+        };
+        assert_eq!(ids(user(1, Role::Listener)), ["a", "d", "e"]);
+        assert_eq!(ids(user(7, Role::Listener)), ["a", "c", "d", "e"]);
+        assert_eq!(ids(user(2, Role::Operator)), ["a", "b", "d", "e"]);
+        assert_eq!(ids(user(3, Role::Admin)), ["a", "b", "c", "d", "e"]);
+        let guest = Subject {
+            guest: true,
+            user_id: None,
+            role: Role::Listener,
+        };
+        assert_eq!(ids(guest), ["a", "d", "e"]);
     }
 
     #[test]

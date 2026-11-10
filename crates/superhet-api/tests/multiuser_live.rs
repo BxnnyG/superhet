@@ -139,6 +139,7 @@ async fn role_matrix_over_every_declared_route() {
         for (method, pattern, access) in &rules {
             let path = pattern
                 .replace("{dev}", "dev0")
+                .replace("{device}", "dev0")
                 .replace("{id}", "1")
                 .replace("{sid}", "u.zz");
             // ws/events and the rest of the table are all plain GET/POST/... requests here; the

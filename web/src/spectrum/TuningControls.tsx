@@ -1,5 +1,5 @@
 import { usePermissions } from "../auth/context";
-import { NEEDS_OPERATOR } from "../auth/permissions";
+import { DEVICE_READ_ONLY, NEEDS_OPERATOR } from "../auth/permissions";
 import { lockedBy } from "../state/locks";
 import { droppedNotice } from "../shell/dropped";
 import { overloadNotice } from "../shell/overload";
@@ -36,7 +36,8 @@ interface Props {
 export function TuningControls({ tuning, onTune }: Props) {
   const { display, busy } = tuning;
   // Centre, rate, gain and ppm need the operator role (POST /tune); others see the values only.
-  const readOnly = !usePermissions().canTune;
+  const perms = usePermissions();
+  const readOnly = !perms.canTune;
   const holders = tuning.state?.locks ?? [];
   const locked = holders.length > 0;
   const rates =
@@ -75,7 +76,9 @@ export function TuningControls({ tuning, onTune }: Props) {
       />
       {readOnly && (
         <p role="note" className="text-xs text-fg-subtle">
-          {NEEDS_OPERATOR} can change the source settings.
+          {perms.deviceReadOnly
+            ? `${DEVICE_READ_ONLY}: the source settings cannot be changed.`
+            : `${NEEDS_OPERATOR} can change the source settings.`}
         </p>
       )}
       {locked && !readOnly && (

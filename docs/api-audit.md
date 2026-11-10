@@ -44,13 +44,14 @@ and exported through the admin API. Not tamper-proof evidence: see "Append-only"
 | `session.connect`, `session.disconnect` | first WebSocket of a session opens / last one closes | `kind`, `duration_secs` |
 | `guest.session_start`, `guest.session_end` | guest session starts / ends (idle, guest mode off) | `reason` |
 | `guest.policy_change` | guest policy saved | `changed` (keys), `enabled` |
+| `device.policy_change`, `device.policy_reset` | per-device access policy saved / reset (`target` = device) | `changed` (keys), `view_role`, `control_role`, `guests_visible`, `allowed_users` (count), `ended_sessions` |
 | `settings.change` | audit settings or VFO limits saved (`target`: `audit` / `limits`) | `changed` |
 | `device.tune` | centre/rate/gain/ppm/bias request (coalesced) | the request fields |
 | `device.lock`, `device.unlock` | tuning lock taken / released | `force` |
 | `vfo.create`, `vfo.update`, `vfo.delete` | VFO changes (`vfo.update` coalesced) | `freq_hz`, `mode`, the changed fields |
 | `profile.load` | profile applied to a device | `profile` |
 | `access.banned` | a request from a banned address was refused before authentication (`outcome:"denied"`, no actor, coalesced per network) | `target` = the banned network, `path` |
-| `access.denied` | a signed-in caller was refused by the access table (`outcome:"denied"`, coalesced) | `target` = `METHOD route-pattern` |
+| `access.denied` | a signed-in caller was refused by the access table or a device policy (`outcome:"denied"`, coalesced) | `target` = `METHOD route-pattern`; device refusals add `device` and `need` (`view`/`control`) |
 | `audit.export` | an export was downloaded | `format`, `rows`, `filters` |
 | system events | published by services on `sh.v1.audit.<source>` | whatever the source sends |
 

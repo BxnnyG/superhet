@@ -28,6 +28,8 @@ use superhet_db::{
 };
 use tokio::sync::Semaphore;
 
+use crate::access::Principal;
+use crate::device_access::{self, Need, Subject};
 use crate::devices::{DevicesState, failure, guard_mutation, json};
 use crate::ws::send;
 
@@ -85,6 +87,32 @@ fn pool(state: &EventsState) -> Result<&PgPool, Box<Response>> {
             "no database",
         ))
     })
+}
+
+/// Keep a query to the devices `principal` may see (ADR-0023): a `dev` filter naming a closed
+/// device is refused, everything else leaves closed devices out.
+async fn scope_to_visible(
+    state: &EventsState,
+    principal: &Principal,
+    query: &mut DbQuery,
+) -> Result<(), Box<Response>> {
+    let auth = &state.devices.auth;
+    if let Some(device) = &query.device {
+        return device_access::check(auth, principal, device, Need::View, "GET decoder-events")
+            .await;
+    }
+    query.exclude_devices = auth
+        .device_policies()
+        .denied(&Subject::from(principal), Need::View)
+        .await
+        .map_err(|_| {
+            Box::new(failure(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "unavailable",
+                "device policy unavailable",
+            ))
+        })?;
+    Ok(())
 }
 
 fn internal(err: &dyn std::fmt::Display) -> Box<Response> {
@@ -165,6 +193,7 @@ impl Filter {
             kinds,
             source: source.map(str::to_owned),
             device,
+            exclude_devices: Vec::new(),
             vfo: match self.vfo {
                 Some(v) => Some(i32::try_from(v).map_err(|_| invalid("invalid vfo"))?),
                 None => None,
@@ -188,9 +217,14 @@ fn parse_cursor(raw: &str) -> Option<(i64, i64)> {
     Some((ts.parse().ok()?, id.parse().ok()?))
 }
 
-async fn list_events(State(state): State<EventsState>, Query(params): Query<Filter>) -> Response {
+async fn list_events(
+    State(state): State<EventsState>,
+    Extension(principal): Extension<Principal>,
+    Query(params): Query<Filter>,
+) -> Response {
     let result = async {
         let mut query = params.to_query()?;
+        scope_to_visible(&state, &principal, &mut query).await?;
         let limit = params.limit.unwrap_or(DEFAULT_LIMIT);
         if !(1..=MAX_LIMIT).contains(&limit) {
             return Err(invalid("limit must be 1..=1000"));
@@ -219,12 +253,33 @@ async fn list_events(State(state): State<EventsState>, Query(params): Query<Filt
     result.unwrap_or_else(|r| *r)
 }
 
-async fn clear_events(State(state): State<EventsState>, headers: HeaderMap) -> Response {
+async fn clear_events(
+    State(state): State<EventsState>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
+) -> Response {
     let result = async {
         guard_mutation(&state.devices, &headers, false)?;
-        let deleted = decoder_events::clear(pool(&state)?)
+        // History of devices the caller may not control stays.
+        let keep = state
+            .devices
+            .auth
+            .device_policies()
+            .denied(&Subject::from(&principal), Need::Control)
             .await
-            .map_err(|e| internal(&e))?;
+            .map_err(|_| {
+                Box::new(failure(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "unavailable",
+                    "device policy unavailable",
+                ))
+            })?;
+        let deleted = if keep.is_empty() {
+            decoder_events::clear(pool(&state)?).await
+        } else {
+            decoder_events::clear_except(pool(&state)?, &keep).await
+        }
+        .map_err(|e| internal(&e))?;
         Ok::<_, Box<Response>>(json(
             StatusCode::OK,
             serde_json::json!({"v": 1, "deleted": deleted}).to_string(),
@@ -297,9 +352,14 @@ fn csv_row(e: &Event) -> String {
 
 const CSV_HEADER: &str = "time,ts_ms,device,vfo,freq_hz,mode,kind,value,meta,source\r\n";
 
-async fn export_csv(State(state): State<EventsState>, Query(filter): Query<Filter>) -> Response {
+async fn export_csv(
+    State(state): State<EventsState>,
+    Extension(principal): Extension<Principal>,
+    Query(filter): Query<Filter>,
+) -> Response {
     let result = async {
         let mut query = filter.to_query()?;
+        scope_to_visible(&state, &principal, &mut query).await?;
         let pool = pool(&state)?;
         let mut body = String::from(CSV_HEADER);
         let mut rows = 0_usize;
