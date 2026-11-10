@@ -57,6 +57,10 @@ struct Inner {
     counter: u64,
     /// Number of token requests received (a refused callback must not reach this).
     token_requests: u64,
+    /// Whether discovery advertises an `end_session_endpoint`.
+    end_session: bool,
+    /// The ID token handed out last.
+    last_id_token: Option<String>,
 }
 
 pub struct MockIdp {
@@ -115,6 +119,8 @@ impl MockIdp {
             base: base.clone(),
             counter: 0,
             token_requests: 0,
+            end_session: true,
+            last_id_token: None,
         }));
         let app = Router::new()
             .route("/.well-known/openid-configuration", get(discovery))
@@ -130,6 +136,52 @@ impl MockIdp {
     /// Number of token requests the provider has received.
     pub fn token_requests(&self) -> u64 {
         self.inner.lock().expect("lock").token_requests
+    }
+
+    /// Whether discovery advertises an `end_session_endpoint` (takes effect when the API
+    /// discovers the provider again, e.g. after its OIDC settings were saved).
+    pub fn set_end_session(&self, on: bool) {
+        self.inner.lock().expect("lock").end_session = on;
+    }
+
+    /// The `end_session_endpoint` the provider advertises.
+    pub fn end_session_endpoint(&self) -> String {
+        format!("{}/logout", self.base)
+    }
+
+    /// The ID token the provider handed out last.
+    pub fn last_id_token(&self) -> Option<String> {
+        self.inner.lock().expect("lock").last_id_token.clone()
+    }
+
+    /// A back-channel logout token for this provider and client with `extra` merged over valid
+    /// defaults (a `null` value removes the claim). `wrong_key` signs it with a key the provider
+    /// does not publish.
+    pub fn logout_token(&self, extra: &Value, wrong_key: bool) -> String {
+        let mut inner = self.inner.lock().expect("lock");
+        inner.counter += 1;
+        let mut claims = json!({
+            "iss": inner.base,
+            "aud": CLIENT_ID,
+            "iat": now(),
+            "jti": format!("logout-{}", inner.counter),
+            "events": {"http://schemas.openid.net/event/backchannel-logout": {}},
+        });
+        if let (Some(target), Some(extra)) = (claims.as_object_mut(), extra.as_object()) {
+            for (k, v) in extra {
+                if v.is_null() {
+                    target.remove(k);
+                } else {
+                    target.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        let key = if wrong_key {
+            &inner.other_key
+        } else {
+            &inner.key
+        };
+        sign(key, &claims)
     }
 
     /// The user signs in at the provider: remember what the authorization request (the
@@ -180,8 +232,11 @@ impl MockIdp {
 }
 
 async fn discovery(State(inner): State<Arc<Mutex<Inner>>>) -> Response {
-    let base = inner.lock().expect("lock").base.clone();
-    axum::Json(json!({
+    let (base, end_session) = {
+        let inner = inner.lock().expect("lock");
+        (inner.base.clone(), inner.end_session)
+    };
+    let mut doc = json!({
         "issuer": base,
         "authorization_endpoint": format!("{base}/authorize"),
         "token_endpoint": format!("{base}/token"),
@@ -192,8 +247,11 @@ async fn discovery(State(inner): State<Arc<Mutex<Inner>>>) -> Response {
         "scopes_supported": ["openid", "email", "profile", "groups"],
         "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
         "claims_supported": ["sub", "email", "email_verified", "preferred_username", "groups"],
-    }))
-    .into_response()
+    });
+    if end_session {
+        doc["end_session_endpoint"] = json!(format!("{base}/logout"));
+    }
+    axum::Json(doc).into_response()
 }
 
 async fn jwks(State(inner): State<Arc<Mutex<Inner>>>) -> Response {
@@ -288,6 +346,7 @@ async fn token(
         &inner.key
     };
     let id_token = sign(key, &claims);
+    inner.last_id_token = Some(id_token.clone());
     (
         StatusCode::OK,
         [

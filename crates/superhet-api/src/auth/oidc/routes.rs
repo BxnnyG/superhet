@@ -21,13 +21,14 @@ use super::client::OidcError;
 use super::config::{self, Identity, OidcSettings};
 use super::flow::{self, FlowError};
 use super::link::{self, Decision, Denial, Facts};
-use crate::auth::routes::{account_who, check_rate, record_failure, start_session};
+use crate::auth::routes::{account_who, check_rate, record_failure, start_oidc_session};
 use crate::auth::{AuthState, ClientInfo, token};
 
 pub fn router() -> Router<AuthState> {
     Router::new()
         .route(config::LOGIN_PATH, get(login))
         .route(config::CALLBACK_PATH, get(callback))
+        .merge(super::routes_logout::router())
 }
 
 /// A redirect with `Cache-Control: no-store` and the given cookies.
@@ -252,9 +253,25 @@ async fn finish(
     };
 
     auth.0.limiter.record_success(client.ip);
-    let cookie = start_session(auth, outcome.user_id, client)
-        .await
-        .map_err(|_| "unavailable")?;
+    let sid = verified
+        .payload
+        .get("sid")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.is_empty() && s.len() <= 512);
+    // Kept for the provider logout; a token too large for the column is simply not kept.
+    let id_token = Some(verified.id_token.as_str()).filter(|t| t.len() <= 16 * 1024);
+    let cookie = start_oidc_session(
+        auth,
+        outcome.user_id,
+        client,
+        &db::SessionOidc {
+            issuer: &identity.issuer,
+            sid,
+            id_token,
+        },
+    )
+    .await
+    .map_err(|_| "unavailable")?;
     if let Err(err) = superhet_db::users::mark_login(db, outcome.user_id).await {
         tracing::warn!(%err, "could not record the login time");
     }

@@ -4,6 +4,7 @@ import { setLockIdentity } from "../state/locks";
 import { Alert, Button } from "../ui";
 import { inviteTokenOf, navigate, usePath } from "../router";
 import { AuthLayout } from "./AuthLayout";
+import { leaveTo } from "./leave";
 import {
   AuthError,
   createAuthClient,
@@ -174,8 +175,9 @@ export function AuthGate({ children, client = defaultClient }: Props) {
   useEffect(() => onRecheckRequested(() => void refresh()), [refresh]);
 
   const signOut = useCallback(async () => {
+    let providerUrl: string | null = null;
     try {
-      await client.logout();
+      providerUrl = await client.logout();
     } catch {
       // The local session ends regardless; the cookie expires server-side.
     }
@@ -187,6 +189,8 @@ export function AuthGate({ children, client = defaultClient }: Props) {
       guest: s.kind === "app" ? s.status.guest : NO_GUEST,
       options: s.kind === "app" ? loginOptionsOf(s.status) : undefined,
     }));
+    // Single sign-on: the identity provider ends its session too, then sends the browser back.
+    if (providerUrl) leaveTo(providerUrl);
   }, [client]);
 
   const ctx = useMemo<AuthContextValue | null>(() => {

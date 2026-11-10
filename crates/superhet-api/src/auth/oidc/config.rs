@@ -14,6 +14,8 @@ pub const KEY_OIDC: &str = "oidc";
 
 /// Path (below the public URL) the provider redirects back to.
 pub const CALLBACK_PATH: &str = "/api/v1/auth/oidc/callback";
+/// Path the provider posts back-channel logout tokens to.
+pub const BACKCHANNEL_PATH: &str = "/api/v1/auth/oidc/backchannel-logout";
 /// Path that starts a login.
 pub const LOGIN_PATH: &str = "/api/v1/auth/oidc/login";
 
@@ -75,6 +77,13 @@ pub struct OidcSettings {
     /// Password logins stay available. Can be switched off only while an enabled admin account
     /// is linked to an OIDC identity.
     pub local_login: bool,
+    /// Signing out of Superhet also ends the session at the provider (RP-initiated logout),
+    /// for sessions that came from OIDC and when the provider advertises an
+    /// `end_session_endpoint`.
+    pub rp_logout: bool,
+    /// Accept the provider's back-channel logout requests, which end the matching Superhet
+    /// sessions.
+    pub backchannel_logout: bool,
 }
 
 impl Default for OidcSettings {
@@ -96,6 +105,8 @@ impl Default for OidcSettings {
             link_by_email: false,
             sync_roles: true,
             local_login: true,
+            rp_logout: true,
+            backchannel_logout: true,
         }
     }
 }
@@ -208,11 +219,34 @@ impl OidcSettings {
     /// # Errors
     /// When `public_url` is not set.
     pub fn redirect_url(&self) -> Result<String, String> {
+        Ok(format!("{}{CALLBACK_PATH}", self.base()?))
+    }
+
+    /// The base URL of this instance without a trailing slash.
+    fn base(&self) -> Result<&str, String> {
         let base = self.public_url.trim().trim_end_matches('/');
         if base.is_empty() {
             return Err("public_url is not set".to_owned());
         }
-        Ok(format!("{base}{CALLBACK_PATH}"))
+        Ok(base)
+    }
+
+    /// Where the provider sends the browser after ending its session (RP-initiated logout);
+    /// to be registered at the provider as a post-logout redirect URI.
+    ///
+    /// # Errors
+    /// When `public_url` is not set.
+    pub fn post_logout_url(&self) -> Result<String, String> {
+        Ok(format!("{}/", self.base()?))
+    }
+
+    /// The URL the provider posts back-channel logout tokens to (to be registered at the
+    /// provider).
+    ///
+    /// # Errors
+    /// When `public_url` is not set.
+    pub fn backchannel_url(&self) -> Result<String, String> {
+        Ok(format!("{}{BACKCHANNEL_PATH}", self.base()?))
     }
 
     /// Scopes sent to the provider: `openid` first, then the configured ones, without duplicates.
@@ -408,6 +442,12 @@ impl OidcEnv {
             }
             if let Some(v) = var("SUPERHET_OIDC_LOCAL_LOGIN") {
                 s.local_login = truthy(&v);
+            }
+            if let Some(v) = var("SUPERHET_OIDC_RP_LOGOUT") {
+                s.rp_logout = truthy(&v);
+            }
+            if let Some(v) = var("SUPERHET_OIDC_BACKCHANNEL_LOGOUT") {
+                s.backchannel_logout = truthy(&v);
             }
             s.validate(allow_http)
                 .map_err(|e| format!("SUPERHET_OIDC_*: {e}"))?;
@@ -694,6 +734,48 @@ mod tests {
         s.scopes = g(&["email", "openid", "email", "groups"]);
         assert_eq!(s.request_scopes(), g(&["openid", "email", "groups"]));
         assert!(OidcSettings::default().redirect_url().is_err());
+    }
+
+    #[test]
+    fn the_logout_urls_are_derived_from_the_public_url() {
+        let mut s = enabled();
+        s.public_url = "https://sdr.example/sdr/".into();
+        assert_eq!(
+            s.post_logout_url().as_deref(),
+            Ok("https://sdr.example/sdr/")
+        );
+        assert_eq!(
+            s.backchannel_url().as_deref(),
+            Ok("https://sdr.example/sdr/api/v1/auth/oidc/backchannel-logout")
+        );
+        let none = OidcSettings::default();
+        assert!(none.post_logout_url().is_err() && none.backchannel_url().is_err());
+    }
+
+    #[test]
+    fn logout_is_on_by_default_and_follows_the_environment() {
+        let s = OidcSettings::default();
+        assert!(s.rp_logout && s.backchannel_logout);
+        let base: &'static [(&str, &str)] = &[
+            ("SUPERHET_OIDC_ISSUER", "https://idp.example"),
+            ("SUPERHET_OIDC_CLIENT_ID", "superhet"),
+            ("SUPERHET_PUBLIC_URL", "https://sdr.example"),
+            ("SUPERHET_OIDC_DEFAULT_ROLE", "listener"),
+        ];
+        let env = OidcEnv::from_lookup(lookup(base), no_files).expect("valid");
+        let s = env.settings.expect("settings");
+        assert!(s.rp_logout && s.backchannel_logout);
+        let off: &'static [(&str, &str)] = &[
+            ("SUPERHET_OIDC_ISSUER", "https://idp.example"),
+            ("SUPERHET_OIDC_CLIENT_ID", "superhet"),
+            ("SUPERHET_PUBLIC_URL", "https://sdr.example"),
+            ("SUPERHET_OIDC_DEFAULT_ROLE", "listener"),
+            ("SUPERHET_OIDC_RP_LOGOUT", "false"),
+            ("SUPERHET_OIDC_BACKCHANNEL_LOGOUT", "0"),
+        ];
+        let env = OidcEnv::from_lookup(lookup(off), no_files).expect("valid");
+        let s = env.settings.expect("settings");
+        assert!(!s.rp_logout && !s.backchannel_logout);
     }
 
     fn lookup(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {

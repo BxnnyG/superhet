@@ -694,6 +694,315 @@ async fn an_environment_configuration_wins_and_is_read_only() {
     drop(proc);
 }
 
+const BACKCHANNEL: &str = "/api/v1/auth/oidc/backchannel-logout";
+
+fn with_sid(mut claims: Value, sid: &str) -> Value {
+    claims["sid"] = json!(sid);
+    claims
+}
+
+impl Rig {
+    /// Sign in through the provider and return the session cookie.
+    fn session(&self, sub: &str, name: &str, sid: &str) -> String {
+        let claims = with_sid(claims(sub, &format!("{name}@example.org"), true, &[]), sid);
+        session_of(&self.login(claims, Flaw::None)).expect("session")
+    }
+
+    fn signed_in(&self, session: &str) -> bool {
+        self.status(session)["authenticated"] == true
+    }
+
+    fn logout(&self, session: &str) -> Reply {
+        req(
+            self.port,
+            "POST",
+            "/api/v1/auth/logout",
+            Some(session),
+            None,
+        )
+    }
+
+    fn backchannel(&self, token: &str) -> Reply {
+        http(
+            self.port,
+            "POST",
+            BACKCHANNEL,
+            &[("Content-Type", "application/x-www-form-urlencoded")],
+            &format!("logout_token={token}"),
+        )
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn signing_out_of_an_oidc_session_sends_the_browser_to_the_provider() {
+    let rig = rig!("rplogout");
+    rig.configure(base_settings(&rig.idp, rig.port));
+    let view = rig.admin("GET", "/api/v1/admin/oidc", None).json();
+    assert_eq!(view["oidc"]["rp_logout"], true);
+    assert_eq!(view["oidc"]["backchannel_logout"], true);
+    assert_eq!(
+        view["post_logout_url"],
+        format!("{}/", public_url(rig.port))
+    );
+    assert_eq!(
+        view["backchannel_url"],
+        format!("{}{BACKCHANNEL}", public_url(rig.port))
+    );
+    let test = rig.admin("POST", "/api/v1/admin/oidc/test", None).json();
+    assert_eq!(test["end_session"], true, "{test}");
+
+    let session = rig.session(ISS_SUB, "anna", "sid-1");
+    assert!(rig.signed_in(&session));
+    let out = rig.logout(&session);
+    assert_eq!(out.status, 200, "{out:?}");
+    let url = out.json()["end_session_url"]
+        .as_str()
+        .expect("end_session_url")
+        .to_owned();
+    assert!(url.starts_with(&rig.idp.end_session_endpoint()), "{url}");
+    let q: std::collections::HashMap<String, String> = Url::parse(&url)
+        .expect("url")
+        .query_pairs()
+        .into_owned()
+        .collect();
+    assert_eq!(
+        Some(&q["id_token_hint"]),
+        rig.idp.last_id_token().as_ref(),
+        "the ID token of the login comes back as hint"
+    );
+    assert_eq!(q["client_id"], common::idp::CLIENT_ID);
+    assert_eq!(
+        q["post_logout_redirect_uri"],
+        format!("{}/", public_url(rig.port))
+    );
+    assert!(q["state"].len() >= 16, "{q:?}");
+    assert!(
+        out.headers
+            .iter()
+            .any(|(n, v)| n == "set-cookie" && v.starts_with("superhet_session=;")),
+        "the session cookie is cleared: {out:?}"
+    );
+    assert!(!rig.signed_in(&session), "the local session is gone");
+    let event = audit(rig.port, &rig.admin, "action=auth.logout");
+    assert_eq!(event[0]["details"]["provider_logout"], true, "{event:?}");
+
+    // A password session has no provider to tell.
+    let local = login(rig.port, ADMIN_USER, ADMIN_PASSWORD);
+    let admin = local.session_cookie().expect("admin session");
+    assert_eq!(rig.logout(&admin).status, 204);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn provider_logout_follows_the_switch_and_the_providers_abilities() {
+    let rig = rig!("rpswitch");
+    let mut settings = base_settings(&rig.idp, rig.port);
+    settings["rp_logout"] = json!(false);
+    rig.configure(settings);
+    let session = rig.session(ISS_SUB, "anna", "sid-1");
+    let out = rig.logout(&session);
+    assert_eq!(
+        out.status, 204,
+        "switched off: local sign-out only: {out:?}"
+    );
+    assert!(!rig.signed_in(&session));
+
+    // On again, but the provider advertises no end session endpoint.
+    rig.idp.set_end_session(false);
+    rig.configure(base_settings(&rig.idp, rig.port));
+    let test = rig.admin("POST", "/api/v1/admin/oidc/test", None).json();
+    assert_eq!(test["end_session"], false);
+    let session = rig.session(ISS_SUB, "anna", "sid-2");
+    assert_eq!(rig.logout(&session).status, 204);
+
+    // And once it does, the next sign-out redirects.
+    rig.idp.set_end_session(true);
+    rig.configure(base_settings(&rig.idp, rig.port));
+    let session = rig.session(ISS_SUB, "anna", "sid-3");
+    assert_eq!(rig.logout(&session).status, 200);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_backchannel_logout_ends_the_matching_sessions_once() {
+    let rig = rig!("bclogout");
+    rig.configure(base_settings(&rig.idp, rig.port));
+    let anna1 = rig.session("sub-anna", "anna", "sid-a1");
+    let anna2 = rig.session("sub-anna", "anna", "sid-a2");
+    let bob = rig.session("sub-bob", "bob", "sid-b1");
+    assert!(rig.signed_in(&anna1) && rig.signed_in(&anna2) && rig.signed_in(&bob));
+
+    // One provider session (sid) ends one Superhet session.
+    let token = rig.idp.logout_token(&json!({"sid": "sid-a1"}), false);
+    let reply = rig.backchannel(&token);
+    assert_eq!(reply.status, 200, "{reply:?}");
+    assert_eq!(reply.header("cache-control"), Some("no-store"));
+    assert!(!rig.signed_in(&anna1));
+    assert!(rig.signed_in(&anna2) && rig.signed_in(&bob));
+    assert!(
+        rig.signed_in(&rig.admin),
+        "password sessions are not touched"
+    );
+
+    // The same token again is a replay, and changes nothing.
+    let again = rig.backchannel(&token);
+    assert_eq!(again.status, 400, "{again:?}");
+    assert_eq!(again.json()["error"], "replay");
+
+    // A subject without a session id ends all of that user's sessions, not other users'.
+    let token = rig.idp.logout_token(&json!({"sub": "sub-anna"}), false);
+    assert_eq!(rig.backchannel(&token).status, 200);
+    assert!(!rig.signed_in(&anna2));
+    assert!(rig.signed_in(&bob) && rig.signed_in(&rig.admin));
+
+    // A token for a session nobody knows is accepted and ends nothing.
+    let token = rig.idp.logout_token(&json!({"sid": "sid-unknown"}), false);
+    assert_eq!(rig.backchannel(&token).status, 200);
+    assert!(rig.signed_in(&bob));
+
+    let events = audit(rig.port, &rig.admin, "action=auth.oidc_backchannel_logout");
+    let ended: Vec<u64> = events
+        .iter()
+        .filter(|e| e["outcome"] == "ok")
+        .map(|e| e["details"]["sessions"].as_u64().unwrap_or(99))
+        .collect();
+    assert_eq!(ended.len(), 3, "{events:?}");
+    assert_eq!(ended.iter().sum::<u64>(), 2, "{events:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn invalid_logout_tokens_are_refused_and_end_nothing() {
+    let rig = rig!("bcbad");
+    rig.configure(base_settings(&rig.idp, rig.port));
+    let victim = rig.session("sub-anna", "anna", "sid-a1");
+
+    let idp = &rig.idp;
+    let sid = json!({"sid": "sid-a1"});
+    let with = |extra: Value| {
+        let mut claims = sid.clone();
+        claims
+            .as_object_mut()
+            .expect("object")
+            .extend(extra.as_object().expect("object").clone());
+        claims
+    };
+    let cases: Vec<(&str, String, &str)> = vec![
+        (
+            "signed with a key the provider does not publish",
+            idp.logout_token(&sid, true),
+            "signature",
+        ),
+        (
+            "wrong audience",
+            idp.logout_token(&with(json!({"aud": "someone-else"})), false),
+            "audience",
+        ),
+        (
+            "wrong issuer",
+            idp.logout_token(&with(json!({"iss": "https://evil.example"})), false),
+            "issuer",
+        ),
+        (
+            "not a logout event",
+            idp.logout_token(&with(json!({"events": {"other": {}}})), false),
+            "event",
+        ),
+        (
+            "an ID token style nonce",
+            idp.logout_token(&with(json!({"nonce": "abc"})), false),
+            "nonce",
+        ),
+        (
+            "issued long ago",
+            idp.logout_token(&with(json!({"iat": 1_000_000})), false),
+            "issued_at",
+        ),
+        (
+            "no iat",
+            idp.logout_token(&with(json!({"iat": null})), false),
+            "issued_at",
+        ),
+        (
+            "no jti",
+            idp.logout_token(&with(json!({"jti": null})), false),
+            "no_jti",
+        ),
+        (
+            "neither sub nor sid",
+            idp.logout_token(&json!({}), false),
+            "no_subject",
+        ),
+        ("not a JWT", "garbage".to_owned(), "malformed"),
+    ];
+    // The limiter for failed requests is generous but finite: stay below it.
+    for (what, token, code) in cases {
+        let reply = rig.backchannel(&token);
+        assert_eq!(reply.status, 400, "{what}: {reply:?}");
+        assert_eq!(reply.json()["error"], code, "{what}");
+        assert!(rig.signed_in(&victim), "{what}: the session survived");
+    }
+
+    // Not a form post, or no token in it.
+    let token = idp.logout_token(&sid, false);
+    let json_post = req(
+        rig.port,
+        "POST",
+        BACKCHANNEL,
+        None,
+        Some(&json!({"logout_token": token})),
+    );
+    assert_eq!(json_post.status, 400, "{json_post:?}");
+    let empty = http(
+        rig.port,
+        "POST",
+        BACKCHANNEL,
+        &[("Content-Type", "application/x-www-form-urlencoded")],
+        "other=1",
+    );
+    assert_eq!(empty.status, 400, "{empty:?}");
+    assert!(rig.signed_in(&victim));
+
+    // The valid token still works afterwards (failures did not poison anything).
+    assert_eq!(rig.backchannel(&token).status, 200);
+    assert!(!rig.signed_in(&victim));
+
+    // Refusals are audited (coalesced, so wait for the row).
+    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+    let denied = audit(rig.port, &rig.admin, "action=auth.oidc_backchannel_logout");
+    assert!(
+        denied.iter().any(|e| e["outcome"] == "denied"),
+        "a denied event: {denied:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn backchannel_logout_can_be_switched_off() {
+    let rig = rig!("bcoff");
+    let mut settings = base_settings(&rig.idp, rig.port);
+    settings["backchannel_logout"] = json!(false);
+    rig.configure(settings);
+    let session = rig.session("sub-anna", "anna", "sid-a1");
+    let token = rig.idp.logout_token(&json!({"sid": "sid-a1"}), false);
+    let reply = rig.backchannel(&token);
+    assert_eq!(reply.status, 400, "{reply:?}");
+    assert_eq!(reply.json()["error"], "not_enabled");
+    assert!(rig.signed_in(&session));
+
+    // Switched on, the very same token (never consumed) works.
+    rig.configure(base_settings(&rig.idp, rig.port));
+    assert_eq!(rig.backchannel(&token).status, 200);
+    assert!(!rig.signed_in(&session));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreachable_provider_makes_the_backchannel_unavailable() {
+    let rig = rig!("bcdead");
+    let mut dead = base_settings(&rig.idp, rig.port);
+    dead["issuer"] = json!("http://127.0.0.1:9");
+    rig.configure(dead);
+    let token = rig.idp.logout_token(&json!({"sid": "sid-a1"}), false);
+    let reply = rig.backchannel(&token);
+    assert_eq!(reply.status, 503, "{reply:?}");
+}
+
 fn spawn_api_on(db_url: &str, port: u16, issuer: &str) -> (Proc, u16) {
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_superhet-api"));
     command

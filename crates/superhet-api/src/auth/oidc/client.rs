@@ -7,16 +7,19 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use openidconnect::core::{CoreClient, CoreProviderMetadata, CoreResponseType};
+use openidconnect::core::{CoreClient, CoreJsonWebKeySet, CoreResponseType};
 use openidconnect::http::Response;
+use openidconnect::url::Url;
 use openidconnect::{
     AsyncHttpClient, AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
     EndpointMaybeSet, EndpointNotSet, EndpointSet, HttpRequest, HttpResponse, IssuerUrl, Nonce,
-    PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse,
+    PkceCodeChallenge, PkceCodeVerifier, ProviderMetadataWithLogout, RedirectUrl, Scope,
+    TokenResponse,
 };
 use serde_json::Value;
 
 use super::config::{OidcSettings, Secret};
+use super::logout::{self, Expect, LogoutClaims, Rejection};
 
 /// Discovery documents and key sets are reused this long.
 const PROVIDER_TTL: Duration = Duration::from_secs(15 * 60);
@@ -133,6 +136,11 @@ type Client = CoreClient<
 pub struct Provider {
     client: Client,
     issuer: String,
+    client_id: String,
+    /// The provider's `end_session_endpoint`, if it advertises one (RP-initiated logout).
+    end_session: Option<Url>,
+    /// The key set the provider published at discovery (back-channel logout tokens).
+    jwks: CoreJsonWebKeySet,
     fetched: Instant,
 }
 
@@ -157,6 +165,8 @@ pub struct Verified {
     pub subject: String,
     /// The token's claims as JSON (read after the signature check).
     pub payload: Value,
+    /// The ID token as received (kept as `id_token_hint` for the provider logout).
+    pub id_token: String,
 }
 
 fn require_https(label: &str, url: &str, allow_plain: bool) -> Result<(), OidcError> {
@@ -184,7 +194,7 @@ impl Provider {
             .map_err(|e| OidcError::Config(format!("issuer: {e}")))?;
         let redirect = RedirectUrl::new(settings.redirect_url().map_err(OidcError::Config)?)
             .map_err(|e| OidcError::Config(format!("public_url: {e}")))?;
-        let metadata = CoreProviderMetadata::discover_async(issuer_url, http)
+        let metadata = ProviderMetadataWithLogout::discover_async(issuer_url, http)
             .await
             .map_err(|e| OidcError::Discovery(chain(&e)))?;
         // The endpoints a login talks to must be as private as the issuer itself.
@@ -197,16 +207,29 @@ impl Provider {
         if let Some(token) = metadata.token_endpoint() {
             require_https("token endpoint", token.as_str(), plain_ok)?;
         }
+        let end_session = metadata
+            .additional_metadata()
+            .end_session_endpoint
+            .as_ref()
+            .map(|e| e.url().clone());
+        if let Some(endpoint) = &end_session {
+            require_https("end session endpoint", endpoint.as_str(), plain_ok)?;
+        }
         let issuer = metadata.issuer().as_str().to_owned();
+        let jwks = metadata.jwks().clone();
+        let client_id = settings.client_id.trim().to_owned();
         let client = CoreClient::from_provider_metadata(
             metadata,
-            ClientId::new(settings.client_id.trim().to_owned()),
+            ClientId::new(client_id.clone()),
             secret.map(|s| ClientSecret::new(s.expose().to_owned())),
         )
         .set_redirect_uri(redirect);
         Ok(Self {
             client,
             issuer,
+            client_id,
+            end_session,
+            jwks,
             fetched: Instant::now(),
         })
     }
@@ -272,15 +295,55 @@ impl Provider {
         // The signature is checked; the remaining claims are read from the same token.
         let serialized =
             serde_json::to_value(id_token).map_err(|e| OidcError::Token(e.to_string()))?;
-        let payload = serialized
-            .as_str()
-            .and_then(payload_of)
+        let raw = serialized.as_str().unwrap_or_default();
+        let payload = payload_of(raw)
             .ok_or_else(|| OidcError::Token("token payload unreadable".to_owned()))?;
         Ok(Verified {
             issuer,
             subject,
             payload,
+            id_token: raw.to_owned(),
         })
+    }
+
+    /// Whether the provider advertised an `end_session_endpoint` at discovery.
+    #[must_use]
+    pub fn has_end_session(&self) -> bool {
+        self.end_session.is_some()
+    }
+
+    /// The URL that ends the provider's session, `None` when it has no end session endpoint.
+    #[must_use]
+    pub fn end_session_url(
+        &self,
+        id_token_hint: Option<&str>,
+        post_logout_redirect_uri: &str,
+        state: &str,
+    ) -> Option<String> {
+        let endpoint = self.end_session.as_ref()?;
+        Some(logout::end_session_url(
+            endpoint,
+            id_token_hint,
+            &self.client_id,
+            post_logout_redirect_uri,
+            state,
+        ))
+    }
+
+    /// Validate a back-channel `logout_token` against this provider (`now` in Unix seconds).
+    ///
+    /// # Errors
+    /// The [`Rejection`] that applies.
+    pub fn check_logout_token(&self, jwt: &str, now: i64) -> Result<LogoutClaims, Rejection> {
+        logout::validate(
+            jwt,
+            &self.jwks,
+            &Expect {
+                issuer: &self.issuer,
+                client_id: &self.client_id,
+                now,
+            },
+        )
     }
 
     fn age(&self) -> Duration {
