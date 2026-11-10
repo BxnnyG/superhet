@@ -135,6 +135,14 @@ test("pause, resume, skip and lock out from the tab, stop from the keyboard", as
   const idle = await api("GET", STATE);
   expect(idle.body.locks).toEqual([]);
   await expect(page.getByText("Not running.")).toBeVisible();
+  // Start from the tab over the visible span, then `G` stops and starts that scan again.
+  const span = page.getByRole("button", { name: "Use the visible span" });
+  if (!(await span.isVisible())) await page.getByRole("button", { name: /What to scan/ }).click();
+  await span.click();
+  await page.getByRole("button", { name: /^Start/ }).click();
+  await expect.poll(async () => (await scannerState()).state, { timeout: 15_000 }).toBe("holding");
+  await page.keyboard.press("g");
+  await expect.poll(async () => (await scannerState()).state, { timeout: 10_000 }).toBe("idle");
   await page.keyboard.press("g");
   await expect.poll(async () => (await scannerState()).state, { timeout: 15_000 }).toBe("holding");
 
