@@ -1,5 +1,5 @@
 -- ADS-B aircraft database (registration, type, operator names) and receiver range statistics
--- (docs/plugins-adsb.md, ADR-0025).
+-- (docs/plugins-adsb.md, ADR-0026).
 --
 -- The aircraft tables hold a public database the admin imported (never shipped with Superhet);
 -- the API replaces their content in one transaction. The 24-bit ICAO address is stored as an

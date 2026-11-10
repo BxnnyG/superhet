@@ -1,5 +1,5 @@
 //! The ADS-B aircraft database: reading the Mictronics export, downloading it on request and
-//! importing it into PostgreSQL (ADR-0025, `docs/plugins-adsb.md`).
+//! importing it into PostgreSQL (ADR-0026, `docs/plugins-adsb.md`).
 //!
 //! Superhet ships no aircraft data. The admin either presses "Download" (one fixed URL, the
 //! Mictronics aircraft database, ODC-By 1.0) or points `SUPERHET_AIRCRAFT_DB_FILE` at a copy of

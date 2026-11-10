@@ -178,6 +178,7 @@ pub const RULES: &[Rule] = &[
     rule("POST", "/api/v1/devices/{dev}/vfos", Guest),
     rule("PATCH", "/api/v1/devices/{dev}/vfos/{id}", Guest),
     rule("DELETE", "/api/v1/devices/{dev}/vfos/{id}", Guest),
+    rule("POST", "/api/v1/devices/{dev}/scanner/{action}", Operator),
     // WebSocket upgrades.
     rule("GET", "/api/v1/ws/spectrum", Guest),
     rule("GET", "/api/v1/ws/audio", Guest),
@@ -214,7 +215,7 @@ pub const RULES: &[Rule] = &[
     // Where the ADS-B map loads its tiles from, and the caching proxy that serves them.
     rule("GET", "/api/v1/map-config", GuestDecoder),
     rule("GET", "/api/v1/map/tiles/{z}/{x}/{y}", GuestDecoder),
-    // ADS-B aircraft database lookups and receiver range statistics (ADR-0025); importing the
+    // ADS-B aircraft database lookups and receiver range statistics (ADR-0026); importing the
     // database is an admin job (`/api/v1/admin/adsb/aircraft-db`, below).
     rule("GET", "/api/v1/adsb/aircraft-db", GuestDecoder),
     rule("GET", "/api/v1/adsb/lookup", GuestDecoder),
@@ -507,6 +508,7 @@ mod tests {
         let sources = [
             include_str!("devices.rs"),
             include_str!("device_list.rs"),
+            include_str!("scanner.rs"),
             include_str!("ws.rs"),
             include_str!("audio_ws.rs"),
             include_str!("state_ws.rs"),

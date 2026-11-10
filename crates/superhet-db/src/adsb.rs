@@ -1,4 +1,4 @@
-//! ADS-B support tables (`docs/plugins-adsb.md`, ADR-0025): the imported aircraft database and
+//! ADS-B support tables (`docs/plugins-adsb.md`, ADR-0026): the imported aircraft database and
 //! the receiver range statistics.
 //!
 //! The aircraft database (registration and type per ICAO address, type descriptions, airline

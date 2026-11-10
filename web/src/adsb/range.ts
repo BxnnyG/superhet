@@ -1,6 +1,6 @@
 // Receiver range statistics (`GET /api/v1/adsb/range`): the farthest position heard per 5 degree
 // bearing sector and altitude band, plus the message rate and aircraft count history. The
-// numbers are collected by the ADS-B plugin and stored by the worker (ADR-0025); this file parses
+// numbers are collected by the ADS-B plugin and stored by the worker (ADR-0026); this file parses
 // them and does the geometry for the polar plot and the coverage outline on the map.
 
 import { isRec } from "../spectrum/api";

@@ -1,4 +1,4 @@
-//! ADS-B extras over REST (ADR-0025, `docs/plugins-adsb.md`): the aircraft database (lookup,
+//! ADS-B extras over REST (ADR-0026, `docs/plugins-adsb.md`): the aircraft database (lookup,
 //! description, admin download / import) and the receiver range statistics.
 //!
 //! ```text

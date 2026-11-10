@@ -1,4 +1,4 @@
-//! ADS-B range statistics (ADR-0025): the plugin's `adsb.range` events are not decoder history;
+//! ADS-B range statistics (ADR-0026): the plugin's `adsb.range` events are not decoder history;
 //! they are turned into maxima per bearing sector and altitude band plus one activity row per
 //! minute (`superhet_db::adsb`). The plugin event consumer hands them over before it would store
 //! them in `decoder_events`.

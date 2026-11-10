@@ -17,6 +17,7 @@ mod overload;
 mod pipeline;
 mod publish;
 mod rds_quality;
+mod scanner;
 mod service;
 mod tap;
 mod vfo;
@@ -191,7 +192,17 @@ async fn start_pipeline(
         tones_sink,
         Some(tap_output),
     )?;
-    let sink = publish::spawn_spectrum_publisher(client.clone(), subject, "spectrum");
+    let spectrum_sink = publish::spawn_spectrum_publisher(client.clone(), subject, "spectrum");
+    // The scanner measures the same frames the browsers get; capture is off unless it runs.
+    let scan_probe = Arc::new(scanner::ScanProbe::default());
+    let sink = {
+        let probe = Arc::clone(&scan_probe);
+        let mut publish = spectrum_sink;
+        move |frame: Vec<u8>| {
+            probe.offer(&frame);
+            publish(frame);
+        }
+    };
     let zoom_handle = zoom::ZoomHandle::default();
     let zoom_sink = publish::spawn_spectrum_publisher(
         client.clone(),
@@ -225,6 +236,7 @@ async fn start_pipeline(
         zoom_handle,
         pipeline.overload(),
         taps,
+        scan_probe,
     )
     .await?;
     let running = Running {

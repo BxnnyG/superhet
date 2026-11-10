@@ -1,6 +1,6 @@
 //! Range statistics of the receiver: the farthest position heard per bearing sector and altitude
 //! band, plus the message rate and aircraft counts, reported once a minute as one `adsb.range`
-//! event (ADR-0025).
+//! event (ADR-0026).
 //!
 //! The plugin sees every snapshot (about once a second), so it is the only place where the maxima
 //! can be built without gaps; the worker stores them. To keep a reset in the database meaningful,

@@ -117,7 +117,7 @@ plugin id, `kind` the event type; filter with `source=` and `kind=`. The live fe
 
 ## ADS-B aircraft database and range statistics
 
-Added by ADR-0025 (`docs/plugins-adsb.md`). Errors use the usual `{"v":1,"ok":false,"code","error"}`.
+Added by ADR-0026 (`docs/plugins-adsb.md`). Errors use the usual `{"v":1,"ok":false,"code","error"}`.
 
 | Route | Access | Purpose |
 |---|---|---|

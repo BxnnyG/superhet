@@ -136,7 +136,7 @@ All decoders are plugins (separate processes). Without a codec plugin, voice dec
 | QRZ.com XML | v1 (P3) | Callsign lookup | Full data requires paid XML subscription | Optional, user's own account |
 | adsbdb.com | v1 (P3) | Aircraft by ICAO24, callsign → route | Free API, rate limited | – |
 | hexdb.io | v1 (P3) | Aircraft, routes, airports | Free API | Fallback for adsbdb |
-| Aircraft database (Mictronics, ODC-By 1.0) | v1 (P3) ✅ | ICAO24 → registration, type; airline by callsign | Admin-triggered download or file import, stored locally (ADR-0025) | OpenSky's database is unlicensed/out of date, tar1090-db and ADSBexchange have no verifiable licence |
+| Aircraft database (Mictronics, ODC-By 1.0) | v1 (P3) ✅ | ICAO24 → registration, type; airline by callsign | Admin-triggered download or file import, stored locally (ADR-0026) | OpenSky's database is unlicensed/out of date, tar1090-db and ADSBexchange have no verifiable licence |
 | planespotters.net photos | later | Aircraft photos | Free API, attribution required, non-commercial | – |
 | OurAirports | later | Airports, frequencies | Public domain CSV | – |
 | ITU MID table | v1 (P3) | MMSI → flag state | Public table, bundled as data | – |

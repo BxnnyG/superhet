@@ -170,7 +170,7 @@ pub async fn run(
                 None => return,
             },
         };
-        // ADS-B range statistics are not history (ADR-0025): store them in their own tables.
+        // ADS-B range statistics are not history (ADR-0026): store them in their own tables.
         if crate::adsb_range::is_range_event(&message.message.payload) {
             let stored = match crate::adsb_range::parse(&message.message.payload) {
                 // Unusable content: retrying would not help.

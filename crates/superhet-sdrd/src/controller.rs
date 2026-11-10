@@ -6,6 +6,7 @@
 //! thread. The newest state document is stored in the `watch` channel the NATS side delivers
 //! from, so every change reaches the state subject and KV.
 
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -38,7 +39,13 @@ pub struct Controller {
     overload: Arc<OverloadStatus>,
     /// The exclusive claim, if any. Always locked after the lock set (`gate`).
     claim: Mutex<Option<Claim>>,
+    /// The scanner's part of the state document (`None` until it was first used).
+    scan_view: Mutex<Option<serde_json::Value>>,
+    /// An exclusive claim took the device from the scanner.
+    scan_preempt: AtomicBool,
 }
+
+mod scan;
 
 /// An exclusive claim: who holds it, until when, and what to go back to.
 struct Claim {
@@ -80,7 +87,7 @@ const HAM_HF_BANDS_HZ: [(u64, u64); 10] = [
 /// Mode of the default VFO: WFM in the FM broadcast band (87.5-108 MHz), AM for airband, LSB /
 /// USB (below / from 10 MHz) on HF amateur bands, AM on the rest of HF, NFM elsewhere. Same
 /// rule as `defaultModeFor` in the web UI.
-fn default_mode(center_hz: u64) -> VfoMode {
+pub(crate) fn default_mode(center_hz: u64) -> VfoMode {
     if (87_500_000..=108_000_000).contains(&center_hz) {
         VfoMode::Wfm
     } else if (108_000_001..=137_000_000).contains(&center_hz) {
@@ -128,6 +135,8 @@ impl Controller {
             state,
             overload: Arc::default(),
             claim: Mutex::new(None),
+            scan_view: Mutex::new(None),
+            scan_preempt: AtomicBool::new(false),
         }
     }
 
@@ -211,6 +220,12 @@ impl Controller {
                 };
             }
             return Ok(self.publish(&locks, &now));
+        }
+        if locks.only_scanner() {
+            // An exclusive plugin wins over the scanner: it stops, the claim goes ahead.
+            locks.release_kind(HolderKind::Scanner);
+            self.scan_preempt
+                .store(true, std::sync::atomic::Ordering::Release);
         }
         if locks.is_locked() {
             return Err(locks.error("tuning"));
@@ -314,6 +329,7 @@ impl Controller {
             self.overload.get(),
             crate::metrics::global().device_dropped_blocks()
                 + crate::metrics::global().vfo_dropped_blocks(),
+            self.scan_view_json().as_ref(),
         )
         .into();
         self.state.send_if_modified(|current| {

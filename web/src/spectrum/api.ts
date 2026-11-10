@@ -1,5 +1,6 @@
 // Typed wrappers for the device REST API (docs/api-devices.md) with runtime validation.
 
+import { parseScannerState, type ScannerState } from "../scanner/model";
 import { apiFetch } from "../auth/session";
 
 export interface GainState {
@@ -49,6 +50,8 @@ export interface DeviceState {
   overload?: OverloadState;
   /** IQ blocks dropped since the daemon started (a stage could not keep up); absent on old daemons. */
   droppedBlocks?: number;
+  /** The scanner (docs/scanner.md); absent on daemons without one. */
+  scanner?: ScannerState;
 }
 
 export interface OverloadState {
@@ -177,6 +180,8 @@ export function parseDeviceState(raw: unknown): DeviceState {
   if (typeof raw.dropped_blocks === "number" && Number.isFinite(raw.dropped_blocks)) {
     state.droppedBlocks = Math.max(0, Math.floor(raw.dropped_blocks));
   }
+  const scanner = parseScannerState(raw.scanner);
+  if (scanner) state.scanner = scanner;
   return state;
 }
 

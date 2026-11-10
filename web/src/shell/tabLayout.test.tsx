@@ -5,9 +5,9 @@ import { tabIcon } from "./tabIcons";
 import { chooseTabMode, scrollHints } from "./tabLayout";
 import { TabStrip } from "./TabStrip";
 
-// The Plugins tab exists only while a plugin ships a panel; the thresholds below are for the usual
+// The Plugins tab exists only while a plugin ships a panel, and the Scanner tab came after these thresholds were set; they are for the usual
 // set, the full set has its own test.
-const USUAL_TABS = INSPECTOR_TABS.filter((t) => t !== "panels");
+const USUAL_TABS = INSPECTOR_TABS.filter((t) => t !== "panels" && t !== "scanner");
 const LABELS = USUAL_TABS.map((t) => INSPECTOR_LABEL[t]);
 
 describe("chooseTabMode", () => {
