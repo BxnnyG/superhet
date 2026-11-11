@@ -6,6 +6,7 @@ import {
   ArrowLeftIcon,
   Badge,
   BanIcon,
+  BellIcon,
   Button,
   GlobeIcon,
   IconButton,
@@ -35,6 +36,7 @@ import { ClientReportSection } from "./ClientReportSection";
 import { DevicePoliciesSection } from "./DevicePoliciesSection";
 import { GuestSection } from "./GuestSection";
 import { LimitsSection } from "./LimitsSection";
+import { NotificationsSection } from "./NotificationsSection";
 import { OidcSection } from "./OidcSection";
 import { PluginsSection } from "./PluginsSection";
 import { SessionsSection } from "./SessionsSection";
@@ -54,6 +56,7 @@ export const ADMIN_SECTIONS: readonly NavItem[] = [
   { id: "devices", label: "Device access", Icon: LockIcon },
   { id: "plugins", label: "Plugins", Icon: PlugIcon },
   { id: "adsb-data", label: "ADS-B data", Icon: PlaneIcon },
+  { id: "notifications", label: "Notifications", Icon: BellIcon },
   { id: "guests", label: "Guest access", Icon: GlobeIcon },
   { id: "sso", label: "Single sign-on", Icon: KeyIcon },
   { id: "client-info", label: "Client device info", Icon: MonitorIcon },
@@ -233,6 +236,8 @@ function SectionBody({
       return <PluginsSection api={pluginApi} />;
     case "adsb-data":
       return <AircraftDbSection api={adsbApi} />;
+    case "notifications":
+      return <NotificationsSection />;
     case "guests":
       return <GuestSection api={api} />;
     case "sso":

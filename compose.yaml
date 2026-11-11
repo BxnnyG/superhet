@@ -167,12 +167,21 @@ services:
   superhet-worker:
     <<: *superhet
     command: ["superhet-worker"]
+    # Outbound access for notification webhooks, SMTP and Web Push (ADR-0027).
+    networks: [backend, edge]
     environment:
       SUPERHET_DATABASE_URL: postgres://superhet:${POSTGRES_PASSWORD}@postgres:5432/superhet
       SUPERHET_NATS_URL: nats://nats:4222
       SUPERHET_NATS_USER: worker
       SUPERHET_NATS_PASSWORD: ${NATS_WORKER_PASSWORD}
       SUPERHET_EVENT_RETENTION_DAYS: ${SUPERHET_EVENT_RETENTION_DAYS:-30}
+      SUPERHET_SMTP_HOST: ${SUPERHET_SMTP_HOST:-}
+      SUPERHET_SMTP_PORT: ${SUPERHET_SMTP_PORT:-}
+      SUPERHET_SMTP_USER: ${SUPERHET_SMTP_USER:-}
+      SUPERHET_SMTP_PASSWORD: ${SUPERHET_SMTP_PASSWORD:-}
+      SUPERHET_SMTP_FROM: ${SUPERHET_SMTP_FROM:-}
+      SUPERHET_SMTP_TLS: ${SUPERHET_SMTP_TLS:-starttls}
+      SUPERHET_VAPID_SUBJECT: ${SUPERHET_VAPID_SUBJECT:-}
     depends_on:
       postgres: { condition: service_healthy }
       nats: { condition: service_healthy }

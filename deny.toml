@@ -22,6 +22,7 @@ allow = [
     "AGPL-3.0-only", # the workspace crates themselves
     "MIT",
     "MIT-0",         # borrow-or-share (via jsonschema in superhet-plugin-protocol)
+    "0BSD",          # quoted_printable (via lettre in superhet-notify), permissive like MIT-0
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",

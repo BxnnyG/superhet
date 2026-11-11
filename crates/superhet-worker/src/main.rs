@@ -1,12 +1,14 @@
 //! Superhet worker (background jobs and event consumers). Port 8076 by default (health only).
 //!
 //! Today it records the decoder history (DTMF bursts, tone changes, RDS changes and the events of
-//! decoder plugins) into PostgreSQL (`docs/api-decoder-events.md`).
+//! decoder plugins) into PostgreSQL (`docs/api-decoder-events.md`) and sends the notifications
+//! that rules ask for on those events (`docs/notifications.md`).
 
 mod adsb_range;
 mod audit;
 mod consumer;
 mod metrics;
+mod notifications;
 mod plugin_events;
 mod recorder;
 mod scanner_events;
@@ -74,6 +76,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
     });
 
+    // Notifications: the sender needs only the database, the matcher the bus too.
+    let notifier = db.clone().map(|pool| {
+        let (client, stop) = (nats.clone(), stop_rx.clone());
+        tokio::spawn(notifications::run(pool, client, retention, stop))
+    });
+
     let recorder = match (db, nats) {
         (Some(pool), Some(client)) => {
             let plugin_events = {
@@ -118,6 +126,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = task.await;
     }
     if let Some(task) = audit_task {
+        let _ = task.await;
+    }
+    if let Some(task) = notifier {
         let _ = task.await;
     }
     Ok(())

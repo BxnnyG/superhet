@@ -31,6 +31,11 @@ export default tseslint.config(
     },
   },
   {
+    // The push service worker (docs/notifications.md) runs in a ServiceWorkerGlobalScope.
+    files: ["public/sw.js"],
+    languageOptions: { globals: globals.serviceworker },
+  },
+  {
     files: ["*.config.{js,ts}"],
     languageOptions: { globals: globals.node },
   },
