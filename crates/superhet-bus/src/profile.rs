@@ -102,6 +102,73 @@ pub struct Vfo {
     /// CTCSS tone squelch in Hz (NFM and AM only); absent/`null` = off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tone_squelch_hz: Option<f32>,
+    /// HF comfort blocks (all off when absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comfort: Option<Comfort>,
+}
+
+/// Manual notch of the [`Comfort`] set.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Notch {
+    /// Centre in Hz of the demodulated audio.
+    pub freq_hz: f32,
+    /// -3 dB width in Hz.
+    pub width_hz: f32,
+}
+
+/// Per-VFO HF comfort blocks; an absent / `null` member is off, strengths are `0.0..=1.0`.
+/// Not for WFM (ignored there).
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Comfort {
+    /// Noise blanker strength.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nb: Option<f32>,
+    /// Manual notch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notch: Option<Notch>,
+    /// Automatic notch adaptation speed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_notch: Option<f32>,
+    /// Noise reduction strength.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nr: Option<f32>,
+}
+
+/// Accepted manual notch frequency range in Hz.
+pub const NOTCH_FREQ_RANGE: std::ops::RangeInclusive<f32> = 50.0..=12_000.0;
+/// Accepted manual notch width range in Hz.
+pub const NOTCH_WIDTH_RANGE: std::ops::RangeInclusive<f32> = 10.0..=1_000.0;
+
+impl Comfort {
+    /// True if every block is off.
+    #[must_use]
+    pub fn is_off(&self) -> bool {
+        self.nb.is_none() && self.notch.is_none() && self.auto_notch.is_none() && self.nr.is_none()
+    }
+
+    /// Range checks.
+    ///
+    /// # Errors
+    /// A strength outside `0..=1` or a notch outside its ranges.
+    pub fn validate(&self) -> Result<(), String> {
+        for (name, v) in [
+            ("nb", self.nb),
+            ("auto_notch", self.auto_notch),
+            ("nr", self.nr),
+        ] {
+            if v.is_some_and(|v| !(0.0..=1.0).contains(&v)) {
+                return Err(format!("comfort.{name} outside 0..=1"));
+            }
+        }
+        if let Some(n) = self.notch
+            && !(NOTCH_FREQ_RANGE.contains(&n.freq_hz) && NOTCH_WIDTH_RANGE.contains(&n.width_hz))
+        {
+            return Err("comfort.notch outside freq_hz 50..=12000 / width_hz 10..=1000".into());
+        }
+        Ok(())
+    }
 }
 
 /// The preset itself.
@@ -223,6 +290,9 @@ impl ProfileData {
             if vfo.tones == Some(false) && vfo.tone_squelch_hz.is_some() {
                 return Err("tone_squelch_hz needs tones enabled".into());
             }
+            if let Some(c) = &vfo.comfort {
+                c.validate()?;
+            }
         }
         if self.decoders.len() > MAX_DECODERS || self.decoders.iter().any(|d| !d.is_object()) {
             return Err(format!(
@@ -257,6 +327,8 @@ impl ProfileData {
             tones: Option<bool>,
             #[serde(default)]
             tone_squelch_hz: Option<f32>,
+            #[serde(default)]
+            comfort: Option<Comfort>,
         }
         #[derive(Deserialize)]
         struct StateLock {
@@ -302,6 +374,7 @@ impl ProfileData {
                     stereo: v.stereo,
                     tones: v.tones,
                     tone_squelch_hz: v.tone_squelch_hz,
+                    comfort: v.comfort.filter(|c| !c.is_off()),
                 })
                 .collect(),
             lock: state.locks.iter().any(|l| l.kind == "user"),

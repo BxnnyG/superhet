@@ -91,7 +91,7 @@ function ActiveVfo({
   const perms = usePermissions();
   // Somebody else's receiver: the controls stay visible but are disabled (the server says 403).
   const readOnly = !canModifyVfo(perms, vfo);
-  const stepHz = stepFor(r.step, vfo.mode);
+  const stepHz = stepFor(r.step, vfo.mode, vfo.freqHz);
   const nudge = (dir: 1 | -1) => {
     // On a plan channel the arrows step channels (unless the user turned that off).
     if (r.stepChannels(dir)) return;
@@ -163,7 +163,7 @@ function ActiveVfo({
           options={[
             {
               value: "auto",
-              label: `Auto ${formatStep(stepFor("auto", vfo.mode)).replace(" kHz", "k")}`,
+              label: `Auto ${formatStep(stepFor("auto", vfo.mode, vfo.freqHz)).replace(" kHz", "k")}`,
             },
             ...STEPS_HZ.map((s) => ({ value: String(s), label: formatStep(s) })),
           ]}

@@ -6,6 +6,7 @@ import type { AudioController } from "../audio/controller";
 import { toasts } from "../ui";
 import type { VfoController } from "../vfo/controller";
 import type { AutoSquelch } from "../vfo/autoSquelch";
+import { comfortSupported, toggleComfort } from "../vfo/comfort";
 import { stepFor, stepFrequency, type StepChoice } from "../vfo/model";
 import { ignoresShortcuts, shortcutFor, type ShortcutAction } from "./shortcuts";
 
@@ -53,7 +54,11 @@ export function runShortcut(action: ShortcutAction, ctx: ShortcutContext): boole
       if (!active) return false;
       if (ctx.stepChannels?.(action.steps)) return true;
       ctx.vfoCtl.update(active.id, {
-        freqHz: stepFrequency(active.freqHz, stepFor(ctx.step, active.mode), action.steps),
+        freqHz: stepFrequency(
+          active.freqHz,
+          stepFor(ctx.step, active.mode, active.freqHz),
+          action.steps,
+        ),
       });
       return true;
     case "vfo": {
@@ -82,6 +87,10 @@ export function runShortcut(action: ShortcutAction, ctx: ShortcutContext): boole
     case "autoSquelch":
       if (!active) return false;
       ctx.autoSquelch.toggle(active, ctx.audio, (id, patch) => ctx.vfoCtl.update(id, patch));
+      return true;
+    case "comfort":
+      if (!active || !comfortSupported(active.mode)) return false;
+      ctx.vfoCtl.update(active.id, { comfort: toggleComfort(active.comfort, action.block) });
       return true;
     case "bookmark":
       ctx.startBookmark();

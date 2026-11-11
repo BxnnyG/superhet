@@ -211,9 +211,21 @@ impl SsbDemod {
 
     /// Demodulates `iq`, appending to `out`.
     pub fn process(&mut self, iq: &[Complex32], out: &mut Vec<f32>) {
+        self.process_with(iq, out, |_| {});
+    }
+
+    /// Like [`Self::process`], but `pre_agc` may edit the product-detector output (notch, noise
+    /// reduction) before the AGC sees it, so a whistle cannot pump the gain.
+    pub fn process_with(
+        &mut self,
+        iq: &[Complex32],
+        out: &mut Vec<f32>,
+        pre_agc: impl FnOnce(&mut [f32]),
+    ) {
         self.nco.mix(iq, &mut self.scratch);
         let start = out.len();
         out.extend(self.scratch.iter().map(|x| x.re));
+        pre_agc(&mut out[start..]);
         self.agc.process_block(&mut out[start..]);
     }
 }

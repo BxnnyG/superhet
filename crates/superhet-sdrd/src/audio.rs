@@ -400,6 +400,7 @@ impl Slot {
         channel.set_stereo(self.vfo.stereo_enabled());
         channel.set_tones(self.vfo.tones_enabled());
         channel.set_tone_squelch(self.vfo.tone_squelch_hz);
+        channel.set_comfort(self.vfo.comfort);
         channel.set_iq_capture(self.taps.iter().any(|t| t.open.kind == TapKind::Iq));
         let channels = channel.output_channels();
         self.ensure_encoder(bitrate_for(cfg.mode, channels), channels);
@@ -796,6 +797,7 @@ mod tests {
                         stereo: None,
                         tones: None,
                         tone_squelch_hz: None,
+                        comfort: Default::default(),
                     },
                     RATE,
                 )
@@ -1099,6 +1101,7 @@ mod tests {
                         stereo,
                         tones: None,
                         tone_squelch_hz: None,
+                        comfort: Default::default(),
                     },
                     RATE,
                 )
@@ -1196,6 +1199,7 @@ mod tests {
                         stereo: Some(Some(true)),
                         tones: None,
                         tone_squelch_hz: None,
+                        comfort: None,
                     },
                     RATE,
                 )
@@ -1306,6 +1310,7 @@ mod tests {
                         stereo: None,
                         tones,
                         tone_squelch_hz: None,
+                        comfort: Default::default(),
                     },
                     RATE,
                 )
@@ -1441,6 +1446,7 @@ mod tests {
                         stereo: None,
                         tones: None,
                         tone_squelch_hz: None,
+                        comfort: Default::default(),
                     },
                     RATE,
                 )

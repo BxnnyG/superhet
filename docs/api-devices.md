@@ -159,7 +159,7 @@ or stereo, 20 ms frames, VBR; 64 kbit/s mono WFM, 96 kbit/s stereo WFM, 24 kbit/
 limits, `docs/api-users.md`).
 
 VFO object (in `vfos` and in replies):
-`{"id","freq_hz","mode":"wfm"|"nfm"|"am"|"usb"|"lsb"|"cw","bandwidth_hz","squelch_dbfs":null|number,"deemphasis":"none"|"50us"|"75us"|null,"stereo":true|false|null,"tones":true|false|null,"tone_squelch_hz":null|number,"cw_pitch_hz"?:number,"offset_hz","status":"active"|"paused","owner"?:string}`
+`{"id","freq_hz","mode":"wfm"|"nfm"|"am"|"usb"|"lsb"|"cw","bandwidth_hz","squelch_dbfs":null|number,"deemphasis":"none"|"50us"|"75us"|null,"stereo":true|false|null,"tones":true|false|null,"tone_squelch_hz":null|number,"cw_pitch_hz"?:number,"comfort"?:{...},"offset_hz","status":"active"|"paused","owner"?:string}`
 
 - `owner` (`u:<user id>` or `g:<guest id>`) is set by the api when it creates the VFO (the create
   body takes an optional `owner`, 1..64 characters of `[A-Za-z0-9:._-]`, which only the api sends)
@@ -192,16 +192,16 @@ Requests (request/reply, JSON, `v` required, unknown fields rejected). Success r
 shape as `ctl.tune`. VFO requests are not coalesced.
 
 - `sh.v1.dev.<dev>.ctl.vfo.create`: `{"v":1,"freq_hz":..,"mode":"wfm"|"nfm"|"am"|"usb"|"lsb"|"cw","bandwidth_hz"?:..,
-  "squelch_dbfs"?:..,"deemphasis"?:..,"cw_pitch_hz"?:..,"stereo"?:..,"tones"?:..,"tone_squelch_hz"?:..}`. `freq_hz` 1..1 THz, `bandwidth_hz`
+  "squelch_dbfs"?:..,"deemphasis"?:..,"cw_pitch_hz"?:..,"stereo"?:..,"tones"?:..,"tone_squelch_hz"?:..,"comfort"?:{..}}`. `freq_hz` 1..1 THz, `bandwidth_hz`
   100..1000000 (and realisable for the mode at the device's sample rate: at least 1000 for
   WFM/NFM/AM, 300 for USB/LSB, 100 for CW), `squelch_dbfs` -200..0 (absent or `null` = off),
   `deemphasis` only for WFM/NFM, `cw_pitch_hz` 200..2000 only for CW, `stereo` (boolean) only for
   WFM, `tones` (boolean) and `tone_squelch_hz` (one of the 50 standard CTCSS tones, see below) only for
-  NFM/AM. A VFO outside the passband is created `paused`.
+  NFM/AM. `comfort` is the HF comfort set, see "HF comfort" below. A VFO outside the passband is created `paused`.
 - `sh.v1.dev.<dev>.ctl.vfo.update`: `{"v":1,"id":..}` plus any of the fields above (partial patch,
   at least one). `null` for `bandwidth_hz` / `squelch_dbfs` / `deemphasis` / `cw_pitch_hz` /
   `stereo` / `tones` / `tone_squelch_hz` resets to the default / off. Changing `mode` drops a
-  `deemphasis`, `cw_pitch_hz`, `stereo`, `tones` or `tone_squelch_hz` override unless given in the same request. Changing
+  `deemphasis`, `cw_pitch_hz`, `stereo`, `tones` or `tone_squelch_hz` override unless given in the same request (`comfort` is kept). Changing
   mode or bandwidth rebuilds the channel (a short audio gap); switching `stereo` restarts the
   audio filters and the encoder (a short gap, the RDS data stays); frequency and squelch changes
   do not.
@@ -217,6 +217,18 @@ cuts the top of the difference signal and loses RDS. `stereo` (default on) choos
 station without a pilot, or with a weak one, plays as mono on both channels automatically. RDS
 is always decoded and published as VFO-scoped JSON events (`sh.v1.dev.<dev>.rds.<vfo>`, forwarded
 on the audio WebSocket), whatever the stereo setting.
+
+### HF comfort
+
+Per VFO, all optional and off by default (`docs/hf-comfort.md` has the signal path). The `comfort`
+member of create / update / the VFO object is an object whose absent members are off:
+`{"nb"?:0..1,"notch"?:{"freq_hz":50..12000,"width_hz":10..1000},"auto_notch"?:0..1,"nr"?:0..1}`.
+`nb` is the noise blanker strength, `notch` a manual notch at an audio frequency, `auto_notch` the
+adaptation speed of the automatic notch and `nr` the noise reduction strength. An update replaces
+the whole set (`{}` switches everything off); out-of-range values are `invalid`. The blocks are
+ignored in WFM and the VFO object leaves `comfort` out while everything is off. Changing a
+strength or dragging the notch does not interrupt the audio.
+
 ### CTCSS and DTMF
 
 An NFM or AM VFO can detect the CTCSS sub-tone of the received transmission and DTMF digits

@@ -153,7 +153,7 @@ export function useReceiver(device: string) {
     (hz: number | null) => {
       if (hz === null) return;
       const mode = defaultModeFor(hz);
-      vfoCtl.create({ freqHz: snapFrequency(hz, stepFor(stepRef.current, mode)), mode });
+      vfoCtl.create({ freqHz: snapFrequency(hz, stepFor(stepRef.current, mode, hz)), mode });
     },
     [vfoCtl],
   );

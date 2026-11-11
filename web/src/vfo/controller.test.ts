@@ -292,3 +292,71 @@ describe("VfoController", () => {
     expect(listener).not.toHaveBeenCalled();
   });
 });
+
+describe("band defaults on retune", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const make = (f: ReturnType<typeof fakeApi>) =>
+    new VfoController({ device: "dev0", api: f.api, debounceMs: 50 });
+
+  const hf = (id: number, freqHz: number, mode: Vfo["mode"], bandwidthHz: number): Vfo => ({
+    ...vfo(id, freqHz),
+    mode,
+    bandwidthHz,
+  });
+
+  it("moves a VFO the user never switched into the mode of the band it lands in", async () => {
+    const f = fakeApi([hf(1, 1_000_000, "am", 6_000)]);
+    const c = make(f);
+    c.start();
+    await flush();
+    c.update(1, { freqHz: 7_100_000 });
+    expect(c.getSnapshot().vfos[0]).toMatchObject({ mode: "lsb", bandwidthHz: 2_400 });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(f.updates).toEqual([
+      { id: 1, patch: { freqHz: 7_100_000, mode: "lsb", bandwidthHz: 2_400 } },
+    ]);
+    c.stop();
+  });
+
+  it("leaves the mode alone while tuning inside one kind of band", async () => {
+    const f = fakeApi([hf(1, 7_100_000, "lsb", 1_800)]);
+    const c = make(f);
+    c.start();
+    await flush();
+    c.update(1, { freqHz: 7_150_000 });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(f.updates).toEqual([{ id: 1, patch: { freqHz: 7_150_000 } }]);
+    c.stop();
+  });
+
+  it("stops following the bands once the user picked a mode for that VFO", async () => {
+    const f = fakeApi([hf(1, 1_000_000, "am", 6_000)]);
+    const c = make(f);
+    c.start();
+    await flush();
+    c.update(1, { mode: "usb", bandwidthHz: null });
+    await vi.advanceTimersByTimeAsync(50);
+    f.updates.length = 0;
+    // Let the first request finish before the next one.
+    f.updateWaiters[0]?.resolve(reply(hf(1, 1_000_000, "usb", 2_400), null));
+    await flush();
+    c.update(1, { freqHz: 14_100_000 });
+    c.update(1, { freqHz: 3_700_000 });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(f.updates.at(-1)?.patch.mode).toBeUndefined();
+    c.stop();
+  });
+
+  it("does not touch frequencies the table does not cover", async () => {
+    const f = fakeApi([hf(1, 7_100_000, "lsb", 2_400)]);
+    const c = make(f);
+    c.start();
+    await flush();
+    c.update(1, { freqHz: 145_500_000 });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(f.updates).toEqual([{ id: 1, patch: { freqHz: 145_500_000 } }]);
+    c.stop();
+  });
+});

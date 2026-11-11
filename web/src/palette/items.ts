@@ -241,6 +241,34 @@ function actionItems(deps: PaletteDeps): PaletteItem[] {
       act({ type: "autoSquelch" }),
       "autoSquelch",
     );
+    add(
+      "noise-blanker",
+      "Noise blanker on / off",
+      ["impulse", "crackle", "ignition", "hf"],
+      act({ type: "comfort", block: "nb" }),
+      "comfortNb",
+    );
+    add(
+      "notch",
+      "Manual notch on / off",
+      ["carrier", "whistle", "heterodyne", "hf"],
+      act({ type: "comfort", block: "notch" }),
+      "comfortNotch",
+    );
+    add(
+      "auto-notch",
+      "Auto notch on / off",
+      ["carrier", "whistle", "heterodyne", "hf"],
+      act({ type: "comfort", block: "autoNotch" }),
+      "comfortAuto",
+    );
+    add(
+      "noise-reduction",
+      "Noise reduction on / off",
+      ["hiss", "denoise", "nr", "hf"],
+      act({ type: "comfort", block: "nr" }),
+      "comfortNr",
+    );
   }
   if (deps.canBookmark !== false) {
     add(

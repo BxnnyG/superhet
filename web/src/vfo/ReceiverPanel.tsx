@@ -15,6 +15,7 @@ import {
   SquelchControl,
   VolumeControl,
 } from "./controls";
+import { ComfortPanel } from "./ComfortPanel";
 import { MODE_LABEL, VFO_PAUSED_FREE_HINT, VFO_PAUSED_HINT, vfoColor } from "./model";
 import { RdsPanel } from "./RdsPanel";
 import { SMeter } from "./SMeter";
@@ -134,6 +135,11 @@ export function ReceiverPanel({
       {vfo.mode === "cw" && (
         <Block title="CW" readOnly={readOnly}>
           <CwPitchControl vfo={vfo} onUpdate={onUpdate} />
+        </Block>
+      )}
+      {vfo.mode !== "wfm" && (
+        <Block title="Noise and notch" readOnly={readOnly}>
+          <ComfortPanel vfo={vfo} onUpdate={onUpdate} />
         </Block>
       )}
       <Block title="Output">

@@ -3,6 +3,7 @@ import { Button, Field, IconButton, Kbd, SegmentedControl, SettingsIcon } from "
 import { type ThemePreference } from "../ui/theme";
 import { OPEN_SETTINGS_EVENT, useAppEvent } from "./appEvents";
 import { AccountDialogs, AccountSection, type AccountDialogKind } from "./AccountSection";
+import { getMwRaster, setMwRaster, subscribeMwRaster } from "../vfo/mwRaster";
 import { getWheelMode, setWheelMode, subscribeWheelMode } from "../spectrum/wheelMode";
 
 interface Props {
@@ -15,6 +16,7 @@ interface Props {
 /** Settings popover (theme for now); the slot for future preferences. */
 export function SettingsMenu({ theme, onTheme, onShortcuts }: Props) {
   const wheel = useSyncExternalStore(subscribeWheelMode, getWheelMode);
+  const mwRaster = useSyncExternalStore(subscribeMwRaster, getMwRaster);
   const [open, setOpen] = useState(false);
   const [accountDialog, setAccountDialog] = useState<AccountDialogKind | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -85,6 +87,22 @@ export function SettingsMenu({ theme, onTheme, onShortcuts }: Props) {
             Zoom: the wheel zooms everywhere, Shift+wheel over the active passband changes its
             bandwidth, Shift or Alt+wheel elsewhere tunes the active VFO. Tune: the wheel tunes the
             active VFO; Ctrl+wheel zooms. Saved in this browser.
+          </p>
+          <Field label="Medium wave raster">
+            <SegmentedControl
+              aria-label="Medium wave raster"
+              value={String(mwRaster)}
+              onChange={(v) => setMwRaster(v === "10000" ? 10_000 : 9_000)}
+              className="w-full"
+              options={[
+                { value: "9000", label: "9 kHz" },
+                { value: "10000", label: "10 kHz" },
+              ]}
+            />
+          </Field>
+          <p className="text-xs text-fg-subtle">
+            Tuning step on medium wave: 9 kHz (Europe, Africa, Asia) or 10 kHz (the Americas). Saved
+            in this browser.
           </p>
           <Button
             variant="ghost"

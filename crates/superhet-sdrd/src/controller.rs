@@ -69,41 +69,66 @@ fn device_gain(gain: profile::Gain) -> Option<Gain> {
     }
 }
 
-/// HF amateur bands in Hz (IARU region 1 plus the common US edges); single sideband is the
-/// convention there. Keep in sync with `HAM_HF_BANDS` in `web/src/vfo/model.ts`.
-const HAM_HF_BANDS_HZ: [(u64, u64); 10] = [
-    (1_800_000, 2_000_000),
-    (3_500_000, 3_900_000),
-    (5_250_000, 5_450_000),
-    (7_000_000, 7_200_000),
-    (10_100_000, 10_150_000),
-    (14_000_000, 14_350_000),
-    (18_068_000, 18_168_000),
-    (21_000_000, 21_450_000),
-    (24_890_000, 24_990_000),
-    (28_000_000, 29_700_000),
+/// HF broadcast, CB and time-signal ranges in Hz where AM is the convention (long, medium and
+/// shortwave broadcast, 11 m CB). Keep in sync with `web/src/vfo/bandDefaults.ts`.
+const HF_AM_RANGES_HZ: [(u64, u64); 17] = [
+    (148_500, 283_500),
+    (520_000, 1_710_000),
+    (2_300_000, 2_495_000),
+    (3_200_000, 3_400_000),
+    (3_900_000, 4_000_000),
+    (4_750_000, 5_060_000),
+    (5_900_000, 6_200_000),
+    (7_200_000, 7_600_000),
+    (9_400_000, 9_900_000),
+    (11_600_000, 12_100_000),
+    (13_570_000, 13_870_000),
+    (15_100_000, 15_800_000),
+    (17_480_000, 17_900_000),
+    (18_900_000, 19_020_000),
+    (21_450_000, 21_850_000),
+    (25_670_000, 26_100_000),
+    (26_965_000, 27_405_000),
 ];
 
-/// Mode of the default VFO: WFM in the FM broadcast band (87.5-108 MHz), AM for airband, LSB /
-/// USB (below / from 10 MHz) on HF amateur bands, AM on the rest of HF, NFM elsewhere. Same
-/// rule as `defaultModeFor` in the web UI.
+/// Nominal frequencies of the time signal stations (AM +-5 kHz).
+const TIME_SIGNALS_HZ: [u64; 5] = [2_500_000, 10_000_000, 15_000_000, 20_000_000, 25_000_000];
+
+/// CW segments of the HF amateur bands (IARU region 1 band plan, the common core).
+const HF_CW_SEGMENTS_HZ: [(u64, u64); 9] = [
+    (1_800_000, 1_840_000),
+    (3_500_000, 3_570_000),
+    (7_000_000, 7_040_000),
+    (10_100_000, 10_130_000),
+    (14_000_000, 14_070_000),
+    (18_068_000, 18_095_000),
+    (21_000_000, 21_070_000),
+    (24_890_000, 24_915_000),
+    (28_000_000, 28_070_000),
+];
+
+/// Mode of the default VFO: WFM in the FM broadcast band (87.5-108 MHz), AM for airband, below
+/// 30 MHz AM in the broadcast bands, CW in the amateur CW segments, otherwise LSB (below 10 MHz)
+/// or USB; NFM elsewhere. Same rule as `defaultModeFor` / `bandDefaultFor` in the web UI.
 pub(crate) fn default_mode(center_hz: u64) -> VfoMode {
+    let within = |&(lo, hi): &(u64, u64)| (lo..=hi).contains(&center_hz);
     if (87_500_000..=108_000_000).contains(&center_hz) {
         VfoMode::Wfm
     } else if (108_000_001..=137_000_000).contains(&center_hz) {
         VfoMode::Am
-    } else if center_hz < 30_000_000 {
-        if HAM_HF_BANDS_HZ
-            .iter()
-            .any(|&(lo, hi)| (lo..=hi).contains(&center_hz))
+    } else if (100_000..30_000_000).contains(&center_hz) {
+        if HF_AM_RANGES_HZ.iter().any(within)
+            || TIME_SIGNALS_HZ
+                .iter()
+                .any(|f| center_hz.abs_diff(*f) <= 5_000)
         {
-            if center_hz < 10_000_000 {
-                VfoMode::Lsb
-            } else {
-                VfoMode::Usb
-            }
-        } else {
             VfoMode::Am
+        } else if HF_CW_SEGMENTS_HZ.iter().any(within) {
+            VfoMode::Cw
+        } else if center_hz < 10_000_000 {
+            VfoMode::Lsb
+        } else {
+            VfoMode::Usb
         }
     } else {
         VfoMode::Nfm
@@ -739,6 +764,7 @@ impl Controller {
             stereo: None,
             tones: None,
             tone_squelch_hz: None,
+            comfort: Default::default(),
         };
         match self.vfos.with(|r| {
             if r.list().is_empty() {
@@ -1360,15 +1386,22 @@ mod tests {
     }
 
     #[test]
-    fn default_mode_uses_sideband_on_hf_ham_bands() {
+    fn default_mode_follows_the_hf_band_table() {
         for (hz, mode) in [
             (3_700_000u64, VfoMode::Lsb),
             (7_100_000, VfoMode::Lsb),
             (14_200_000, VfoMode::Usb),
             (28_400_000, VfoMode::Usb),
+            (1_300_000, VfoMode::Am),
             (6_100_000, VfoMode::Am),
             (7_300_000, VfoMode::Am),
+            (9_995_000, VfoMode::Am),
             (27_185_000, VfoMode::Am),
+            (7_020_000, VfoMode::Cw),
+            (14_050_000, VfoMode::Cw),
+            (4_100_000, VfoMode::Lsb),
+            (12_500_000, VfoMode::Usb),
+            (50_000, VfoMode::Nfm),
             (121_500_000, VfoMode::Am),
             (50_200_000, VfoMode::Nfm),
         ] {
@@ -1436,6 +1469,7 @@ mod tests {
             stereo: None,
             tones: None,
             tone_squelch_hz: None,
+            comfort: None,
         }];
         let err = load(&c, &data).expect_err("invalid");
         assert_eq!(err.code, ErrorCode::Invalid);
@@ -1467,6 +1501,7 @@ mod tests {
                 stereo: None,
                 tones: None,
                 tone_squelch_hz: None,
+                comfort: None,
             }],
             lock: true,
             ..ProfileData::from_state(&state(&c)).expect("snapshot")

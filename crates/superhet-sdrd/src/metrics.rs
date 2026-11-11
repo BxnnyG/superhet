@@ -233,6 +233,7 @@ mod tests {
             stereo: None,
             tones: None,
             tone_squelch_hz: None,
+            comfort: Default::default(),
             owner: None,
         }
     }
