@@ -64,7 +64,8 @@ fn audio_on_the_bus_fills_the_ring_and_replays_as_a_valid_ogg_file() {
     assert!(mgr.replay_ogg("dev0", 9, 5, false).is_none());
     assert!(mgr.replay_ogg("dev1", 3, 5, false).is_none());
     let (_, gated) = mgr.replay_ogg("dev0", 3, 10, true).expect("replay");
-    assert!(gated <= 251);
+    // 400 open frames plus the 5 frames of pre-roll; the other 95 closed ones are cut.
+    assert_eq!(gated, 405);
 }
 
 #[test]

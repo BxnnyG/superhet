@@ -653,14 +653,18 @@ async fn start(
                 .max_seconds
                 .unwrap_or(recorder::IQ_DEFAULT_SECONDS)
                 .clamp(1, recorder::IQ_MAX_SECONDS);
-            let max_bytes = request
+            // The default never exceeds the quota; an explicit larger value is a mistake.
+            let mut max_bytes = request
                 .max_mb
                 .unwrap_or(recorder::IQ_DEFAULT_MB)
                 .clamp(1, recorder::IQ_MAX_MB)
                 * 1024
                 * 1024;
             if max_bytes_quota > 0 && max_bytes > max_bytes_quota {
-                return invalid("max_mb is larger than the recordings quota");
+                if request.max_mb.is_some() {
+                    return invalid("max_mb is larger than the recordings quota");
+                }
+                max_bytes = max_bytes_quota / 2;
             }
             let hw = doc["label"]
                 .as_str()

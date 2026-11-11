@@ -498,11 +498,7 @@ mod tests {
                 ("FREQUENCY".into(), "145500000".into())
             ]
         );
-        assert!(
-            file.pages >= 2 + 3 + 1,
-            "50 packets per page: {}",
-            file.pages
-        );
+        assert!(file.pages > 2 + 3, "50 packets per page: {}", file.pages);
     }
 
     #[test]
