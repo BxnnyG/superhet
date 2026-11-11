@@ -6,11 +6,13 @@
 //!   AM / USB / LSB / CW demodulators with squelch and AGC, producing 48 kHz audio (WFM
 //!   optionally as stereo). Building blocks are in [`nco`], [`fir`], [`demod`] and [`resample`].
 //!   Pure DSP: no I/O, no threads.
+//! - [`comfort`]: per-VFO noise blanker, notch filters and noise reduction for HF listening.
 //! - [`wfm`]: 19 kHz pilot PLL (stereo carrier, lock detection) of the broadcast-FM multiplex.
 //! - [`rds`]: RDS receiver (57 kHz subcarrier to PS, RadioText, PI, PTY).
 //! - [`tones`]: CTCSS sub-tone and DTMF digit detection on NFM / AM audio.
 
 pub mod channel;
+pub mod comfort;
 pub mod demod;
 pub mod fir;
 pub mod nco;
@@ -27,11 +29,14 @@ pub use channel::{
     CW_DEFAULT_PITCH_HZ, CW_PITCH_RANGE_HZ, Channel, ChannelConfig, ChannelStats, Deemphasis,
     DspError, Mode, OUTPUT_RATE, SSB_LOW_CUT_HZ,
 };
+pub use comfort::{ComfortConfig, NotchSetting};
 pub use rds::RdsInfo;
 pub use spectrum::{SpectrumConfig, SpectrumError, SpectrumProcessor};
 pub use tones::{CTCSS_TONES_HZ, DTMF_TAIL_LEN, ToneDetector, canonical_ctcss};
 pub use zoom::{ZoomConfig, ZoomError, ZoomSpectrum, shift_for_span};
 
+#[cfg(test)]
+mod comfort_tests;
 #[cfg(test)]
 mod rds_e2e_tests;
 #[cfg(test)]

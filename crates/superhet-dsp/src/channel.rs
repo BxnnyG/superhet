@@ -32,6 +32,7 @@
 
 use num_complex::Complex32;
 
+use crate::comfort::{AudioComfort, ComfortConfig, NoiseBlanker};
 use crate::demod::{
     AgcTimes, AmDemod, DcBlock, Deemph, FmDemod, NFM_REF_DEVIATION_HZ, SsbDemod, WFM_DEVIATION_HZ,
 };
@@ -519,6 +520,10 @@ pub struct Channel {
     /// Keep the channel-filtered baseband of each processed block (for plugin taps).
     capture_iq: bool,
     iq_out: Vec<Complex32>,
+    /// HF comfort blocks requested ([`Self::set_comfort`]); inactive in WFM.
+    comfort: ComfortConfig,
+    blanker: Option<NoiseBlanker>,
+    audio_comfort: Option<AudioComfort>,
 }
 
 fn validate_offset(offset_hz: f64, rate: u32) -> Result<(), DspError> {
@@ -566,7 +571,74 @@ impl Channel {
             out_r: Vec::new(),
             capture_iq: false,
             iq_out: Vec::new(),
+            comfort: ComfortConfig::default(),
+            blanker: None,
+            audio_comfort: None,
         })
+    }
+
+    /// Switches the HF comfort blocks (noise blanker, notches, noise reduction; all off by
+    /// default). Blocks that stay on keep their state, so dragging the notch or moving a strength
+    /// slider is click-free. They are inactive in WFM and resume when the mode changes back.
+    pub fn set_comfort(&mut self, comfort: ComfortConfig) {
+        self.comfort = comfort.sanitized();
+        self.sync_comfort(false);
+    }
+
+    /// Current comfort configuration.
+    pub fn comfort(&self) -> &ComfortConfig {
+        &self.comfort
+    }
+
+    /// Latency added by the enabled comfort blocks in seconds (noise reduction frame, blanker
+    /// look-behind); 0 when none is on.
+    pub fn comfort_latency_s(&self) -> f64 {
+        let rate = self.chain.channel_rate;
+        self.blanker
+            .as_ref()
+            .map_or(0.0, |b| b.delay() as f64 / rate)
+            + self
+                .audio_comfort
+                .as_ref()
+                .map_or(0.0, |a| a.delay() as f64 / rate)
+    }
+
+    /// Creates / updates / drops the comfort blocks to match `self.comfort` and the current chain;
+    /// `rebuilt` = the chain (rate) changed, so the old state is useless.
+    fn sync_comfort(&mut self, rebuilt: bool) {
+        let rate = self.chain.channel_rate;
+        let active = !matches!(self.cfg.mode, Mode::Wfm { .. });
+        let cfg = if active {
+            self.comfort
+        } else {
+            ComfortConfig::default()
+        };
+        if rebuilt {
+            self.blanker = None;
+            self.audio_comfort = None;
+        }
+        match (cfg.noise_blanker, &mut self.blanker) {
+            (Some(s), Some(b)) => b.set_strength(s),
+            (Some(s), None) => {
+                let mut b = NoiseBlanker::new(rate, s);
+                b.set_interpolate(matches!(self.cfg.mode, Mode::Am));
+                self.blanker = Some(b);
+            }
+            (None, _) => self.blanker = None,
+        }
+        if let Some(a) = &mut self.audio_comfort {
+            a.update(rate, &cfg);
+        } else if !cfg.is_off() {
+            let a = AudioComfort::new(rate, &cfg);
+            self.audio_comfort = (!a.is_empty()).then_some(a);
+        }
+        if self
+            .audio_comfort
+            .as_ref()
+            .is_some_and(AudioComfort::is_empty)
+        {
+            self.audio_comfort = None;
+        }
     }
 
     /// Keeps (or stops keeping) the complex baseband of every processed block, available through
@@ -721,6 +793,7 @@ impl Channel {
         self.nco
             .set_offset(cfg.offset_hz, f64::from(cfg.input_rate));
         self.cfg = cfg;
+        self.sync_comfort(true);
         self.sync_tones();
         if let Some(t) = &mut self.tones {
             t.reset();
@@ -775,6 +848,12 @@ impl Channel {
         self.last_power_dbfs = -200.0;
         if let Some(t) = &mut self.tones {
             t.reset();
+        }
+        if let Some(b) = &mut self.blanker {
+            b.reset();
+        }
+        if let Some(a) = &mut self.audio_comfort {
+            a.reset();
         }
     }
 
@@ -831,6 +910,9 @@ impl Channel {
                 n.mix(&self.buf_a, &mut self.buf_b);
                 std::mem::swap(&mut self.buf_a, &mut self.buf_b);
             }
+            if let Some(b) = &mut self.blanker {
+                b.process(&mut self.buf_a);
+            }
             self.buf_b.clear();
             self.chain
                 .channel_filter
@@ -853,7 +935,19 @@ impl Channel {
             match &mut self.chain.demod {
                 Demod::Fm(d) => d.process(&self.buf_a, &mut self.audio_a),
                 Demod::Am(d) => d.process(&self.buf_a, &mut self.audio_a),
-                Demod::Ssb(d) => d.process(&self.buf_a, &mut self.audio_a),
+                Demod::Ssb(d) => {
+                    let comfort = &mut self.audio_comfort;
+                    d.process_with(&self.buf_a, &mut self.audio_a, |a| {
+                        if let Some(c) = comfort {
+                            c.process(a);
+                        }
+                    });
+                }
+            }
+            if !matches!(self.chain.demod, Demod::Ssb(_))
+                && let Some(c) = &mut self.audio_comfort
+            {
+                c.process(&mut self.audio_a);
             }
             let stereo = self.output_channels() == 2;
             if let Some(w) = &mut self.chain.wfm {

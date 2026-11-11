@@ -181,12 +181,15 @@ export function SpectrumView({
       onVfoSelect: (id) => vfoCtl.select(id),
       onVfoMove: (id, hz) => {
         const v = vfoCtl.getSnapshot().vfos.find((x) => x.id === id);
-        if (v) vfoCtl.update(id, { freqHz: snapFrequency(hz, stepFor(live.current.step, v.mode)) });
+        if (v)
+          vfoCtl.update(id, {
+            freqHz: snapFrequency(hz, stepFor(live.current.step, v.mode, v.freqHz)),
+          });
       },
       // The same rule the click applies, so the hover preview shows the real landing frequency.
       snap: (hz, id) => {
         const v = id === null ? undefined : vfoCtl.getSnapshot().vfos.find((x) => x.id === id);
-        return snapClick(hz, v ? stepFor(live.current.step, v.mode) : null);
+        return snapClick(hz, v ? stepFor(live.current.step, v.mode, v.freqHz) : null);
       },
       onVfoCreate: (hz) => createVfoAt(hz),
       annotations,
@@ -195,7 +198,7 @@ export function SpectrumView({
       onVfoStep: (id, steps) => {
         const v = vfoCtl.getSnapshot().vfos.find((x) => x.id === id);
         if (v) {
-          const stepHz = stepFor(live.current.step, v.mode);
+          const stepHz = stepFor(live.current.step, v.mode, v.freqHz);
           vfoCtl.update(id, { freqHz: stepFrequency(v.freqHz, stepHz, steps) });
         }
       },

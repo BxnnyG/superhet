@@ -1,5 +1,6 @@
 // Pure VFO helpers: frequency snapping, defaults, squelch slider mapping, hit testing.
 
+import { bandDefaultFor } from "./bandDefaults";
 import type { Vfo, VfoMode } from "./api";
 
 export const MODE_LABEL: Record<VfoMode, string> = {
@@ -57,8 +58,15 @@ export const STEPS_HZ = [
 
 export type StepChoice = "auto" | number;
 
-export function stepFor(choice: StepChoice, mode: VfoMode): number {
-  return choice === "auto" ? DEFAULT_STEP_HZ[mode] : choice;
+/**
+ * The step in Hz. "auto" is the band's step below 30 MHz (9 / 10 kHz medium wave, 5 kHz shortwave
+ * broadcast, 100 Hz CW and amateur SSB, 1 kHz other SSB) while the VFO is in that band's mode,
+ * otherwise the mode default.
+ */
+export function stepFor(choice: StepChoice, mode: VfoMode, freqHz?: number): number {
+  if (choice !== "auto") return choice;
+  const band = freqHz === undefined ? null : bandDefaultFor(freqHz);
+  return band?.mode === mode ? band.stepHz : DEFAULT_STEP_HZ[mode];
 }
 
 export function formatStep(hz: number): string {
@@ -72,36 +80,15 @@ export function snapFrequency(hz: number, stepHz: number): number {
 }
 
 /**
- * HF amateur bands (Hz, IARU region 1 plus the common US edges). Operators use single sideband
- * there: LSB below 10 MHz, USB from 10 MHz up. Keep in sync with `default_mode` in
- * `crates/superhet-sdrd/src/controller.rs`.
- */
-const HAM_HF_BANDS: ReadonlyArray<readonly [number, number]> = [
-  [1.8e6, 2e6],
-  [3.5e6, 3.9e6],
-  [5.25e6, 5.45e6],
-  [7e6, 7.2e6],
-  [10.1e6, 10.15e6],
-  [14e6, 14.35e6],
-  [18.068e6, 18.168e6],
-  [21e6, 21.45e6],
-  [24.89e6, 24.99e6],
-  [28e6, 29.7e6],
-];
-
-/**
  * Sensible mode for a new VFO when the user (or a bookmark / band plan entry) did not choose
- * one: FM broadcast WFM, airband AM, HF amateur bands LSB (below 10 MHz) or USB, the rest of
- * HF (broadcast, CB, utility) AM, everything else NFM.
+ * one: FM broadcast WFM, airband AM, below 30 MHz the table in bandDefaults.ts (AM in the
+ * broadcast bands, CW in the amateur CW segments, LSB below 10 MHz, USB above), everything else
+ * NFM.
  */
 export function defaultModeFor(hz: number): VfoMode {
   if (hz >= 87.5e6 && hz <= 108e6) return "wfm";
   if (hz > 108e6 && hz <= 137e6) return "am";
-  if (hz < 30e6) {
-    if (HAM_HF_BANDS.some(([lo, hi]) => hz >= lo && hz <= hi)) return hz < 10e6 ? "lsb" : "usb";
-    return "am";
-  }
-  return "nfm";
+  return bandDefaultFor(hz)?.mode ?? "nfm";
 }
 
 /** Bandwidth presets (Hz) offered in the panel; the mode default is the empty choice. */

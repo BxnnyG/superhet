@@ -13,6 +13,8 @@ export type ShortcutAction =
   | { type: "mode"; mode: VfoMode; label: string }
   | { type: "listen" }
   | { type: "autoSquelch" }
+  /** Switch one HF comfort block of the active VFO on / off. */
+  | { type: "comfort"; block: "nb" | "notch" | "autoNotch" | "nr" }
   | { type: "bookmark" }
   /** Zoom factor around the display centre (< 1 zooms in). */
   | { type: "zoom"; factor: number }
@@ -105,6 +107,14 @@ export function shortcutFor(e: KeyLike): ShortcutAction | null {
       return { type: "listen" };
     case "s":
       return { type: "autoSquelch" };
+    case "v":
+      return { type: "comfort", block: "nb" };
+    case "t":
+      return { type: "comfort", block: "notch" };
+    case "a":
+      return { type: "comfort", block: "autoNotch" };
+    case "r":
+      return { type: "comfort", block: "nr" };
     case "b":
       return { type: "bookmark" };
     case "n":
@@ -194,6 +204,10 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
   },
   { id: "listen", group: "Receiver", keys: ["M"], label: "Mute / unmute the active VFO" },
   { id: "autoSquelch", group: "Receiver", keys: ["S"], label: "Squelch Auto on / off" },
+  { id: "comfortNb", group: "Receiver", keys: ["V"], label: "Noise blanker on / off" },
+  { id: "comfortNotch", group: "Receiver", keys: ["T"], label: "Manual notch on / off" },
+  { id: "comfortAuto", group: "Receiver", keys: ["A"], label: "Auto notch on / off" },
+  { id: "comfortNr", group: "Receiver", keys: ["R"], label: "Noise reduction on / off" },
   { id: "scanToggle", group: "Scanner", keys: ["G"], label: "Start / stop the scanner (go)" },
   { id: "scanPause", group: "Scanner", keys: ["P"], label: "Pause / resume the scanner" },
   { id: "scanSkip", group: "Scanner", keys: ["K"], label: "Skip the held channel" },
