@@ -6,6 +6,7 @@ import { BookmarksPanel } from "../bookmarks/BookmarksPanel";
 import { ChannelsPanel } from "../channels/ChannelsPanel";
 import { AdsbPanel } from "../adsb/AdsbPanel";
 import { DabPanel } from "../dab/DabPanel";
+import { RecordingsPanel } from "../recordings/RecordingsPanel";
 import { ScannerPanel } from "../scanner/ScannerPanel";
 import { DecodersTab } from "../decoders/DecodersTab";
 import { PanelsTab } from "../panels/PanelsTab";
@@ -139,6 +140,7 @@ function TabBody({ r, tab, phoneUp }: { r: Receiver; tab: InspectorTab; phoneUp:
           centreHz={r.tuningSnap.display?.centerHz ?? null}
           showDemodulator={!phoneUp}
           digital={{ device: r.device, plugins: r.plugins }}
+          device={r.device}
           sampleRateHz={r.tuningSnap.state?.sampleRate}
           onUpdate={(id, patch) => r.vfoCtl.update(id, patch)}
           onRemove={(id) => r.vfoCtl.remove(id)}
@@ -161,6 +163,8 @@ function TabBody({ r, tab, phoneUp }: { r: Receiver; tab: InspectorTab; phoneUp:
       return <ChannelsPanel r={r} />;
     case "scanner":
       return <ScannerPanel r={r} />;
+    case "recordings":
+      return <RecordingsPanel device={r.device} />;
     case "decoders":
       return (
         <DecodersTab

@@ -182,6 +182,7 @@ describe("inspector tabs", () => {
       "bookmarks",
       "channels",
       "scanner",
+      "recordings",
       "decoders",
       "dab",
       "adsb",

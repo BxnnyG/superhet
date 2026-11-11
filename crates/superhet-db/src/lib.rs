@@ -10,6 +10,7 @@ pub mod device_policies;
 pub mod oidc;
 pub mod plugin_instances;
 pub mod profiles;
+pub mod recordings;
 pub mod settings;
 pub mod users;
 

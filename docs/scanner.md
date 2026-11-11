@@ -62,6 +62,12 @@ level_dbfs, margin_db, priority, source, list`).
 (source and settings), `lockouts`, `hits` (newest first, at most 25). Clients must tolerate it
 being absent.
 
+## Recording hits
+
+`record_hits: true` on `start` (not forwarded to the daemon) records every hit as a squelch-gated
+audio recording until the scan stops (`docs/recordings.md`, ADR-0028). The Scanner tab has the
+switch; the hits keep their entry in the decoder history as before.
+
 ## History
 
 Every hit is stored in the decoder history (`docs/api-decoder-events.md`) with `source`

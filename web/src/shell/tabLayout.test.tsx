@@ -7,7 +7,9 @@ import { TabStrip } from "./TabStrip";
 
 // The Plugins tab exists only while a plugin ships a panel, and the Scanner tab came after these thresholds were set; they are for the usual
 // set, the full set has its own test.
-const USUAL_TABS = INSPECTOR_TABS.filter((t) => t !== "panels" && t !== "scanner");
+const USUAL_TABS = INSPECTOR_TABS.filter(
+  (t) => t !== "panels" && t !== "scanner" && t !== "recordings",
+);
 const LABELS = USUAL_TABS.map((t) => INSPECTOR_LABEL[t]);
 
 describe("chooseTabMode", () => {

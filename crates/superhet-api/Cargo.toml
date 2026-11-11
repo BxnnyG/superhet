@@ -20,7 +20,8 @@ serde_json = "1"
 thiserror.workspace = true
 superhet-bus.workspace = true
 superhet-db.workspace = true
-tokio = { workspace = true, features = ["time", "fs"] }
+superhet-recording.workspace = true
+tokio = { workspace = true, features = ["time", "fs", "io-util"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tower.workspace = true
