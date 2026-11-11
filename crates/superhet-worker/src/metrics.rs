@@ -18,6 +18,9 @@ static PRUNED: AtomicU64 = AtomicU64::new(0);
 static AUDIT_STORED: AtomicU64 = AtomicU64::new(0);
 static AUDIT_DROPPED: AtomicU64 = AtomicU64::new(0);
 static AUDIT_PRUNED: AtomicU64 = AtomicU64::new(0);
+static NOTIFY_SENT: AtomicU64 = AtomicU64::new(0);
+static NOTIFY_FAILED: AtomicU64 = AtomicU64::new(0);
+static NOTIFY_SUPPRESSED: AtomicU64 = AtomicU64::new(0);
 
 /// Counts a system audit event stored in the database.
 pub fn audit_event_stored() {
@@ -35,6 +38,17 @@ pub fn audit_pruned(count: u64) {
 }
 
 /// Counts a decoder event stored in the database.
+/// A notification delivery ended: sent, or failed for good.
+pub fn notification_result(sent: bool) {
+    let counter = if sent { &NOTIFY_SENT } else { &NOTIFY_FAILED };
+    counter.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Matches held back by quiet hours, cooldown or the hourly cap.
+pub fn notifications_suppressed(count: u64) {
+    NOTIFY_SUPPRESSED.fetch_add(count, Ordering::Relaxed);
+}
+
 pub fn event_inserted(kind: &str) {
     let mut map = INSERTED
         .lock()
@@ -87,6 +101,24 @@ pub fn render() -> String {
         "Decoder history events removed by the retention job.",
         Kind::Counter,
         PRUNED.load(Ordering::Relaxed),
+    );
+    e.single_u64(
+        "superhet_worker_notifications_sent_total",
+        "Notifications delivered to their target.",
+        Kind::Counter,
+        NOTIFY_SENT.load(Ordering::Relaxed),
+    );
+    e.single_u64(
+        "superhet_worker_notifications_failed_total",
+        "Notifications given up on after errors or retries.",
+        Kind::Counter,
+        NOTIFY_FAILED.load(Ordering::Relaxed),
+    );
+    e.single_u64(
+        "superhet_worker_notifications_suppressed_total",
+        "Rule matches held back by quiet hours, cooldown or the hourly cap.",
+        Kind::Counter,
+        NOTIFY_SUPPRESSED.load(Ordering::Relaxed),
     );
     e.single_u64(
         "superhet_worker_audit_events_stored_total",

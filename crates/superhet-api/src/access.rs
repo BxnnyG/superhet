@@ -230,6 +230,12 @@ pub const RULES: &[Rule] = &[
     // Where the ADS-B map loads its tiles from, and the caching proxy that serves them.
     rule("GET", "/api/v1/map-config", GuestDecoder),
     rule("GET", "/api/v1/map/tiles/{z}/{x}/{y}", GuestDecoder),
+    // ADS-B aircraft database lookups and receiver range statistics (ADR-0026); importing the
+    // database is an admin job (`/api/v1/admin/adsb/aircraft-db`, below).
+    rule("GET", "/api/v1/adsb/aircraft-db", GuestDecoder),
+    rule("GET", "/api/v1/adsb/lookup", GuestDecoder),
+    rule("GET", "/api/v1/adsb/range", GuestDecoder),
+    rule("DELETE", "/api/v1/adsb/range", Operator),
     rule(
         "POST",
         "/api/v1/plugin-instances/{id}/reconfigure",
@@ -271,6 +277,8 @@ pub const RULES: &[Rule] = &[
     rule("PATCH", "/api/v1/admin/users/{id}", Admin),
     rule("DELETE", "/api/v1/admin/users/{id}", Admin),
     rule("POST", "/api/v1/admin/users/{id}/password", Admin),
+    rule("POST", "/api/v1/admin/adsb/aircraft-db", Admin),
+    rule("DELETE", "/api/v1/admin/adsb/aircraft-db", Admin),
     rule("GET", "/api/v1/admin/invites", Admin),
     rule("POST", "/api/v1/admin/invites", Admin),
     rule("DELETE", "/api/v1/admin/invites/{id}", Admin),
@@ -295,6 +303,26 @@ pub const RULES: &[Rule] = &[
     rule("PUT", "/api/v1/admin/limits", Admin),
     rule("GET", "/api/v1/admin/client-report-policy", Admin),
     rule("PUT", "/api/v1/admin/client-report-policy", Admin),
+    // Notifications (ADR-0027): rules and targets are admin business; every account manages its
+    // own browser subscription.
+    rule("GET", "/api/v1/admin/notification-targets", Admin),
+    rule("POST", "/api/v1/admin/notification-targets", Admin),
+    rule("PUT", "/api/v1/admin/notification-targets/{id}", Admin),
+    rule("DELETE", "/api/v1/admin/notification-targets/{id}", Admin),
+    rule(
+        "POST",
+        "/api/v1/admin/notification-targets/{id}/test",
+        Admin,
+    ),
+    rule("GET", "/api/v1/admin/notification-rules", Admin),
+    rule("POST", "/api/v1/admin/notification-rules", Admin),
+    rule("PUT", "/api/v1/admin/notification-rules/{id}", Admin),
+    rule("DELETE", "/api/v1/admin/notification-rules/{id}", Admin),
+    rule("POST", "/api/v1/admin/notification-rules/{id}/test", Admin),
+    rule("GET", "/api/v1/admin/notification-deliveries", Admin),
+    rule("GET", "/api/v1/me/push", Listener),
+    rule("POST", "/api/v1/me/push/subscriptions", Listener),
+    rule("DELETE", "/api/v1/me/push/subscriptions/{id}", Listener),
 ];
 
 /// The rule for a matched route and method (HEAD counts as GET).
@@ -525,6 +553,7 @@ mod tests {
             include_str!("bookmarks.rs"),
             include_str!("plugins.rs"),
             include_str!("map.rs"),
+            include_str!("adsb.rs"),
             include_str!("channel_plans.rs"),
             include_str!("admin/mod.rs"),
         ];

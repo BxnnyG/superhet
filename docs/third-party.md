@@ -51,3 +51,16 @@ generator `gen-ng` from the multimon-ng repository, which is not shipped.
 
 Changing a package version is a normal image change; re-check the licence column and the golden
 tests (`docs/plugins-decoders.md`) when you do.
+
+## ADS-B aircraft data (not shipped)
+
+Superhet ships no aircraft data. The admin console can download, on request, the
+[Mictronics aircraft database](https://github.com/Mictronics/aircraft-database) (registration and
+type per ICAO address, ICAO type descriptions, airline names) under the **Open Data Commons
+Attribution License 1.0** (<https://opendatacommons.org/licenses/by/1-0/>), or import a copy of it
+from a file. It is stored in the operator's PostgreSQL, not in the image or the repository, and the
+ADS-B view credits the source and links the licence. The country table (`web/src/adsb/icaoRanges.ts`)
+is the ICAO Annex 10 allocation of 24-bit address blocks, compiled with the help of the assignment
+list kept by the tar1090 project (GPL-3.0-or-later; data of regulatory facts, AGPL-compatible).
+Photo sites (Planespotters, JetPhotos) are only linked, never fetched. Crate added for reading the
+archive: `zip` (MIT) with `flate2` and `zlib-rs` (MIT/Apache-2.0 / Zlib).

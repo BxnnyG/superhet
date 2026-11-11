@@ -132,4 +132,42 @@ describe("AdsbMap", () => {
     expect(container.querySelectorAll("path.leaflet-interactive").length).toBeGreaterThanOrEqual(1);
     expect(container.querySelectorAll(".leaflet-overlay-pane path")).toHaveLength(3);
   });
+
+  it("draws the symbol of the aircraft type", () => {
+    const symbols = new Map([
+      ["3c6444", "heavy" as const],
+      ["406a3d", "heli" as const],
+    ]);
+    const { container } = render(<AdsbMap aircraft={picture()} {...props} symbols={symbols} />);
+    const kinds = [...container.querySelectorAll(".adsb-plane")].map((e) =>
+      e.getAttribute("data-kind"),
+    );
+    expect(kinds.sort()).toEqual(["heavy", "heli"]);
+    // Every kind has a shape, so no aircraft is ever drawn as nothing.
+    for (const kind of ["jet", "prop", "glider", "balloon", "uav", "ground", "unknown"] as const) {
+      const { container: c } = render(
+        <AdsbMap
+          aircraft={picture().slice(0, 1)}
+          {...props}
+          symbols={new Map([["3c6444", kind]])}
+        />,
+      );
+      expect(c.querySelector(".adsb-plane svg")?.innerHTML.length).toBeGreaterThan(20);
+    }
+  });
+
+  it("draws and removes the coverage outline", () => {
+    const ring: [number, number][] = [
+      [52, 7],
+      [51, 8],
+      [50, 7],
+      [51, 6],
+    ];
+    const { container, rerender } = render(
+      <AdsbMap aircraft={picture()} {...props} coverage={ring} />,
+    );
+    expect(container.querySelectorAll("path.adsb-coverage")).toHaveLength(1);
+    rerender(<AdsbMap aircraft={picture()} {...props} coverage={null} />);
+    expect(container.querySelectorAll("path.adsb-coverage")).toHaveLength(0);
+  });
 });

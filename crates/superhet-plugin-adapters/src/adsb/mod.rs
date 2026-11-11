@@ -8,11 +8,12 @@
 //! ```
 //!
 //! No sockets are involved on the decoder side: IQ goes in on stdin and the picture comes out as
-//! a file that readsb replaces atomically. The parser ([`aircraft`]) and the event / status logic
-//! ([`tracker`]) are plain functions, unit-tested on recorded `aircraft.json` files;
+//! a file that readsb replaces atomically. The parser ([`aircraft`]), the event / status logic
+//! ([`tracker`]) and the range statistics ([`range`]) are plain functions, unit-tested on recorded `aircraft.json` files;
 //! `tests/adsb_plugin.rs` runs the whole adapter against a fake host and a stand-in `readsb`.
 
 pub mod aircraft;
+pub mod range;
 pub mod tracker;
 
 use std::io::{Read, Write};
@@ -28,6 +29,7 @@ use superhet_plugin_protocol::framed::{Frame, FrameKind};
 
 use crate::event::round5;
 use crate::run::exit_code_of;
+use range::RangeWindow;
 use tracker::Tracker;
 
 /// Interval of the plugin's heartbeat frames (the host's watchdog allows 15 s).
@@ -285,6 +287,7 @@ fn poll(
     failed: &AtomicBool,
 ) {
     let mut tracker = Tracker::new(config.event_interval);
+    let mut window = RangeWindow::new(config.receiver);
     let mut running = false;
     loop {
         if stopping.load(Ordering::Relaxed) {
@@ -312,6 +315,16 @@ fn poll(
                 if link.event("adsb.aircraft", &Value::Object(data)).is_err() {
                     return;
                 }
+            }
+            // Once a minute: range maxima and activity of the minute that just ended.
+            if let Some(data) = window.observe(
+                &snapshot,
+                now_ms(),
+                tracker.count(),
+                tracker.messages_per_s(),
+            ) && link.event("adsb.range", &Value::Object(data)).is_err()
+            {
+                return;
             }
         }
         let mode = if running { "running" } else { "starting" };

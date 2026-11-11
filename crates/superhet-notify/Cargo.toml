@@ -1,0 +1,28 @@
+[package]
+name = "superhet-notify"
+description = "Superhet notifications: rule matching, message templates, webhook / e-mail / Web Push delivery."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64 = "0.23.1"
+regex = "1"
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2"] }
+ring = "0.17"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
+tokio = { workspace = true, features = ["time", "io-util"] }
+tracing.workspace = true
+url = "2"
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["time", "io-util", "rt-multi-thread", "macros", "net"] }
+
+[lints]
+workspace = true

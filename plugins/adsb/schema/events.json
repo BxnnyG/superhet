@@ -31,6 +31,42 @@
     },
     {
       "properties": {
+        "type": { "const": "adsb.range" },
+        "data": {
+          "type": "object",
+          "description": "Once a minute: the farthest positions heard in that minute per bearing sector and altitude band, and the activity of the minute. Not a history event: the worker stores it in the range statistics.",
+          "properties": {
+            "summary": { "type": "string" },
+            "minute_ms": { "type": "integer", "minimum": 0 },
+            "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+            "lon": { "type": "number", "minimum": -180, "maximum": 180 },
+            "msgs_per_s": { "type": "number", "minimum": 0 },
+            "aircraft": { "type": "integer", "minimum": 0 },
+            "with_position": { "type": "integer", "minimum": 0 },
+            "sectors": {
+              "type": "array",
+              "maxItems": 432,
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "integer", "minimum": 0, "maximum": 71 },
+                  { "type": "integer", "minimum": 0, "maximum": 5 },
+                  { "type": "number", "minimum": 0 },
+                  { "type": "string" }
+                ],
+                "minItems": 4,
+                "maxItems": 4
+              }
+            }
+          },
+          "required": ["summary", "minute_ms", "msgs_per_s", "aircraft", "with_position", "sectors"],
+          "dependentRequired": { "lat": ["lon"], "lon": ["lat"] }
+        }
+      },
+      "required": ["type", "data"]
+    },
+    {
+      "properties": {
         "type": { "const": "adsb.error" },
         "data": {
           "type": "object",
