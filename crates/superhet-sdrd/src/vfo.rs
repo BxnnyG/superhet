@@ -12,8 +12,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Deserializer, Serialize};
 use superhet_bus::profile;
 use superhet_dsp::{
-    CW_DEFAULT_PITCH_HZ, CW_PITCH_RANGE_HZ, Channel, ChannelConfig, Deemphasis, Mode,
-    SSB_LOW_CUT_HZ, canonical_ctcss,
+    CW_DEFAULT_PITCH_HZ, CW_PITCH_RANGE_HZ, Channel, ChannelConfig, ComfortConfig, Deemphasis,
+    Mode, NotchSetting, SSB_LOW_CUT_HZ, canonical_ctcss,
 };
 
 use crate::control::{CtlError, ErrorCode, MAX_CENTER_HZ, VERSION};
@@ -106,6 +106,8 @@ pub struct Vfo {
     pub tones: Option<bool>,
     /// CTCSS tone squelch (NFM and AM only, a standard tone); `None` = off.
     pub tone_squelch_hz: Option<f32>,
+    /// HF comfort blocks (noise blanker, notches, noise reduction); all off by default.
+    pub comfort: ComfortConfig,
     /// Who created the VFO (`u:<user id>` or `g:<guest id>`, set by the api); `None` = shared
     /// (default VFO, profile load).
     pub owner: Option<String>,
@@ -237,6 +239,9 @@ impl Vfo {
             stereo: (self.mode == VfoMode::Wfm).then(|| self.stereo_enabled()),
             tones: matches!(self.mode, VfoMode::Nfm | VfoMode::Am).then(|| self.tones_enabled()),
             tone_squelch_hz: self.tone_squelch_hz,
+            comfort: (self.mode != VfoMode::Wfm)
+                .then(|| comfort_to_wire(&self.comfort))
+                .flatten(),
             owner: self.owner.as_deref(),
             offset_hz: self.offset_hz(tuning.center_hz),
             status: self.status(tuning),
@@ -258,6 +263,8 @@ pub struct VfoWire<'a> {
     stereo: Option<bool>,
     tones: Option<bool>,
     tone_squelch_hz: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    comfort: Option<profile::Comfort>,
     #[serde(skip_serializing_if = "Option::is_none")]
     owner: Option<&'a str>,
     offset_hz: f64,
@@ -285,6 +292,8 @@ pub struct VfoCreate {
     pub tones: Option<bool>,
     /// CTCSS tone squelch (NFM and AM only).
     pub tone_squelch_hz: Option<f32>,
+    /// HF comfort blocks.
+    pub comfort: ComfortConfig,
 }
 
 /// Validated `vfo.update` request; `Some(None)` means "reset to default / off".
@@ -310,6 +319,39 @@ pub struct VfoPatch {
     pub tones: Option<Option<bool>>,
     /// New CTCSS tone squelch.
     pub tone_squelch_hz: Option<Option<f32>>,
+    /// New HF comfort set (replaces the whole set; `{}` switches everything off).
+    pub comfort: Option<ComfortConfig>,
+}
+
+/// Wire (and profile) form of the comfort set to the DSP configuration; validates ranges.
+fn comfort_from_wire(wire: Option<profile::Comfort>) -> Result<ComfortConfig, CtlError> {
+    let Some(c) = wire else {
+        return Ok(ComfortConfig::default());
+    };
+    c.validate().map_err(CtlError::invalid)?;
+    Ok(ComfortConfig {
+        noise_blanker: c.nb,
+        notch: c.notch.map(|n| NotchSetting {
+            freq_hz: n.freq_hz,
+            width_hz: n.width_hz,
+        }),
+        auto_notch: c.auto_notch,
+        noise_reduction: c.nr,
+    })
+}
+
+/// The comfort set as sent in the state document; `None` when everything is off.
+fn comfort_to_wire(c: &ComfortConfig) -> Option<profile::Comfort> {
+    let wire = profile::Comfort {
+        nb: c.noise_blanker,
+        notch: c.notch.map(|n| profile::Notch {
+            freq_hz: n.freq_hz,
+            width_hz: n.width_hz,
+        }),
+        auto_notch: c.auto_notch,
+        nr: c.noise_reduction,
+    };
+    (!wire.is_off()).then_some(wire)
 }
 
 fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
@@ -333,6 +375,7 @@ struct CreateWire {
     stereo: Option<bool>,
     tones: Option<bool>,
     tone_squelch_hz: Option<f32>,
+    comfort: Option<profile::Comfort>,
     owner: Option<String>,
 }
 
@@ -357,6 +400,7 @@ struct UpdateWire {
     tones: Option<Option<bool>>,
     #[serde(default, deserialize_with = "present")]
     tone_squelch_hz: Option<Option<f32>>,
+    comfort: Option<profile::Comfort>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -515,6 +559,7 @@ pub fn parse_create_owned(payload: &[u8]) -> Result<(VfoCreate, Option<String>),
         stereo: wire.stereo,
         tones: wire.tones,
         tone_squelch_hz: snap_tone(wire.tone_squelch_hz)?,
+        comfort: comfort_from_wire(wire.comfort)?,
     };
     check_freq(request.freq_hz)?;
     check_bandwidth(request.bandwidth_hz)?;
@@ -544,6 +589,10 @@ pub fn parse_update(payload: &[u8]) -> Result<VfoPatch, CtlError> {
         stereo: wire.stereo,
         tones: wire.tones,
         tone_squelch_hz: wire.tone_squelch_hz.map(snap_tone).transpose()?,
+        comfort: wire
+            .comfort
+            .map(|c| comfort_from_wire(Some(c)))
+            .transpose()?,
     };
     if let Some(hz) = patch.freq_hz {
         check_freq(hz)?;
@@ -562,6 +611,7 @@ pub fn parse_update(payload: &[u8]) -> Result<VfoPatch, CtlError> {
         && patch.stereo.is_none()
         && patch.tones.is_none()
         && patch.tone_squelch_hz.is_none()
+        && patch.comfort.is_none()
     {
         return Err(CtlError::invalid("request changes nothing"));
     }
@@ -632,6 +682,7 @@ impl Vfo {
             stereo: request.stereo,
             tones: request.tones,
             tone_squelch_hz: request.tone_squelch_hz,
+            comfort: request.comfort,
             owner: None,
         }
     }
@@ -683,6 +734,7 @@ impl From<&profile::Vfo> for VfoCreate {
             stereo: vfo.stereo,
             tones: vfo.tones,
             tone_squelch_hz: vfo.tone_squelch_hz,
+            comfort: comfort_from_wire(vfo.comfort).unwrap_or_default(),
         }
     }
 }
@@ -789,6 +841,9 @@ impl VfoRegistry {
         }
         if let Some(t) = patch.tone_squelch_hz {
             vfo.tone_squelch_hz = t;
+        }
+        if let Some(c) = patch.comfort {
+            vfo.comfort = c;
         }
         check_deemphasis(vfo.mode, vfo.deemphasis)?;
         check_stereo(vfo.mode, vfo.stereo)?;
@@ -950,6 +1005,7 @@ mod tests {
             stereo: None,
             tones: None,
             tone_squelch_hz: None,
+            comfort: Default::default(),
         }
     }
 
@@ -1175,6 +1231,7 @@ mod tests {
                     stereo: None,
                     tones: None,
                     tone_squelch_hz: None,
+                    comfort: Default::default(),
                 },
                 RATE,
             )
@@ -1322,6 +1379,7 @@ mod tests {
             stereo: None,
             tones: None,
             tone_squelch_hz: None,
+            comfort: Default::default(),
             owner: None,
         };
         // The usable half span is 435.2 kHz (85 % of 1.024 MS/s); NFM default 12.5 kHz leaves
@@ -1371,6 +1429,7 @@ mod tests {
             stereo: None,
             tones: None,
             tone_squelch_hz: None,
+            comfort: Default::default(),
             owner: None,
         };
         let value = serde_json::to_value(vfo.wire(T)).expect("json");
@@ -1537,5 +1596,53 @@ mod tests {
         assert_eq!(shared.generation(), 1);
         let (rev, list) = shared.snapshot();
         assert_eq!((rev, list.len()), (1, 1));
+    }
+    #[test]
+    fn comfort_is_off_by_default_and_round_trips_through_create_update_and_wire() {
+        let tuning = Tuning {
+            center_hz: 7_000_000,
+            sample_rate: RATE,
+        };
+        let mut reg = VfoRegistry::with_max(4);
+        let plain = create(r#"{"v":1,"freq_hz":7100000,"mode":"lsb"}"#).expect("valid");
+        assert!(plain.comfort.is_off());
+        let v = reg.create(plain, RATE).expect("created");
+        assert!(serde_json::to_value(v.wire(tuning)).expect("json")["comfort"].is_null());
+
+        let patch = parse_update(
+            format!(
+                r#"{{"v":1,"id":{},"comfort":{{"nb":0.4,"notch":{{"freq_hz":1200,"width_hz":60}},"auto_notch":0.5,"nr":0.7}}}}"#,
+                v.id
+            )
+            .as_bytes(),
+        )
+        .expect("valid");
+        let v = reg.update(&patch, RATE).expect("updated");
+        assert_eq!(v.comfort.noise_blanker, Some(0.4));
+        assert_eq!(v.comfort.notch.map(|n| n.freq_hz), Some(1_200.0));
+        let wire = serde_json::to_value(v.wire(tuning)).expect("json");
+        assert_eq!(wire["comfort"]["nr"], 0.7_f32);
+        assert_eq!(wire["comfort"]["notch"]["width_hz"], 60.0);
+
+        // `{}` switches everything off again; the other fields stay.
+        let off = parse_update(format!(r#"{{"v":1,"id":{},"comfort":{{}}}}"#, v.id).as_bytes())
+            .expect("valid");
+        let v = reg.update(&off, RATE).expect("updated");
+        assert!(v.comfort.is_off());
+        assert_eq!(v.mode, VfoMode::Lsb);
+    }
+
+    #[test]
+    fn rejects_out_of_range_comfort() {
+        for bad in [
+            r#"{"nb":1.5}"#,
+            r#"{"nr":-0.1}"#,
+            r#"{"notch":{"freq_hz":10,"width_hz":50}}"#,
+            r#"{"notch":{"freq_hz":1000,"width_hz":5000}}"#,
+            r#"{"speed":1}"#,
+        ] {
+            let body = format!(r#"{{"v":1,"id":1,"comfort":{bad}}}"#);
+            assert!(parse_update(body.as_bytes()).is_err(), "{bad}");
+        }
     }
 }

@@ -15,6 +15,8 @@ import {
   type VfoPatch,
   type VfoReply,
 } from "./api";
+import { retuneDefaults } from "./bandDefaults";
+import { comfortIsOff } from "./comfort";
 import { loadCwPitch } from "./cwPitch";
 import { DEFAULT_BANDWIDTH_HZ } from "./model";
 
@@ -70,6 +72,8 @@ export function applyVfoPatch(vfo: Vfo, patch: VfoPatch): Vfo {
     next.bandwidthHz = DEFAULT_BANDWIDTH_HZ[patch.mode];
   if (patch.squelchDbfs !== undefined) next.squelchDbfs = patch.squelchDbfs;
   if (patch.cwPitchHz !== undefined) next.cwPitchHz = patch.cwPitchHz;
+  if (patch.comfort !== undefined)
+    next.comfort = comfortIsOff(patch.comfort) ? null : patch.comfort;
   return next;
 }
 
@@ -82,6 +86,8 @@ export class VfoController {
   private selectedId: number | null = null;
   private error: string | null = null;
   private pending = new Map<number, VfoPatch>();
+  /** VFOs whose mode the user chose by hand: they no longer follow the band defaults. */
+  private readonly manualMode = new Set<number>();
   private ops: Op[] = [];
   private inFlight = false;
   private sent: { id: number; patch: VfoPatch } | null = null;
@@ -151,9 +157,25 @@ export class VfoController {
     this.schedule();
   }
 
-  /** Change a VFO; fields of earlier unsent updates of the same VFO are overwritten. */
-  update(id: number, patch: VfoPatch): void {
+  /**
+   * Change a VFO; fields of earlier unsent updates of the same VFO are overwritten. A VFO whose
+   * mode the user never set (a patch with `mode` marks it as chosen by hand) follows the band it
+   * is retuned into: AM on broadcast bands, CW segments, LSB below 10 MHz, USB above.
+   */
+  update(id: number, requested: VfoPatch): void {
     if (!this.mayModify(id)) return;
+    let patch = requested;
+    if (patch.mode !== undefined) {
+      this.manualMode.add(id);
+    } else if (
+      patch.freqHz !== undefined &&
+      patch.bandwidthHz === undefined &&
+      !this.manualMode.has(id)
+    ) {
+      const from = this.snapshot.vfos.find((v) => v.id === id);
+      const next = from ? retuneDefaults(from.freqHz, patch.freqHz) : null;
+      if (next) patch = { ...patch, mode: next.mode, bandwidthHz: next.bandwidthHz };
+    }
     // Switching a VFO to CW starts with the pitch the user last picked (the daemon would
     // otherwise reset it to 700 Hz).
     const current = this.confirmed.find((v) => v.id === id);

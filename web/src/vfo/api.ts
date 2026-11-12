@@ -1,6 +1,7 @@
 // Typed wrappers for the VFO REST routes (docs/api-devices.md) with runtime validation.
 
 import { apiFetch } from "../auth/session";
+import { comfortBody, parseComfort, type Comfort } from "./comfort";
 import {
   ApiError,
   deviceUrl,
@@ -37,6 +38,8 @@ export interface Vfo {
   tones?: boolean | null;
   /** CTCSS tone squelch in Hz; null = off. */
   toneSquelchHz?: number | null;
+  /** HF comfort blocks (noise blanker, notches, noise reduction); null = all off. */
+  comfort?: Comfort | null;
   offsetHz: number;
   status: "active" | "paused";
   /** The viewer created it. Absent on daemons without accounts (everything is editable). */
@@ -72,6 +75,8 @@ export interface VfoPatch {
   tones?: boolean | null;
   /** NFM and AM only, one of the standard CTCSS tones; `null` switches the tone squelch off. */
   toneSquelchHz?: number | null;
+  /** The whole comfort set (replaces the old one); `{}` switches every block off. */
+  comfort?: Comfort;
 }
 
 /**
@@ -103,6 +108,7 @@ function bad(what: string): never {
 
 export function parseVfo(raw: unknown): Vfo {
   if (!isRec(raw)) return bad("not an object");
+  const comfort = parseComfort(raw.comfort);
   const {
     id,
     freq_hz,
@@ -143,6 +149,7 @@ export function parseVfo(raw: unknown): Vfo {
       typeof tone_squelch_hz === "number" && Number.isFinite(tone_squelch_hz)
         ? tone_squelch_hz
         : null,
+    ...(comfort ? { comfort } : {}),
     offsetHz: typeof offset_hz === "number" ? offset_hz : 0,
     status: status === "paused" ? "paused" : "active",
     ...(typeof raw.mine === "boolean" ? { mine: raw.mine } : {}),
@@ -212,6 +219,7 @@ export function patchBody(patch: VfoPatch): Rec {
   if (patch.stereo !== undefined) body.stereo = patch.stereo;
   if (patch.tones !== undefined) body.tones = patch.tones;
   if (patch.toneSquelchHz !== undefined) body.tone_squelch_hz = patch.toneSquelchHz;
+  if (patch.comfort !== undefined) body.comfort = comfortBody(patch.comfort);
   return body;
 }
 
