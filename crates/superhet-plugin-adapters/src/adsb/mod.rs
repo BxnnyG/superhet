@@ -149,7 +149,6 @@ fn now_ms() -> u64 {
 
 /// Run the plugin: connect to the host, start `program` (readsb) and serve until the host goes
 /// away or the decoder dies.
-#[must_use]
 pub fn run(program: &str, config: &Value, socket: &str) -> ExitCode {
     let config = match Config::from_json(config) {
         Ok(config) => config,

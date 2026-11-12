@@ -193,7 +193,6 @@ pub(crate) fn unix_ms() -> u64 {
 
 /// Run the plugin: connect to the host, serve until it goes away. `program` is the decoder to
 /// start (`m17-demod`).
-#[must_use]
 pub fn run(program: &str, config: &Value, socket: &str) -> ExitCode {
     let config = match Config::from_json(config) {
         Ok(config) => config,

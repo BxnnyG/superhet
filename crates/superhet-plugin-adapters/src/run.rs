@@ -65,7 +65,6 @@ pub fn run(program: &str, args: &[String], mut map: impl FnMut(&str) -> Option<V
 }
 
 /// The adapter's exit code for a tool that ended with `status` (its own code, else 1).
-#[must_use]
 pub fn exit_code_of(status: std::process::ExitStatus, program: &str) -> ExitCode {
     eprintln!("{program} ended with {status}");
     ExitCode::from(

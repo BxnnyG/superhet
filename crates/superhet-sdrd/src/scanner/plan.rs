@@ -335,9 +335,7 @@ mod tests {
             db: vec![-80.0; 1000],
         };
         // 1 kHz per bin starting at 99.5 MHz; a 12.5 kHz channel at +100 kHz is 594..=606.
-        for bin in 594..=606 {
-            frame.db[bin] = -60.0;
-        }
+        frame.db[594..=606].fill(-60.0);
         let measure = Measure::new(&frame);
         assert!((measure.floor_db() + 80.0).abs() < 0.01);
         let on = measure.level(&nfm(100_100_000)).expect("inside");
