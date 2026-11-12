@@ -122,11 +122,10 @@ impl Converter {
         }
         let frames = self.out[0].len().min(self.out[1].len());
         let mut pcm = Vec::with_capacity(frames * 4);
-        for i in 0..frames {
-            for side in 0..2 {
-                let value = (self.out[side][i] * 32767.0)
-                    .round()
-                    .clamp(-32768.0, 32767.0);
+        let (left, right) = (&self.out[0], &self.out[1]);
+        for (l, r) in left.iter().zip(right).take(frames) {
+            for sample in [l, r] {
+                let value = (sample * 32767.0).round().clamp(-32768.0, 32767.0);
                 pcm.extend_from_slice(&(value as i16).to_le_bytes());
             }
         }

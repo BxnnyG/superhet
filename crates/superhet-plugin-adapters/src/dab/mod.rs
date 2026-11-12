@@ -39,7 +39,6 @@ const IQ_QUEUE: usize = 128;
 
 /// Run the plugin: connect to the host, serve until it goes away. `program` is the decoder to
 /// start (`welle-cli`).
-#[must_use]
 pub fn run(program: &str, config: &Value, socket: &str, freq_hz: Option<u64>) -> ExitCode {
     let (link, mut incoming, hello) = match link::connect(socket) {
         Ok(parts) => parts,

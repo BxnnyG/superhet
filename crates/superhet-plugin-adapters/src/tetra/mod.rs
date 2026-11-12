@@ -304,7 +304,6 @@ impl Shared {
 }
 
 /// Run the plugin: connect to the host, serve until it goes away.
-#[must_use]
 pub fn run(config: &Value, socket: &str) -> ExitCode {
     let config = match Config::from_json(config) {
         Ok(config) => config,
