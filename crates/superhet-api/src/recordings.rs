@@ -790,7 +790,21 @@ async fn replay(
     )
     .await
     {
-        return failure(StatusCode::FORBIDDEN, "forbidden", reason);
+        // "forbidden" is a policy answer; anything else means the daemon could not be asked.
+        let status = if reason == "forbidden" {
+            StatusCode::FORBIDDEN
+        } else {
+            StatusCode::SERVICE_UNAVAILABLE
+        };
+        return failure(
+            status,
+            if reason == "forbidden" {
+                "forbidden"
+            } else {
+                "unavailable"
+            },
+            reason,
+        );
     }
     match state
         .mgr
