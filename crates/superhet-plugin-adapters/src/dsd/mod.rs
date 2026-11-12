@@ -290,7 +290,6 @@ pub(crate) fn watch_stdin(on_close: impl FnOnce() + Send + 'static) {
 
 /// Run the plugin: connect to the host, serve until it goes away. `plugin_dir` is the directory
 /// the host started the plugin in.
-#[must_use]
 pub fn run(config: &Value, socket: &str, plugin_dir: &Path) -> ExitCode {
     let config = match Config::from_json(config) {
         Ok(config) => config,
