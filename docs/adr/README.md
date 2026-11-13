@@ -31,3 +31,4 @@ Format: one file per decision, `NNNN-short-title.md`, sections *Status*, *Contex
 | [0025](0025-scanner.md) | Scanner in the device daemon, detection on the spectrum | accepted |
 | [0026](0026-adsb-aircraft-database-and-range.md) | ADS-B aircraft database (Mictronics, ODC-By) and range statistics | accepted |
 | [0027](0027-notifications.md) | Notifications: rules, targets, outbox delivery | accepted |
+| [0028](0028-recordings-and-instant-replay.md) | Recordings and instant replay in the API service, no re-encoding | accepted |

@@ -6,6 +6,7 @@ import {
   ListIcon,
   PlaneIcon,
   PlugIcon,
+  RecordIcon,
   SettingsIcon,
   SearchIcon,
   SignalIcon,
@@ -24,6 +25,8 @@ export function tabIcon(tab: InspectorTab, size = 16): ReactNode {
       return <ListIcon size={size} />;
     case "scanner":
       return <SearchIcon size={size} />;
+    case "recordings":
+      return <RecordIcon size={size} />;
     case "decoders":
       return <ActivityIcon size={size} />;
     case "dab":

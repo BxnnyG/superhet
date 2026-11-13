@@ -5,6 +5,11 @@
 //! owning the device, which validates it and answers with the new device state (the scanner's
 //! state is its `scanner` object). Operators and admins only; the state itself is readable by
 //! everybody who can read the device state.
+//!
+//! `start` also takes `record_hits` (boolean, handled here, not by the daemon): while the scan
+//! runs, every hit is recorded as a squelch-gated audio recording (`recorder.rs`, ADR-0028).
+
+use std::sync::Arc;
 
 use axum::{
     Extension, Router,
@@ -19,6 +24,7 @@ use superhet_bus::{audit::Outcome, subjects};
 
 use crate::access::Principal;
 use crate::devices::{DevicesState, call_daemon, failure, guard_mutation, json, viewed};
+use crate::recorder::{Manager, Owner};
 
 /// Largest accepted body: a channel list of up to 2000 entries.
 pub const MAX_BODY_BYTES: usize = 256 * 1024;
@@ -29,12 +35,13 @@ const ACTIONS: [&str; 7] = [
 ];
 
 /// Routes of the scanner API, behind the authentication hook.
-pub fn router(state: DevicesState) -> Router {
+pub fn router(state: DevicesState, recorder: Arc<Manager>) -> Router {
     Router::new()
         .route(
             "/api/v1/devices/{dev}/scanner/{action}",
             post(post_scanner).layer(DefaultBodyLimit::max(MAX_BODY_BYTES)),
         )
+        .layer(Extension(recorder))
         .with_state(state)
 }
 
@@ -61,6 +68,7 @@ fn prepare(body: &[u8]) -> Result<Map<String, Value>, &'static str> {
 async fn post_scanner(
     State(state): State<DevicesState>,
     Extension(principal): Extension<Principal>,
+    Extension(recorder): Extension<Arc<Manager>>,
     Path((device, action)): Path<(String, String)>,
     headers: HeaderMap,
     body: Bytes,
@@ -74,18 +82,43 @@ async fn post_scanner(
     let Ok(subject) = subjects::ctl_scanner(&device, &action) else {
         return failure(StatusCode::BAD_REQUEST, "invalid", "invalid device id");
     };
-    let object = match prepare(&body) {
+    let mut object = match prepare(&body) {
         Ok(object) => object,
         Err(message) => return failure(StatusCode::BAD_REQUEST, "invalid", message),
+    };
+    let record_hits = match object.remove("record_hits") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(on)) => on,
+        Some(_) => {
+            return failure(
+                StatusCode::BAD_REQUEST,
+                "invalid",
+                "record_hits must be a boolean",
+            );
+        }
     };
     state.auth.registry().note_device(&device);
     let payload = Value::Object(object.clone()).to_string().into_bytes();
     let audit_action = format!("device.scanner.{action}");
     match call_daemon(&state, subject, payload).await {
         Ok(reply) => {
+            match action.as_str() {
+                "start" if record_hits => recorder.enable_hit_recording(
+                    &device,
+                    Owner {
+                        name: principal.name.clone(),
+                        id: principal.owner_id(),
+                    },
+                    principal.who(),
+                ),
+                "start" | "stop" => recorder.disable_hit_recording(&device).await,
+                _ => {}
+            }
             // Never log a whole channel list: the action and what it addressed are enough.
             let details = match action.as_str() {
-                "start" => json!({"source": object.get("source").and_then(|s| s.get("kind"))}),
+                "start" => {
+                    json!({"source": object.get("source").and_then(|s| s.get("kind")), "record_hits": record_hits})
+                }
                 "lockout" | "unlock" => json!({"freq_hz": object.get("freq_hz")}),
                 _ => json!({}),
             };
@@ -130,7 +163,11 @@ mod tests {
     use tower::ServiceExt;
 
     async fn call(request: Request<Body>) -> (StatusCode, Value) {
-        let router = router(DevicesState::for_tests()).layer(Extension(Principal::test(
+        let router = router(
+            DevicesState::for_tests(),
+            Manager::for_tests(std::env::temp_dir().join("superhet-scanner-test")),
+        )
+        .layer(Extension(Principal::test(
             superhet_db::users::Role::Operator,
         )));
         let response = router.oneshot(request).await.expect("infallible");

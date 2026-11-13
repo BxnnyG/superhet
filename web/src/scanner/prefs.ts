@@ -15,6 +15,8 @@ export interface ScannerPrefs {
   /** A bookmark group id, `flagged` (bookmarks marked for scanning) or `all`. */
   bookmarkGroup: string;
   planId: string | null;
+  /** Record every hit as an audio recording while the scan runs (operators). */
+  recordHits: boolean;
   settings: ScanSettings;
 }
 
@@ -26,6 +28,7 @@ export const DEFAULT_PREFS: ScannerPrefs = {
   mode: null,
   bookmarkGroup: "flagged",
   planId: null,
+  recordHits: false,
   settings: DEFAULT_SETTINGS,
 };
 
@@ -52,6 +55,7 @@ export function parsePrefs(raw: unknown): ScannerPrefs {
     mode: typeof r.mode === "string" && MODES.includes(r.mode) ? (r.mode as VfoMode) : null,
     bookmarkGroup: typeof r.bookmarkGroup === "string" ? r.bookmarkGroup : "flagged",
     planId: typeof r.planId === "string" ? r.planId : null,
+    recordHits: r.recordHits === true,
     settings: {
       thresholdDb: num(s.thresholdDb, d.thresholdDb, 1, 60),
       thresholdDbfs:

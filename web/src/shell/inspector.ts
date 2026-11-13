@@ -9,6 +9,7 @@ export const INSPECTOR_TABS = [
   "bookmarks",
   "channels",
   "scanner",
+  "recordings",
   "decoders",
   "dab",
   "adsb",
@@ -31,7 +32,8 @@ export function visibleTabs(
 ): readonly InspectorTab[] {
   return INSPECTOR_TABS.filter(
     (t) =>
-      (t !== "bookmarks" || perms.canReadBookmarks) &&
+      // Recordings, like bookmarks, are for accounts; guests have neither.
+      ((t !== "bookmarks" && t !== "recordings") || perms.canReadBookmarks) &&
       ((t !== "decoders" && t !== "dab" && t !== "adsb" && t !== "panels") ||
         perms.canSeeDecoders) &&
       (t !== "panels" || hasPanels),
@@ -43,6 +45,7 @@ export const INSPECTOR_LABEL: Record<InspectorTab, string> = {
   bookmarks: "Bookmarks",
   channels: "Channels",
   scanner: "Scanner",
+  recordings: "Recordings",
   decoders: "Decoders",
   dab: "DAB",
   adsb: "ADS-B",

@@ -158,7 +158,7 @@ async fn audio_ws(
 /// Whether `principal` may listen to every VFO in `wanted`: operators and admins hear all;
 /// everybody else only their own and shared (ownerless) VFOs. An id the daemon does not know is
 /// refused too, so nobody can pre-subscribe to a VFO somebody else creates later.
-async fn may_listen(
+pub(crate) async fn may_listen(
     devices: &DevicesState,
     principal: &Principal,
     device: &str,

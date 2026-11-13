@@ -86,6 +86,10 @@ services:
       SUPERHET_MAP_TILE_MODE: ${SUPERHET_MAP_TILE_MODE:-proxy}
       SUPERHET_MAP_TILE_CACHE_DIR: /data/tiles
       SUPERHET_MAP_TILE_CACHE_MAX_MB: ${SUPERHET_MAP_TILE_CACHE_MAX_MB:-512}
+      # Recordings library and instant replay (docs/recordings.md).
+      SUPERHET_RECORDINGS_DIR: /data/recordings
+      SUPERHET_RECORDINGS_MAX_GB: ${SUPERHET_RECORDINGS_MAX_GB:-20}
+      SUPERHET_REPLAY_SECONDS: ${SUPERHET_REPLAY_SECONDS:-60}
       SUPERHET_PUBLIC_URL: ${SUPERHET_PUBLIC_URL:-}
       SUPERHET_OIDC_ISSUER: ${SUPERHET_OIDC_ISSUER:-}
       SUPERHET_OIDC_CLIENT_ID: ${SUPERHET_OIDC_CLIENT_ID:-}
@@ -105,6 +109,7 @@ services:
       SUPERHET_OIDC_KEEP_LOCAL_LOGIN: ${SUPERHET_OIDC_KEEP_LOCAL_LOGIN:-}
     volumes:
       - tile-cache:/data/tiles
+      - recordings:/data/recordings
     depends_on:
       postgres: { condition: service_healthy }
       nats: { condition: service_healthy }
@@ -201,3 +206,4 @@ volumes:
   nats-data:
   plugin-data:
   tile-cache:
+  recordings:
