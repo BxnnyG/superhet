@@ -321,6 +321,24 @@ fn listen_view(reply: &Value) -> Value {
     json!({"ok": true, "instances": streams})
 }
 
+/// The audio streams of the running plugin instances bound to `device`, for the public share
+/// page: `{id, plugin_id, audio_vfo}` only. An unreachable host gives an empty list.
+pub(crate) async fn audio_streams_of(state: &DevicesState, device: &str) -> Vec<Value> {
+    let Ok(client) = connected(state.nats.as_ref()) else {
+        return Vec::new();
+    };
+    let Ok(reply) = host_call(client, "instances", json!({})).await else {
+        return Vec::new();
+    };
+    listen_view(&reply)["instances"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+        .filter(|i| i["device"] == device && i["audio_vfo"].is_u64())
+        .map(|i| json!({"id": i["id"], "plugin_id": i["plugin_id"], "audio_vfo": i["audio_vfo"]}))
+        .collect()
+}
+
 /// `GET /api/v1/plugin-streams` – running plugin instances without their configuration, so a
 /// listener can find the decoder output and its audio. Control stays with the operator routes.
 async fn list_streams(

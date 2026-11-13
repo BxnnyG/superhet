@@ -13,6 +13,7 @@ mod oidc_routes;
 mod report;
 mod sessions;
 mod settings_routes;
+mod share_links;
 mod users;
 
 use axum::{
@@ -158,6 +159,26 @@ pub fn router(state: AdminState) -> Router {
         .route(
             "/api/v1/admin/notification-deliveries",
             get(notifications::list_deliveries),
+        )
+        .route(
+            "/api/v1/admin/share-links",
+            get(share_links::list)
+                .post(share_links::create)
+                .layer(limit),
+        )
+        .route(
+            "/api/v1/admin/share-links/{id}",
+            axum::routing::put(share_links::update)
+                .delete(share_links::remove)
+                .layer(limit),
+        )
+        .route(
+            "/api/v1/admin/share-links/{id}/revoke",
+            post(share_links::revoke),
+        )
+        .route(
+            "/api/v1/admin/share-links/{id}/rotate",
+            post(share_links::rotate),
         )
         .route("/api/v1/me/push", get(notifications::my_push))
         .route(

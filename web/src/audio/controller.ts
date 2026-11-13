@@ -66,6 +66,10 @@ export interface AudioControllerOptions {
   storage?: Storage | null;
   engine?: AudioEngine;
   createSocket?: (url: string) => WebSocket;
+  /** Another endpoint (the public share page), and whether it belongs to a login session. */
+  url?: string;
+  session?: boolean;
+  onMessage?: (msg: unknown) => void;
 }
 
 export class AudioController {
@@ -113,6 +117,9 @@ export class AudioController {
     this.socket = new AudioSocket({
       device: opts.device,
       createSocket: opts.createSocket,
+      url: opts.url,
+      session: opts.session,
+      onMessage: opts.onMessage,
       onFrame: (f) => this.onFrame(f),
       onRds: (id, state) => this.onRds(id, state),
       onTones: (msg) => this.onTones(msg),
@@ -130,6 +137,11 @@ export class AudioController {
 
   start(): void {
     this.socket.start();
+  }
+
+  /** Send a control message on the audio socket. */
+  send(message: unknown): void {
+    this.socket.sendJson(message);
   }
 
   stop(): void {
