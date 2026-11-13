@@ -57,6 +57,13 @@ impl AudioState {
     }
 }
 
+impl AudioState {
+    /// The audio hub (shared with the public share routes).
+    pub(crate) fn hub(&self) -> Arc<AudioHub> {
+        Arc::clone(&self.hub)
+    }
+}
+
 /// Routes of the gateway, behind the authentication hook.
 pub fn router(state: AudioState) -> Router {
     Router::new().route(PATH, get(audio_ws)).with_state(state)

@@ -26,6 +26,7 @@ mod profiles;
 mod registry;
 mod scanner;
 mod settings;
+mod share;
 mod state_ws;
 mod tiles;
 mod view;
@@ -59,6 +60,7 @@ fn app(
     audio: audio_ws::AudioState,
     devices: devices::DevicesState,
 ) -> Router {
+    let share = share::ShareState::new(devices.clone(), ws.hub(), audio.hub());
     // Public by design (opaque-origin frames cannot send the session cookie, the files are plugin
     // code): the sandboxed panel assets, `plugin_ui` explains.
     let panel_assets = plugin_ui::router(devices.clone());
@@ -101,6 +103,7 @@ fn app(
         .route("/readyz", get(readyz))
         .with_state(deps)
         .merge(panel_assets)
+        .merge(share::router(share))
         .merge(auth::router(auth.clone()))
         .merge(auth::protect(protected, auth.clone()))
         .layer(middleware::from_fn_with_state(web, web::layer));
@@ -192,8 +195,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
     }
-    let web = web::Web::from_env();
+    let web = web::Web::from_env().with_shares(Arc::clone(auth.share_links()));
     maintenance::spawn(auth.clone(), devices.clone());
+    share::spawn_upkeep(auth.clone(), devices.clone());
     let app = app(web, Deps { db, nats }, auth, ws, audio, devices);
     axum::serve(
         listener,

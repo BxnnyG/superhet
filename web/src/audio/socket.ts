@@ -19,8 +19,12 @@ export interface AudioSocketOptions {
   onTones?: (msg: TonesMessage) => void;
   onStatus?: (status: SocketStatus) => void;
   onError?: (message: string) => void;
-  /** Override for tests. */
+  /** Control messages other than RDS, tones and errors (the share page's `hello` / `tuned`). */
+  onMessage?: (msg: unknown) => void;
+  /** Override for tests, and for the public share page (which has no account session). */
   url?: string;
+  /** False on pages without a login: a closed socket must not probe or mark the session lost. */
+  session?: boolean;
   createSocket?: (url: string) => WebSocket;
 }
 
@@ -75,6 +79,16 @@ export class AudioSocket {
     this.sendSubscription();
   }
 
+  private sessionLost(): boolean {
+    return this.opts.session !== false && isSessionLost();
+  }
+
+  /** Send a control message (ignored while not connected). */
+  sendJson(message: unknown): void {
+    const ws = this.ws;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+  }
+
   private setStatus(status: SocketStatus): void {
     if (this.status === status) return;
     this.status = status;
@@ -82,7 +96,7 @@ export class AudioSocket {
   }
 
   private connect(): void {
-    if (this.closed || isSessionLost()) return;
+    if (this.closed || this.sessionLost()) return;
     this.setStatus(this.attempt === 0 ? "connecting" : "reconnecting");
     const url = this.opts.url ?? audioUrl(this.opts.device);
     let ws: WebSocket;
@@ -117,7 +131,7 @@ export class AudioSocket {
       this.ws = null;
       // A rejected upgrade (401) looks like any failed connection: ask the server whether the
       // session is still valid; if not, the session is marked lost and reconnecting stops.
-      checkSessionAfterClose();
+      if (this.opts.session !== false) checkSessionAfterClose();
       this.scheduleReconnect();
     };
     // `close` always follows `error`; nothing to do here.
@@ -145,14 +159,16 @@ export class AudioSocket {
         "error" in msg
       ) {
         this.opts.onError?.(String(msg.error));
+        return;
       }
+      this.opts.onMessage?.(msg);
     } catch {
       // Ignore malformed control messages.
     }
   }
 
   private scheduleReconnect(): void {
-    if (this.closed || isSessionLost()) return;
+    if (this.closed || this.sessionLost()) return;
     this.setStatus("reconnecting");
     const delay = backoffDelay(this.attempt);
     this.attempt += 1;

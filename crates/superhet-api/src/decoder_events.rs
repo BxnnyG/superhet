@@ -44,7 +44,7 @@ const MAX_EXPORT: usize = 100_000;
 /// Rows fetched per query while exporting.
 const EXPORT_PAGE: i64 = 5000;
 const MAX_SEARCH_CHARS: usize = 100;
-const MAX_CLIENT_BYTES: usize = 1024;
+pub(crate) const MAX_CLIENT_BYTES: usize = 1024;
 const MAX_WS_CLIENTS: usize = 32;
 
 /// Shared state of the decoder event routes.
@@ -457,7 +457,7 @@ fn envelope(doc: &str) -> Option<String> {
     is_object.then(|| format!(r#"{{"v":1,"type":"decoder_event","event":{doc}}}"#))
 }
 
-async fn serve_client(
+pub(crate) async fn serve_client(
     mut socket: WebSocket,
     mut updates: Subscriber,
     mut kill: crate::registry::ConnGuard,

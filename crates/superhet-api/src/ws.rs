@@ -32,7 +32,7 @@ use superhet_bus::spectrum::SpectrumFrame;
 /// Route path of the spectrum gateway.
 pub const PATH: &str = "/api/v1/ws/spectrum";
 /// Maximum size of a client control message.
-const MAX_CONTROL_BYTES: usize = 4096;
+pub(crate) const MAX_CONTROL_BYTES: usize = 4096;
 /// Maximum concurrent spectrum clients.
 const MAX_CLIENTS: usize = 32;
 /// A client that cannot take a frame within this time is disconnected.
@@ -65,6 +65,13 @@ impl WsState {
             slots: Arc::new(Semaphore::new(MAX_CLIENTS)),
             auth,
         }
+    }
+}
+
+impl WsState {
+    /// The spectrum hub (shared with the public share routes).
+    pub(crate) fn hub(&self) -> Arc<Hub> {
+        Arc::clone(&self.hub)
     }
 }
 
@@ -172,7 +179,7 @@ impl Session {
     }
 }
 
-async fn serve_client(
+pub(crate) async fn serve_client(
     mut socket: WebSocket,
     streams: Streams,
     hub: &Hub,

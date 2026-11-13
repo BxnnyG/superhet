@@ -305,6 +305,13 @@ pub const RULES: &[Rule] = &[
     rule("DELETE", "/api/v1/admin/notification-rules/{id}", Admin),
     rule("POST", "/api/v1/admin/notification-rules/{id}/test", Admin),
     rule("GET", "/api/v1/admin/notification-deliveries", Admin),
+    // Public receiver share links (ADR-0029); the public side lives in `share`, outside this table.
+    rule("GET", "/api/v1/admin/share-links", Admin),
+    rule("POST", "/api/v1/admin/share-links", Admin),
+    rule("PUT", "/api/v1/admin/share-links/{id}", Admin),
+    rule("DELETE", "/api/v1/admin/share-links/{id}", Admin),
+    rule("POST", "/api/v1/admin/share-links/{id}/revoke", Admin),
+    rule("POST", "/api/v1/admin/share-links/{id}/rotate", Admin),
     rule("GET", "/api/v1/me/push", Listener),
     rule("POST", "/api/v1/me/push/subscriptions", Listener),
     rule("DELETE", "/api/v1/me/push/subscriptions/{id}", Listener),
