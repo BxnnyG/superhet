@@ -8,6 +8,7 @@ import { describeHttpError } from "../http";
 import { createAdsbApi, type AdsbApi } from "./api";
 import { InfoCache } from "./info";
 import { ADSB_PLUGIN_ID, type AdsbReply } from "./model";
+import { TrailStore } from "./trails";
 
 export interface AdsbSnapshot {
   /** The instance being followed; null when no ADS-B instance is known. */
@@ -42,6 +43,8 @@ export class AdsbStore {
 
   /** Registration, type and airline of the aircraft in view (the imported database). */
   readonly info: InfoCache;
+  /** Where each aircraft has been (the plugin only reports where it is now). */
+  readonly trails = new TrailStore();
 
   constructor(readonly client: AdsbApi = createAdsbApi()) {
     this.info = new InfoCache(client);
@@ -82,6 +85,7 @@ export class AdsbStore {
    */
   follow(id: string | null): void {
     if (id === this.snap.instanceId) return;
+    this.trails.clear();
     this.set({ instanceId: id, reply: null, receivedAt: 0, error: null });
     if (id !== null && this.running) void this.poll();
   }
@@ -106,7 +110,9 @@ export class AdsbStore {
         this.set({ instanceId: null, reply: null, receivedAt: 0, error: null });
         return;
       }
-      this.set({ reply, receivedAt: Date.now(), error: null });
+      const receivedAt = Date.now();
+      this.trails.record(reply.status?.aircraft ?? [], receivedAt);
+      this.set({ reply, receivedAt, error: null });
     } catch (e) {
       if (this.abort?.signal.aborted || this.snap.instanceId !== id) return;
       this.set({ error: describeHttpError(e) });

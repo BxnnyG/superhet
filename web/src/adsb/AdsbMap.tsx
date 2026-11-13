@@ -1,22 +1,48 @@
-// The aircraft map: markers and trails on the shared base map (map/BaseMap.tsx).
-// The positions and fading come from `Tracked` (adsb/model.ts); trails are kept here, in the
-// browser, for as long as an aircraft stays on the picture.
+// The aircraft map: markers, trails, labels and range rings on the shared base map
+// (map/BaseMap.tsx). Imperative on purpose: a marker is a DOM element that is created once and then
+// only touched where something changed (position, rotation, colour, label text), so 200+ aircraft
+// cost a few attribute writes per second and no React render. Trails are drawn on one canvas
+// (TrailCanvas.ts). The positions and fading come from `Tracked` (adsb/model.ts); the trail
+// points come from the store (adsb/trails.ts).
 
 import L from "leaflet";
 import { useEffect, useRef } from "react";
 import { MapCanvas, useBaseMap } from "../map/BaseMap";
 import type { MapConfig } from "../map/mapConfig";
-import { altitudeColor, label, type Tracked } from "./model";
-import type { SymbolKind } from "./icao";
+import { altitudeColor, emergencyOf, formatAlt, formatSpeed, label, type Tracked } from "./model";
+import { DEFAULT_PREFS, type LabelFields } from "./prefs";
+import { destination } from "./range";
+import { SYMBOL_SIZE, symbolSvg, UPRIGHT, type SymbolKind } from "./symbols";
+import { TrailCanvas, type TrailItem } from "./TrailCanvas";
+import { trailSegments, type TrailStore } from "./trails";
+import { distanceUnitName, kmPerDistanceUnit, type UnitSystem } from "./units";
 
-/** Positions kept per aircraft for its trail. */
-const TRAIL_POINTS = 40;
+/** Labels appear from this zoom on (a continent view would be a wall of text). */
+export const LABEL_MIN_ZOOM = 6;
+/** Pixel cell of the label declutter grid. */
+const CELL_W = 56;
+const CELL_H = 15;
 
 interface Entry {
   marker: L.Marker;
-  trail: L.Polyline;
-  points: L.LatLngTuple[];
-  iconKey: string;
+  /** The marker's own elements, set once the marker is on the map. */
+  plane: HTMLElement | null;
+  tag: HTMLElement | null;
+  line1: HTMLElement | null;
+  line2: HTMLElement | null;
+  ring: HTMLElement | null;
+  kind: SymbolKind;
+  /** Accumulated rotation (never wraps, so the symbol turns the short way). */
+  turn: number;
+  heading: number | null;
+  color: string;
+  opacity: number;
+  at: L.LatLngTuple;
+  text1: string;
+  text2: string;
+  title: string;
+  /** The label would collide with another one and is hidden. */
+  hidden: boolean;
 }
 
 interface Props {
@@ -28,49 +54,77 @@ interface Props {
   fitSignal: number;
   /** Where the tiles come from. */
   tiles: MapConfig;
-  /** Symbol per aircraft (type from the database or the emitter category); default: a jet. */
+  /** Symbol per aircraft (type from the database or the emitter category); default: unknown. */
   symbols?: ReadonlyMap<string, SymbolKind>;
   /** Coverage outline (one point per bearing sector) to draw around the receiver; null = none. */
   coverage?: readonly (readonly [number, number])[] | null;
+  units?: UnitSystem;
+  /** Where the trails are kept; none = no trails. */
+  trails?: TrailStore;
+  /** Trail length in minutes; 0 = none. */
+  trailMinutes?: number;
+  labels?: LabelFields;
+  /** Range rings around the receiver, in the chosen distance unit. */
+  rings?: boolean;
+  /** Keep the selected aircraft in the middle of the map. */
+  follow?: boolean;
+  /** The user dragged the map: following ends. */
+  onUserPan?: () => void;
 }
 
-const STROKE =
-  'fill="currentColor" stroke="rgba(0,0,0,.65)" stroke-width="1.1" stroke-linejoin="round"';
-
-/** Symbols pointing north (up) on a 24 x 24 grid; they are rotated to the track. */
-const SHAPES: Record<SymbolKind, string> = {
-  jet: `<path d="M12 1.5l2.3 7.2 8.2 4.8v2.2l-8.2-2.4-.5 5.4 3 2.1v1.7L12 21.4l-4.8 1.1v-1.7l3-2.1-.5-5.4-8.2 2.4v-2.2l8.2-4.8z" ${STROKE}/>`,
-  heavy: `<path d="M12 0.8l2.2 6.4 9.3 6.2v2.6l-9.3-2.6-.4 4.6 3.1 2.2v2l-4.9-.9-4.9.9v-2l3.1-2.2-.4-4.6-9.3 2.6v-2.6l9.3-6.2z" ${STROKE}/>`,
-  prop: `<path d="M12 3l1.3 5.2 9.2.3v2.6l-9.2.4-.5 6.2 2.9 1.6v1.9L12 20.9l-3.7.3v-1.9l2.9-1.6-.5-6.2-9.2-.4V8.5l9.2-.3z" ${STROKE}/><path d="M9.5 2.5h5" stroke="rgba(0,0,0,.65)" stroke-width="1.6" stroke-linecap="round"/>`,
-  heli: `<circle cx="12" cy="12" r="3.6" ${STROKE}/><path d="M12 15.4V22M9 22h6M3 12h18M12 3v18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>`,
-  glider: `<path d="M12 4l1 7 10.5 2.2v1.4L13 14.4l-.6 6 2.4 1.4v1H9.2v-1l2.4-1.4-.6-6L0.5 14.6v-1.4L11 11z" ${STROKE}/>`,
-  balloon: `<circle cx="12" cy="9" r="6.5" ${STROKE}/><rect x="9.5" y="17.5" width="5" height="4" rx=".8" ${STROKE}/>`,
-  uav: `<path d="M5 5l14 14M19 5L5 19" stroke="rgba(0,0,0,.65)" stroke-width="3.2" stroke-linecap="round"/><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12" r="2.6" ${STROKE}/>`,
-  ground: `<rect x="6" y="5" width="12" height="14" rx="2" ${STROKE}/>`,
-  unknown: `<path d="M12 1.5l2.3 7.2 8.2 4.8v2.2l-8.2-2.4-.5 5.4 3 2.1v1.7L12 21.4l-4.8 1.1v-1.7l3-2.1-.5-5.4-8.2 2.4v-2.2l8.2-4.8z" ${STROKE}/>`,
-};
-
-const svgOf = (kind: SymbolKind): string =>
-  `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">${SHAPES[kind]}</svg>`;
-
-function iconFor(
-  a: Tracked,
-  selected: boolean,
-  kind: SymbolKind,
-): { key: string; icon: L.DivIcon } {
-  // Balloons and ground vehicles have no heading worth showing.
-  const rotation =
-    kind === "balloon" || kind === "ground" ? 0 : Math.round((a.trackDeg ?? 0) / 5) * 5;
-  const color = altitudeColor(a);
-  const key = `${rotation}|${color}|${selected}|${a.trackDeg === null}|${kind}`;
-  const ring = selected ? '<span class="adsb-ring"></span>' : "";
-  const icon = L.divIcon({
+function buildIcon(kind: SymbolKind): L.DivIcon {
+  const size = SYMBOL_SIZE[kind];
+  return L.divIcon({
     className: "adsb-icon",
-    html: `${ring}<span class="adsb-plane" data-kind="${kind}" style="color:${color};transform:rotate(${rotation}deg)">${svgOf(kind)}</span>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
+    html:
+      `<span class="adsb-ring" hidden></span>` +
+      `<span class="adsb-plane" data-kind="${kind}">${symbolSvg(kind)}</span>` +
+      `<span class="adsb-tag" hidden><span class="adsb-l1"></span><span class="adsb-l2"></span></span>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
   });
-  return { key, icon };
+}
+
+function bind(entry: Entry): void {
+  const el = entry.marker.getElement();
+  entry.plane = el?.querySelector<HTMLElement>(".adsb-plane") ?? null;
+  entry.tag = el?.querySelector<HTMLElement>(".adsb-tag") ?? null;
+  entry.line1 = el?.querySelector<HTMLElement>(".adsb-l1") ?? null;
+  entry.line2 = el?.querySelector<HTMLElement>(".adsb-l2") ?? null;
+  entry.ring = el?.querySelector<HTMLElement>(".adsb-ring") ?? null;
+  // The state of a fresh element is unknown: write everything once.
+  entry.turn = Number.NaN;
+  entry.color = "";
+  entry.text1 = "\u0000";
+  entry.text2 = "\u0000";
+  entry.title = "";
+  entry.opacity = -1;
+  entry.hidden = true;
+}
+
+/** Nearest angle equivalent to `to` (mod 360) around `from`, so a turn takes the short way. */
+function unwrap(from: number, to: number): number {
+  if (Number.isNaN(from)) return to;
+  return from + ((((to - from) % 360) + 540) % 360) - 180;
+}
+
+function labelTexts(a: Tracked, fields: LabelFields, units: UnitSystem): [string, string] {
+  const l1 = fields.callsign ? label(a) : "";
+  const second: string[] = [];
+  if (fields.altitude) second.push(formatAlt(a, units).text);
+  if (fields.speed && a.speedKt !== null) second.push(formatSpeed(a.speedKt, units).text);
+  return [l1, second.join(" ")];
+}
+
+function titleOf(a: Tracked, units: UnitSystem): string {
+  const alt = formatAlt(a, units);
+  const parts = [label(a)];
+  if (alt.text !== "–") parts.push(alt.other === "" ? alt.text : `${alt.text} (${alt.other})`);
+  if (a.speedKt !== null) {
+    const speed = formatSpeed(a.speedKt, units);
+    parts.push(`${speed.text} (${speed.other})`);
+  }
+  return parts.join(" · ");
 }
 
 export function AdsbMap({
@@ -82,25 +136,47 @@ export function AdsbMap({
   tiles,
   symbols,
   coverage = null,
+  units = "metric",
+  trails,
+  trailMinutes = 0,
+  labels = DEFAULT_PREFS.labels,
+  rings = false,
+  follow = false,
+  onUserPan,
 }: Props) {
   const { hostRef, mapRef: map, tileProblem } = useBaseMap(tiles, () => onSelect(null));
   const entries = useRef(new Map<string, Entry>());
   const station = useRef<L.CircleMarker | null>(null);
+  const trailCanvas = useRef<TrailCanvas | null>(null);
   const fitted = useRef(false);
   const onSelectRef = useRef(onSelect);
+  const onPanRef = useRef(onUserPan);
   useEffect(() => {
     onSelectRef.current = onSelect;
+    onPanRef.current = onUserPan;
   });
 
-  // Forget the markers with the map.
+  // Forget the markers and the trail canvas with the map.
   useEffect(() => {
+    const m = map.current;
     const current = entries.current;
+    if (m !== null) {
+      trailCanvas.current = new TrailCanvas(m);
+      const onDrag = (): void => onPanRef.current?.();
+      m.on("dragstart", onDrag);
+      return () => {
+        m.off("dragstart", onDrag);
+        trailCanvas.current?.destroy();
+        trailCanvas.current = null;
+        current.clear();
+        station.current = null;
+        fitted.current = false;
+      };
+    }
     return () => {
       current.clear();
-      station.current = null;
-      fitted.current = false;
     };
-  }, []);
+  }, [map]);
 
   // The station marker.
   useEffect(() => {
@@ -119,6 +195,51 @@ export function AdsbMap({
       .bindTooltip("Receiver", { direction: "top" })
       .addTo(m);
   }, [map, receiver]);
+
+  // Range rings around the receiver in the chosen unit, spaced to the zoom.
+  useEffect(() => {
+    const m = map.current;
+    if (m === null || !rings || receiver === null) return;
+    const group = L.layerGroup().addTo(m);
+    const draw = (): void => {
+      group.clearLayers();
+      const unitKm = kmPerDistanceUnit(units);
+      const mPerPx = (156543.03392 * Math.cos((receiver.lat * Math.PI) / 180)) / 2 ** m.getZoom();
+      const stepUnits = niceStep((mPerPx * 140) / 1000 / unitKm);
+      const size = m.getSize();
+      const reach = (Math.hypot(size.x, size.y) * mPerPx) / 1000 / unitKm;
+      const count = Math.min(12, Math.max(1, Math.ceil(reach / stepUnits)));
+      for (let i = 1; i <= count; i++) {
+        const km = i * stepUnits * unitKm;
+        L.circle([receiver.lat, receiver.lon], {
+          radius: km * 1000,
+          fill: false,
+          weight: 1,
+          dashArray: "4 5",
+          color: "#818cf8",
+          opacity: 0.7,
+          interactive: false,
+          className: "adsb-range-ring",
+        }).addTo(group);
+        const [lat, lon] = destination(receiver, 0, km);
+        L.marker([lat, lon], {
+          interactive: false,
+          keyboard: false,
+          icon: L.divIcon({
+            className: "adsb-ring-label",
+            html: `${i * stepUnits} ${distanceUnitName(units)}`,
+            iconSize: [0, 0],
+          }),
+        }).addTo(group);
+      }
+    };
+    draw();
+    m.on("zoomend resize", draw);
+    return () => {
+      m.off("zoomend resize", draw);
+      group.remove();
+    };
+  }, [map, rings, receiver, units]);
 
   // Coverage outline: the farthest reception per sector, drawn around the receiver.
   const outline = useRef<L.Polygon | null>(null);
@@ -145,7 +266,53 @@ export function AdsbMap({
     };
   }, [map, coverage]);
 
-  // Aircraft: add, move, recolour, fade, remove.
+  // Hide labels that would sit on top of another one (selected aircraft always keep theirs).
+  const declutter = useRef<() => void>(() => {});
+  useEffect(() => {
+    declutter.current = () => {
+      const m = map.current;
+      if (m === null) return;
+      const show = m.getZoom() >= LABEL_MIN_ZOOM || selected !== null;
+      const taken = new Set<string>();
+      // Selected first, then low aircraft (more interesting near an airport), then the rest.
+      const order = [...entries.current.entries()].sort(([ia], [ib]) =>
+        ia === selected ? -1 : ib === selected ? 1 : 0,
+      );
+      for (const [icao, entry] of order) {
+        const tag = entry.tag;
+        if (tag === null) continue;
+        const empty = entry.text1 === "" && entry.text2 === "";
+        let visible = !empty && (show || icao === selected);
+        if (visible && icao !== selected) {
+          const p = m.latLngToContainerPoint(entry.at);
+          const w = Math.max(entry.text1.length, entry.text2.length) * 6 + 14;
+          const x0 = Math.floor(p.x / CELL_W);
+          const x1 = Math.floor((p.x + w) / CELL_W);
+          const y0 = Math.floor((p.y - CELL_H / 2) / CELL_H);
+          const y1 = Math.floor((p.y + CELL_H * (entry.text2 === "" ? 0.5 : 1.5)) / CELL_H);
+          const cells: string[] = [];
+          for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) cells.push(`${x},${y}`);
+          if (cells.some((c) => taken.has(c))) visible = false;
+          else for (const c of cells) taken.add(c);
+        }
+        if (entry.hidden === visible) {
+          entry.hidden = !visible;
+          tag.hidden = !visible;
+        }
+      }
+    };
+  });
+  useEffect(() => {
+    const m = map.current;
+    if (m === null) return;
+    const run = (): void => declutter.current();
+    m.on("zoomend moveend", run);
+    return () => {
+      m.off("zoomend moveend", run);
+    };
+  }, [map]);
+
+  // Aircraft: add, move, rotate, recolour, relabel, fade, remove. Only what changed is written.
   useEffect(() => {
     const m = map.current;
     if (m === null) return;
@@ -154,56 +321,132 @@ export function AdsbMap({
       if (a.lat === null || a.lon === null) continue;
       live.add(a.icao);
       const at: L.LatLngTuple = [a.lat, a.lon];
-      const isSelected = a.icao === selected;
-      const { key, icon } = iconFor(a, isSelected, symbols?.get(a.icao) ?? "jet");
+      const kind = symbols?.get(a.icao) ?? "unknown";
       let entry = entries.current.get(a.icao);
+      if (entry !== undefined && entry.kind !== kind) {
+        // A different symbol needs a different element (and size).
+        entry.marker.setIcon(buildIcon(kind));
+        entry.kind = kind;
+        bind(entry);
+      }
       if (entry === undefined) {
-        const marker = L.marker(at, { icon, keyboard: false, riseOnHover: true })
-          .bindTooltip(label(a), {
-            permanent: true,
-            direction: "right",
-            offset: [10, 0],
-            className: "adsb-label",
-          })
+        const marker = L.marker(at, { icon: buildIcon(kind), keyboard: false, riseOnHover: true })
           .on("click", (e) => {
             L.DomEvent.stopPropagation(e);
             onSelectRef.current(a.icao);
           })
           .addTo(m);
-        const trail = L.polyline([at], { weight: 1.5, interactive: false }).addTo(m);
-        entry = { marker, trail, points: [at], iconKey: key };
+        entry = {
+          marker,
+          plane: null,
+          tag: null,
+          line1: null,
+          line2: null,
+          ring: null,
+          kind,
+          turn: Number.NaN,
+          heading: null,
+          color: "",
+          opacity: -1,
+          at,
+          text1: "",
+          text2: "",
+          title: "",
+          hidden: true,
+        };
+        bind(entry);
         entries.current.set(a.icao, entry);
-      } else {
-        const last = entry.points[entry.points.length - 1];
-        if (last === undefined || last[0] !== at[0] || last[1] !== at[1]) {
-          entry.points.push(at);
-          if (entry.points.length > TRAIL_POINTS) entry.points.shift();
-          entry.trail.setLatLngs(entry.points);
-          entry.marker.setLatLng(at);
-        }
-        if (entry.iconKey !== key) {
-          entry.marker.setIcon(icon);
-          entry.iconKey = key;
-        }
-        entry.marker.setTooltipContent(label(a));
       }
-      entry.marker.setOpacity(a.opacity);
-      entry.marker.setZIndexOffset(isSelected ? 1000 : 0);
-      entry.marker.getTooltip()?.setOpacity(a.opacity * 0.9);
-      entry.trail.setStyle({ color: altitudeColor(a), opacity: a.opacity * 0.55 });
+      if (entry.at[0] !== at[0] || entry.at[1] !== at[1]) {
+        entry.marker.setLatLng(at);
+        entry.at = at;
+      }
+      const isSelected = a.icao === selected;
+      // The symbol points along the track (the heading when there is no track).
+      const course = a.trackDeg ?? a.headingDeg;
+      if (entry.plane !== null) {
+        const upright = UPRIGHT.has(kind) || course === null;
+        const next = upright ? 0 : Math.round(course / 5) * 5;
+        if (Number.isNaN(entry.turn) || next !== ((entry.turn % 360) + 360) % 360) {
+          entry.turn = unwrap(entry.turn, next);
+          entry.plane.style.transform = `rotate(${entry.turn}deg)`;
+        }
+        const color = altitudeColor(a);
+        if (entry.color !== color) {
+          entry.color = color;
+          entry.plane.style.color = color;
+        }
+      }
+      if (entry.ring !== null) {
+        // The ring marks the selection and, in red, an emergency squawk (7500, 7600, 7700).
+        const emergency = emergencyOf(a) !== null;
+        entry.ring.hidden = !(isSelected || emergency);
+        if (emergency) entry.ring.dataset.emergency = "true";
+        else delete entry.ring.dataset.emergency;
+      }
+      const [t1, t2] = labelTexts(a, labels, units);
+      if (entry.line1 !== null && entry.text1 !== t1) {
+        entry.text1 = t1;
+        entry.line1.textContent = t1;
+      }
+      if (entry.line2 !== null && entry.text2 !== t2) {
+        entry.text2 = t2;
+        entry.line2.textContent = t2;
+      }
+      if (entry.plane !== null) {
+        const title = titleOf(a, units);
+        if (entry.title !== title) {
+          entry.title = title;
+          entry.plane.title = title;
+        }
+      }
+      if (entry.opacity !== a.opacity) {
+        entry.opacity = a.opacity;
+        entry.marker.setOpacity(a.opacity);
+      }
+      entry.marker.setZIndexOffset(isSelected ? 1000 : Math.round(SYMBOL_SIZE[kind] * 2));
     }
     for (const [icao, entry] of entries.current) {
       if (live.has(icao)) continue;
       entry.marker.remove();
-      entry.trail.remove();
       entries.current.delete(icao);
+    }
+    declutter.current();
+
+    // Trails of the aircraft on the map, cut to the chosen length.
+    const now = Date.now();
+    const windowMs = trailMinutes * 60_000;
+    const items: TrailItem[] = [];
+    if (trails !== undefined && windowMs > 0) {
+      for (const a of aircraft) {
+        if (a.lat === null || a.lon === null) continue;
+        const head = {
+          lat: a.lat,
+          lon: a.lon,
+          altFt: a.altFt,
+          onGround: a.onGround,
+          t: now - a.ageS * 1000,
+        };
+        items.push({
+          segments: trailSegments(trails.get(a.icao), now, windowMs, head),
+          opacity: a.opacity,
+          selected: a.icao === selected,
+        });
+      }
+    }
+    trailCanvas.current?.set(items);
+
+    // Following keeps the selected aircraft in view without taking the map away from a drag.
+    const chosen = follow && selected !== null ? entries.current.get(selected) : undefined;
+    if (chosen !== undefined && live.has(selected ?? "")) {
+      m.panTo(chosen.at, { animate: true, duration: 0.9, easeLinearity: 1, noMoveStart: true });
     }
     // First time there is something to show: frame it (later the user owns the view).
     if (!fitted.current && (live.size > 0 || receiver !== null)) {
       fitAll(m, aircraft, receiver);
       fitted.current = true;
     }
-  }, [map, aircraft, selected, receiver, symbols]);
+  }, [map, aircraft, selected, receiver, symbols, labels, units, trails, trailMinutes, follow]);
 
   // "Fit" button.
   useEffect(() => {
@@ -232,6 +475,12 @@ export function AdsbMap({
       className="adsb-map"
     />
   );
+}
+
+/** A round ring spacing at or above `wanted` (in display units): 1, 2, 5, 10, 20, 25, 50, 100... */
+export function niceStep(wanted: number): number {
+  const steps = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2500];
+  return steps.find((s) => s >= wanted) ?? 5000;
 }
 
 function fitAll(

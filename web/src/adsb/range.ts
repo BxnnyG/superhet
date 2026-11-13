@@ -4,6 +4,7 @@
 // them and does the geometry for the polar plot and the coverage outline on the map.
 
 import { isRec } from "../spectrum/api";
+import { formatAltRange, type UnitSystem } from "./units";
 
 export const SECTORS = 72;
 export const SECTOR_DEG = 360 / SECTORS;
@@ -17,6 +18,15 @@ export const BAND_LABELS: readonly string[] = [
   "30 000 to 40 000 ft",
   "above 40 000 ft",
 ];
+
+/** Upper edge in feet of each altitude band (the last band has none). */
+const BAND_EDGES_FT: readonly number[] = [5_000, 10_000, 20_000, 30_000, 40_000];
+export const BAND_COUNT = BAND_EDGES_FT.length + 1;
+
+/** Name of altitude band `i` in the chosen units, e.g. "5 000 to 10 000 ft" or "1 500 to 3 000 m". */
+export function bandLabel(i: number, units: UnitSystem): string {
+  return formatAltRange(BAND_EDGES_FT[i - 1] ?? null, BAND_EDGES_FT[i] ?? null, units);
+}
 
 export interface RangeCell {
   sector: number;

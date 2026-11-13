@@ -17,16 +17,25 @@ import {
   cn,
 } from "../ui";
 import { StateBadge } from "../plugins/parts";
+import type { SymbolKind } from "./symbols";
 import { useMapConfig } from "../map/mapConfig";
-import { countryOf, flagEmoji, operatorCode, photoLinks, symbolKind, SYMBOL_LABEL } from "./icao";
+import { countryOf, flagEmoji, operatorCode } from "./icao";
 import type { DatabaseStatus, InfoCache } from "./info";
 import { RangePanel } from "./RangePanel";
 import { outline, sectorMax } from "./range";
 import { useRange } from "./useRange";
+import { AircraftDetails } from "./AircraftDetails";
+import { FilterPopover, MapSettings } from "./MapControls";
+import { NO_FILTER, passes, type AircraftFilter } from "./filters";
+import { loadPrefs, savePrefs, type MapPrefs } from "./prefs";
+import { symbolKind, SYMBOL_LABEL } from "./symbols";
+import { loadUnits, saveUnits, unitNames, type UnitSystem } from "./units";
 import {
-  ALTITUDE_LEGEND,
+  altitudeLegend,
+  emergencyOf,
   formatAge,
   formatAlt,
+  formatDistance,
   formatRssi,
   formatSpeed,
   formatTrack,
@@ -52,13 +61,20 @@ function useNow(intervalMs = 1000): number {
   return now;
 }
 
-const COLUMNS: readonly { key: SortKey | "type"; title: string; align?: "right" }[] = [
+const COLUMNS: readonly {
+  key: SortKey | "type";
+  title: string;
+  /** Unit shown under the title, for the columns that have one. */
+  unit?: "alt" | "speed" | "dist";
+  align?: "right";
+}[] = [
   { key: "callsign", title: "Callsign" },
   { key: "icao", title: "ICAO" },
   { key: "type", title: "Type" },
-  { key: "alt", title: "Altitude", align: "right" },
-  { key: "speed", title: "Speed", align: "right" },
+  { key: "alt", title: "Altitude", unit: "alt", align: "right" },
+  { key: "speed", title: "Speed", unit: "speed", align: "right" },
   { key: "track", title: "Track", align: "right" },
+  { key: "distance", title: "Distance", unit: "dist", align: "right" },
   { key: "rssi", title: "Signal", align: "right" },
   { key: "age", title: "Heard", align: "right" },
 ];
@@ -72,6 +88,18 @@ export function AdsbView({ r }: { r: Receiver }) {
   const now = useNow();
   const [query, setQuery] = useState("");
   const [onlyPositions, setOnlyPositions] = useState(false);
+  const [units, setUnitsState] = useState<UnitSystem>(() => loadUnits());
+  const [prefs, setPrefsState] = useState<MapPrefs>(() => loadPrefs());
+  const [filter, setFilter] = useState<AircraftFilter>(NO_FILTER);
+  const [follow, setFollow] = useState(false);
+  const setUnits = (u: UnitSystem) => {
+    setUnitsState(u);
+    saveUnits(u);
+  };
+  const setPrefs = (p: MapPrefs) => {
+    setPrefsState(p);
+    savePrefs(p);
+  };
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "age", dir: "asc" });
   const [selected, setSelected] = useState<string | null>(null);
   const [fitSignal, setFitSignal] = useState(0);
@@ -80,7 +108,6 @@ export function AdsbView({ r }: { r: Receiver }) {
   const [showOutline, setShowOutline] = useState(false);
   const tiles = useMapConfig();
   const perms = usePermissions();
-  const infoVersion = useSyncExternalStore(r.adsb.info.subscribe, r.adsb.info.getSnapshot);
   const [db, setDb] = useState<DatabaseStatus | null>(null);
   useEffect(() => {
     const ctrl = new AbortController();
@@ -100,16 +127,51 @@ export function AdsbView({ r }: { r: Receiver }) {
     () => (status === null ? [] : tracked(status, snap.receivedAt, now)),
     [status, snap.receivedAt, now],
   );
+  const infoVersion = useSyncExternalStore(r.adsb.info.subscribe, r.adsb.info.getSnapshot);
+  // What the database and the emitter category say each aircraft is.
+  const symbols = useMemo(() => {
+    void infoVersion;
+    return new Map(
+      all.map((a) => {
+        const info = r.adsb.info.aircraftInfo(a.icao);
+        return [
+          a.icao,
+          symbolKind({
+            typeCode: info?.typeCode,
+            typeClass: info?.typeClass,
+            wake: info?.wake,
+            category: a.category,
+            military: info?.military,
+          }),
+        ] as const;
+      }),
+    );
+  }, [all, r.adsb.info, infoVersion]);
+  const visible = useMemo(
+    () =>
+      all.filter((a) =>
+        passes(
+          a,
+          {
+            kind: symbols.get(a.icao) ?? "unknown",
+            military: r.adsb.info.aircraftInfo(a.icao)?.military === true,
+          },
+          filter,
+        ),
+      ),
+    [all, symbols, filter, r.adsb.info],
+  );
   const shown = useMemo(
     () =>
       sortAircraft(
-        all.filter((a) => matchesFilter(a, query) && (!onlyPositions || a.lat !== null)),
+        visible.filter((a) => matchesFilter(a, query) && (!onlyPositions || a.lat !== null)),
         sort.key,
         sort.dir,
       ),
-    [all, query, onlyPositions, sort],
+    [visible, query, onlyPositions, sort],
   );
-  const onMap = useMemo(() => all.filter((a) => a.lat !== null), [all]);
+  const onMap = useMemo(() => visible.filter((a) => a.lat !== null), [visible]);
+  const emergencies = useMemo(() => all.filter((a) => emergencyOf(a) !== null), [all]);
 
   // Registration, type and airline from the local aircraft database, asked for in batches.
   const wanted = useMemo(
@@ -125,19 +187,6 @@ export function AdsbView({ r }: { r: Receiver }) {
     // The key stands for the lists; a new array with the same content asks for nothing new.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [r.adsb.info, wantedKey]);
-  const symbols = useMemo(() => {
-    void infoVersion;
-    return new Map(
-      all.map((a) => {
-        const info = r.adsb.info.aircraftInfo(a.icao);
-        return [
-          a.icao,
-          symbolKind(info?.typeClass ?? null, info?.wake ?? null, a.category),
-        ] as const;
-      }),
-    );
-  }, [all, r.adsb.info, infoVersion]);
-
   // Range statistics: the coverage outline on the map and the Range tab.
   const device = snap.reply?.device ?? r.device;
   const range = useRange(r.adsb.client, device, hours, snap.instanceId !== null);
@@ -165,7 +214,13 @@ export function AdsbView({ r }: { r: Receiver }) {
     setSort((s) =>
       s.key === key
         ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
-        : { key, dir: key === "callsign" || key === "icao" || key === "age" ? "asc" : "desc" },
+        : {
+            key,
+            dir:
+              key === "callsign" || key === "icao" || key === "age" || key === "distance"
+                ? "asc"
+                : "desc",
+          },
     );
 
   return (
@@ -189,8 +244,26 @@ export function AdsbView({ r }: { r: Receiver }) {
                 {Math.round(status.messagesPerS)} msg/s
               </Badge>
             )}
+            {visible.length !== all.length && (
+              <Badge title="Aircraft hidden by the filter">
+                {all.length - visible.length} hidden
+              </Badge>
+            )}
           </>
         )}
+        {emergencies.map((a) => (
+          <PlainButton
+            key={a.icao}
+            data-testid={`adsb-emergency-${a.icao}`}
+            title={emergencyOf(a) ?? undefined}
+            onClick={() => setSelected(a.icao)}
+            className="rounded-full"
+          >
+            <Badge tone="danger" dot pulse>
+              {a.squawk} {label(a)}
+            </Badge>
+          </PlainButton>
+        ))}
         <span className="flex-1" />
         <label className="relative flex items-center">
           <span className="sr-only">Filter aircraft</span>
@@ -204,6 +277,8 @@ export function AdsbView({ r }: { r: Receiver }) {
           />
         </label>
         <Toggle checked={onlyPositions} onChange={setOnlyPositions} label="Only with position" />
+        <FilterPopover filter={filter} onFilter={setFilter} units={units} />
+        <MapSettings units={units} onUnits={setUnits} prefs={prefs} onPrefs={setPrefs} />
         <Button
           size="sm"
           variant="secondary"
@@ -250,14 +325,21 @@ export function AdsbView({ r }: { r: Receiver }) {
                   tiles={tiles}
                   symbols={symbols}
                   coverage={coverage}
+                  units={units}
+                  trails={r.adsb.trails}
+                  trailMinutes={prefs.trailMinutes}
+                  labels={prefs.labels}
+                  rings={prefs.rings}
+                  follow={follow && selected !== null}
+                  onUserPan={() => setFollow(false)}
                 />
               )}
             </Suspense>
-            <Legend />
+            <Legend units={units} />
           </div>
           <section
             aria-label="Aircraft table"
-            className="flex max-h-[45%] min-h-0 shrink-0 flex-col border-t border-border bg-surface-1 md:max-h-none md:w-[38rem] md:border-t-0 md:border-l"
+            className="flex max-h-[45%] min-h-0 shrink-0 flex-col border-t border-border bg-surface-1 md:max-h-none md:w-[44rem] md:border-t-0 md:border-l"
           >
             <div className="shrink-0 border-b border-border px-3 py-2">
               <SegmentedControl
@@ -281,13 +363,20 @@ export function AdsbView({ r }: { r: Receiver }) {
                 canReset={perms.canUsePlugins}
                 showOutline={showOutline}
                 onShowOutline={setShowOutline}
+                units={units}
               />
             ) : (
               <>
                 {chosen !== null && (
-                  <Details
+                  <AircraftDetails
                     a={chosen}
-                    onClose={() => setSelected(null)}
+                    units={units}
+                    onClose={() => {
+                      setSelected(null);
+                      setFollow(false);
+                    }}
+                    follow={follow}
+                    onFollow={setFollow}
                     info={r.adsb.info}
                     version={infoVersion}
                   />
@@ -333,6 +422,12 @@ export function AdsbView({ r }: { r: Receiver }) {
                                   aria-label={`Sort by ${c.title}`}
                                 >
                                   {c.title}
+                                  {c.unit !== undefined && (
+                                    <span className="font-normal text-fg-subtle">
+                                      {" "}
+                                      {unitNames(units)[c.unit]}
+                                    </span>
+                                  )}
                                   {sort.key === c.key && (
                                     <ChevronDownIcon
                                       size={12}
@@ -352,6 +447,8 @@ export function AdsbView({ r }: { r: Receiver }) {
                             a={a}
                             info={r.adsb.info}
                             version={infoVersion}
+                            units={units}
+                            kind={symbols.get(a.icao) ?? "unknown"}
                             selected={a.icao === selected}
                             onSelect={() => setSelected(a.icao === selected ? null : a.icao)}
                           />
@@ -391,25 +488,35 @@ function Row({
   selected,
   onSelect,
   info,
+  units,
+  kind,
 }: {
   a: Tracked;
   selected: boolean;
   onSelect: () => void;
   info: InfoCache;
+  units: UnitSystem;
+  kind: SymbolKind;
   /** Re-renders the row when lookups arrive. */
   version: number;
 }) {
   const known = info.aircraftInfo(a.icao);
   const operator = info.operatorInfo(operatorCode(a.callsign));
+  const emergency = emergencyOf(a);
+  const alt = formatAlt(a, units);
+  const speed = formatSpeed(a.speedKt, units);
+  const dist = formatDistance(a.distKm, units);
   return (
     <tr
       data-testid={`adsb-row-${a.icao}`}
+      data-emergency={emergency !== null ? a.squawk : undefined}
       data-selected={selected || undefined}
       aria-selected={selected}
       onClick={onSelect}
       style={{ opacity: a.opacity }}
       className={cn(
         "cursor-pointer border-t border-border/60 hover:bg-surface-2",
+        emergency !== null && "bg-danger-soft/60",
         selected && "bg-accent-soft hover:bg-accent-soft",
       )}
     >
@@ -422,6 +529,11 @@ function Row({
           <span aria-hidden="true" className="ml-1 text-fg-subtle" title="No position yet">
             ·
           </span>
+        )}
+        {emergency !== null && (
+          <div className="text-[11px] font-semibold text-danger" title={emergency}>
+            {a.squawk} emergency
+          </div>
         )}
         {operator !== null && (
           <div className="max-w-[9rem] truncate text-[11px] font-normal text-fg-muted">
@@ -436,94 +548,25 @@ function Row({
           <div className="text-[11px] text-fg">{known.registration}</div>
         )}
       </td>
-      <td className="px-2 py-1.5 text-fg-muted" title={known?.typeDesc ?? undefined}>
+      <td
+        className="px-2 py-1.5 text-fg-muted"
+        title={[known?.typeDesc, SYMBOL_LABEL[kind]].filter(Boolean).join(" \u00b7 ")}
+      >
         {known?.typeCode ?? "–"}
       </td>
-      <td className="px-2 py-1.5 text-right">{formatAlt(a)}</td>
-      <td className="px-2 py-1.5 text-right">{formatSpeed(a)}</td>
-      <td className="px-2 py-1.5 text-right">{formatTrack(a)}</td>
+      <td className="px-2 py-1.5 text-right" title={alt.other === "" ? undefined : alt.other}>
+        {alt.text}
+      </td>
+      <td className="px-2 py-1.5 text-right" title={speed.other === "" ? undefined : speed.other}>
+        {speed.text}
+      </td>
+      <td className="px-2 py-1.5 text-right">{formatTrack(a.trackDeg)}</td>
+      <td className="px-2 py-1.5 text-right" title={dist.other === "" ? undefined : dist.other}>
+        {dist.text}
+      </td>
       <td className="px-2 py-1.5 text-right text-fg-muted">{formatRssi(a)}</td>
       <td className="px-2 py-1.5 text-right text-fg-muted">{formatAge(a.ageS)}</td>
     </tr>
-  );
-}
-
-function Details({
-  a,
-  onClose,
-  info,
-}: {
-  a: Tracked;
-  onClose: () => void;
-  info: InfoCache;
-  /** Re-renders the panel when lookups arrive. */
-  version: number;
-}) {
-  const known = info.aircraftInfo(a.icao);
-  const operator = info.operatorInfo(operatorCode(a.callsign));
-  const country = countryOf(a.icao);
-  const kind = symbolKind(known?.typeClass ?? null, known?.wake ?? null, a.category);
-  const links = photoLinks(a.icao, known?.registration ?? null);
-  const fields: [string, string][] = [
-    ["ICAO", a.icao.toUpperCase()],
-    ["Registration", known?.registration ?? "–"],
-    [
-      "Type",
-      known === null ? "–" : [known.typeCode, known.typeDesc].filter(Boolean).join(" ") || "–",
-    ],
-    ["Operator", operator?.name ?? "–"],
-    ["Country", country === null ? "–" : `${flagEmoji(country.code)} ${country.name}`.trim()],
-    ["Symbol", SYMBOL_LABEL[kind]],
-    ["Altitude", formatAlt(a)],
-    ["Speed", formatSpeed(a)],
-    ["Track", formatTrack(a)],
-    ["Climb", a.vrateFpm === null ? "–" : `${a.vrateFpm > 0 ? "+" : ""}${a.vrateFpm} ft/min`],
-    ["Squawk", a.squawk ?? "–"],
-    ["Category", a.category ?? "–"],
-    [
-      "Position",
-      a.lat === null || a.lon === null ? "–" : `${a.lat.toFixed(4)}, ${a.lon.toFixed(4)}`,
-    ],
-    ["Messages", String(a.messages)],
-  ];
-  return (
-    <div data-testid="adsb-details" className="shrink-0 border-b border-border p-3">
-      <div className="mb-2 flex items-center gap-2">
-        <h3 className="text-sm font-semibold">{label(a)}</h3>
-        {known?.military === true && <Badge tone="warn">military</Badge>}
-        <span className="flex-1" />
-        <IconButton label="Clear selection" size="sm" onClick={onClose}>
-          <CloseIcon />
-        </IconButton>
-      </div>
-      <dl className="grid grid-cols-3 gap-x-3 gap-y-1.5 text-xs">
-        {fields.map(([k, v]) => (
-          <div key={k}>
-            <dt className="text-[11px] text-fg-muted">{k}</dt>
-            <dd className="font-medium tabular-nums">{v}</dd>
-          </div>
-        ))}
-      </dl>
-      {links.length > 0 && (
-        <p className="mt-2 text-xs text-fg-muted">
-          Photos:{" "}
-          {links.map((l, i) => (
-            <span key={l.label}>
-              {i > 0 && ", "}
-              <a
-                href={l.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-accent underline-offset-2 hover:underline"
-              >
-                {l.label}
-              </a>
-            </span>
-          ))}{" "}
-          (opens the site; nothing is loaded from it here)
-        </p>
-      )}
-    </div>
   );
 }
 
@@ -555,13 +598,13 @@ function DatabaseNote({ db }: { db: DatabaseStatus | null }) {
   );
 }
 
-function Legend() {
+function Legend({ units }: { units: UnitSystem }) {
   return (
     <ul
       aria-label="Altitude colours"
       className="pointer-events-none absolute bottom-6 left-3 z-[500] flex flex-wrap gap-x-3 gap-y-1 rounded-lg border border-border bg-surface-1/90 px-2.5 py-1.5 text-[11px] text-fg-muted shadow-pop backdrop-blur"
     >
-      {ALTITUDE_LEGEND.map(([color, text]) => (
+      {altitudeLegend(units).map(([color, text]) => (
         <li key={text} className="flex items-center gap-1.5">
           <span aria-hidden="true" className="size-2 rounded-full" style={{ background: color }} />
           {text}

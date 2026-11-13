@@ -1,4 +1,5 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { FLEET, fleetLookup, fleetReply } from "./adsb-fleet";
 
 // Browser smoke test of the ADS-B plugin (docs/plugins-adsb.md): the operator starts the bundled
 // plugin through the ADS-B tab (takeover confirmation), the map and table overlay opens with the
@@ -88,7 +89,97 @@ test("the operator starts ADS-B and sees the aircraft on the map and in the tabl
   // Selecting a row shows the details of the aircraft and marks it on the map.
   await table.getByTestId("adsb-row-3c6444").click();
   await expect(view.getByTestId("adsb-details")).toContainText("DLH123");
-  await expect(map.locator(".adsb-ring")).toHaveCount(1);
+  await expect(map.locator(".adsb-ring:not([hidden])")).toHaveCount(1);
+});
+
+test("a mixed fleet gets the right symbols, units, trails, filters and emergency marks", async () => {
+  // The same overlay, fed with one aircraft of every kind (status and lookup are answered here).
+  let polls = 0;
+  await page.route(/\/api\/v1\/plugin-instances\/[^/]+\/status$/, (route) =>
+    route.fulfill({ json: fleetReply(polls++) }),
+  );
+  await page.route(/\/api\/v1\/adsb\/lookup\?/, (route) => route.fulfill({ json: fleetLookup() }));
+  await page.evaluate(() => window.localStorage.removeItem("superhet.adsb.units.v1"));
+
+  const view = page.getByRole("dialog", { name: "ADS-B aircraft" });
+  const map = view.getByRole("application", { name: "Aircraft map" });
+  await expect(map.locator(".leaflet-marker-icon")).toHaveCount(FLEET.length, { timeout: 20_000 });
+
+  // Every aircraft has the symbol of its type; none is drawn as a jet by default.
+  for (const f of FLEET) {
+    const title = f.callsign ?? f.icao;
+    await expect(map.locator(`.adsb-plane[title^="${title}"]`)).toHaveAttribute(
+      "data-kind",
+      f.kind,
+    );
+  }
+
+  // Metric by default, the other unit in the tooltip.
+  const dlh = view.getByTestId("adsb-row-3c64a1");
+  await expect(dlh).toContainText("11,582 m");
+  await expect(dlh).toContainText("907 km/h");
+  await expect(dlh.getByTitle("490 kt")).toBeVisible();
+
+  // The emergency squawk is marked in the header, the table and on the map.
+  await expect(view.getByTestId("adsb-emergency-3e1a0a")).toContainText("7700 EMG777");
+  await expect(map.locator(".adsb-ring[data-emergency]")).toHaveCount(1);
+
+  // Details: identity, GNSS altitude, speed, distance and bearing from the receiver.
+  await view.getByTestId("adsb-row-3e1a03").click();
+  const details = view.getByTestId("adsb-details");
+  await expect(details).toContainText("CHX33");
+  await expect(details).toContainText("Helicopter");
+  await expect(details).toContainText("EUROCOPTER EC-135");
+  await expect(details).toContainText("Altitude (GNSS)");
+  await expect(details).toContainText("Distance, bearing");
+  await expect(details.getByRole("link", { name: "ADS-B Exchange" })).toBeVisible();
+
+  // Aviation units on request; the choice survives a reload of the overlay.
+  await view.getByRole("button", { name: "Map", exact: true }).click();
+  await view.getByLabel("Units").selectOption("aviation");
+  await expect(dlh).toContainText("38,000 ft");
+  await expect(dlh).toContainText("490 kt");
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("superhet.adsb.units.v1")))
+    .toBe("aviation");
+  await view.getByLabel("Units").selectOption("metric");
+  await view.getByLabel("Trails").selectOption("5");
+  await view.getByRole("switch", { name: /Range rings/ }).click();
+  await expect(map.locator("path.adsb-range-ring").first()).toBeVisible();
+  await view.getByRole("button", { name: "Map", exact: true }).click();
+
+  // The table sorts by distance from the receiver (nearest first).
+  await view.getByRole("button", { name: "Sort by Distance" }).click();
+  await expect(view.getByTestId(/^adsb-row-/).first()).toHaveAttribute(
+    "data-testid",
+    "adsb-row-3e1a03",
+  );
+
+  // Filters: hide helicopters; only military.
+  await view.getByRole("button", { name: /^Filter/ }).click();
+  await view.getByLabel("Helicopters").uncheck();
+  await expect(view.getByTestId("adsb-row-3e1a03")).toHaveCount(0);
+  await expect(map.locator(".adsb-plane")).toHaveCount(FLEET.length - 1);
+  await view.getByRole("button", { name: "Clear filters" }).click();
+  await view.getByRole("switch", { name: "Military only" }).click();
+  await expect(map.locator(".adsb-plane")).toHaveCount(1);
+  await view.getByRole("button", { name: "Clear filters" }).click();
+  await expect(map.locator(".adsb-plane")).toHaveCount(FLEET.length);
+  await view.getByRole("button", { name: /^Filter/ }).click();
+
+  // Let the trails grow, then take the pictures (light and dark theme).
+  await view.getByTestId("adsb-row-3c64a1").click();
+  await page.waitForTimeout(9_000);
+  await expect(map.locator("canvas.adsb-trail-canvas")).toHaveCount(1);
+  await view.getByRole("button", { name: "Fit map" }).click();
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.screenshot({ path: "e2e/artifacts/adsb-map-light.png" });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.screenshot({ path: "e2e/artifacts/adsb-map-dark.png" });
+  await page.emulateMedia({ colorScheme: "light" });
+
+  await page.unroute(/\/api\/v1\/plugin-instances\/[^/]+\/status$/);
+  await page.unroute(/\/api\/v1\/adsb\/lookup\?/);
 });
 
 test("the view closes, the tab keeps the numbers, and ADS-B stops cleanly", async () => {

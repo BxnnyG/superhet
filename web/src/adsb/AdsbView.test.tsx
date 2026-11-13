@@ -57,8 +57,9 @@ describe("AdsbView", () => {
     expect(screen.getByTestId("map")).toHaveTextContent("3c6444,406a3d");
     const dlh = screen.getByTestId("adsb-row-3c6444");
     expect(dlh).toHaveTextContent("DLH123");
-    expect(dlh).toHaveTextContent("35,000 ft");
-    expect(dlh).toHaveTextContent("451 kt");
+    expect(dlh).toHaveTextContent("10,668 m");
+    expect(dlh).toHaveTextContent("836 km/h");
+    expect(dlh).toHaveTextContent("13.8 km");
     expect(screen.getByTestId("adsb-row-406a3d")).toHaveTextContent("ground");
     // No callsign: the address stands in, and the row says there is no position.
     expect(screen.getByTestId("adsb-row-4ca7b2")).toHaveTextContent(/no position/);
@@ -103,7 +104,7 @@ describe("AdsbView", () => {
     fireEvent.click(screen.getByTestId("adsb-row-3c6444"));
     const details = screen.getByTestId("adsb-details");
     expect(details).toHaveTextContent("DLH123");
-    expect(details).toHaveTextContent("-64 ft/min");
+    expect(details).toHaveTextContent("\u22120.3 m/s");
     expect(details).toHaveTextContent("1000");
     expect(mapProps).toHaveBeenLastCalledWith(expect.objectContaining({ selected: "3c6444" }));
     fireEvent.click(within(details).getByRole("button", { name: "Clear selection" }));
@@ -128,6 +129,79 @@ describe("AdsbView", () => {
     await act(() => vi.advanceTimersByTimeAsync(5_000));
     expect(screen.queryAllByTestId(/^adsb-row-/)).toHaveLength(0);
     expect(screen.getByText(/No aircraft heard yet/)).toBeInTheDocument();
+  });
+
+  it("switches units, keeps the choice in the browser and shows the other unit as tooltip", async () => {
+    window.localStorage.clear();
+    const { r } = await setup();
+    const first = await show(r);
+    const dlh = screen.getByTestId("adsb-row-3c6444");
+    expect(dlh).toHaveTextContent("836 km/h");
+    expect(within(dlh).getByTitle("451 kt")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Map" }));
+    fireEvent.change(screen.getByLabelText("Units"), { target: { value: "aviation" } });
+    expect(screen.getByTestId("adsb-row-3c6444")).toHaveTextContent("35,000 ft");
+    expect(screen.getByTestId("adsb-row-3c6444")).toHaveTextContent("451 kt");
+    expect(mapProps).toHaveBeenLastCalledWith(expect.objectContaining({ units: "aviation" }));
+    expect(window.localStorage.getItem("superhet.adsb.units.v1")).toBe("aviation");
+    expect(screen.getByLabelText("Altitude colours")).toHaveTextContent("< 5,000 ft");
+    // A new view starts with the saved choice.
+    first.unmount();
+    await show(r);
+    expect(screen.getByTestId("adsb-row-3c6444")).toHaveTextContent("451 kt");
+    window.localStorage.clear();
+  });
+
+  it("highlights an emergency squawk in the header, the row and the details", async () => {
+    window.localStorage.clear();
+    const { r, adsb } = await setup();
+    const reply = adsbReply();
+    const aircraft = reply.status?.aircraft.map((a) =>
+      a.icao === "3c6444" ? { ...a, squawk: "7700" } : a,
+    );
+    if (!reply.status || !aircraft) throw new Error("fixture");
+    vi.spyOn(adsb.client, "status").mockResolvedValue({
+      ...reply,
+      status: { ...reply.status, aircraft },
+    });
+    await show(r);
+    await act(() => vi.advanceTimersByTimeAsync(1_100));
+    expect(screen.getByTestId("adsb-emergency-3c6444")).toHaveTextContent("7700 DLH123");
+    expect(screen.getByTestId("adsb-row-3c6444")).toHaveAttribute("data-emergency", "7700");
+    expect(screen.getByTestId("adsb-row-406a3d")).not.toHaveAttribute("data-emergency");
+    fireEvent.click(screen.getByTestId("adsb-emergency-3c6444"));
+    expect(screen.getByTestId("adsb-details")).toHaveAttribute("data-emergency", "7700");
+    expect(screen.getByTestId("adsb-details")).toHaveTextContent("General emergency");
+  });
+
+  it("filters the table and the map by altitude, ground traffic and military", async () => {
+    window.localStorage.clear();
+    const { r } = await setup();
+    await show(r);
+    fireEvent.click(screen.getByRole("button", { name: /^Filter/ }));
+    fireEvent.change(screen.getByLabelText(/^Altitude from/), { target: { value: "5000" } });
+    // 5,000 m from the metric setting: the airliner at 10,668 m stays, the ground aircraft goes.
+    expect(rows()).toEqual(["3c6444"]);
+    expect(screen.getByText("2 hidden")).toBeInTheDocument();
+    expect(screen.getByTestId("map")).toHaveTextContent("3c6444");
+    expect(screen.getByTestId("map")).not.toHaveTextContent("406a3d");
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(rows()).toEqual(["3c6444", "406a3d", "4ca7b2"]);
+    fireEvent.click(screen.getByRole("radio", { name: "On ground" }));
+    expect(rows()).toEqual(["406a3d"]);
+    fireEvent.click(screen.getByRole("switch", { name: "Military only" }));
+    expect(screen.getByText(/No aircraft match the filter/)).toBeInTheDocument();
+  });
+
+  it("sorts the table by distance from the receiver", async () => {
+    window.localStorage.clear();
+    const { r } = await setup();
+    await show(r);
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Distance" }));
+    // Nearest first; the aircraft without a position is last.
+    expect(rows()).toEqual(["3c6444", "406a3d", "4ca7b2"]);
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Distance" }));
+    expect(rows()).toEqual(["406a3d", "3c6444", "4ca7b2"]);
   });
 
   it("closes with the button and with Escape", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countryOf, flagEmoji, operatorCode, photoLinks, symbolKind } from "./icao";
+import { countryOf, flagEmoji, operatorCode, photoLinks } from "./icao";
 import { ICAO_RANGES } from "./icaoRanges";
 
 describe("countryOf", () => {
@@ -55,30 +55,6 @@ describe("operatorCode", () => {
     expect(operatorCode("N123AB")).toBeNull();
     expect(operatorCode("REACH")).toBeNull();
     expect(operatorCode(null)).toBeNull();
-  });
-});
-
-describe("symbolKind", () => {
-  it("uses the ICAO type class first", () => {
-    expect(symbolKind("L2J", "M", null)).toBe("jet");
-    expect(symbolKind("L2J", "H", "A3")).toBe("heavy");
-    expect(symbolKind("L4J", "H", null)).toBe("heavy");
-    expect(symbolKind("L2T", "M", "A3")).toBe("prop");
-    expect(symbolKind("L1P", "L", null)).toBe("prop");
-    expect(symbolKind("H2T", "M", null)).toBe("heli");
-    expect(symbolKind("G1P", "L", null)).toBe("heli");
-  });
-
-  it("falls back to the emitter category", () => {
-    expect(symbolKind(null, null, "A5")).toBe("heavy");
-    expect(symbolKind(null, null, "A3")).toBe("jet");
-    expect(symbolKind(null, null, "A1")).toBe("prop");
-    expect(symbolKind(null, null, "A7")).toBe("heli");
-    expect(symbolKind(null, null, "B1")).toBe("glider");
-    expect(symbolKind(null, null, "B2")).toBe("balloon");
-    expect(symbolKind(null, null, "B6")).toBe("uav");
-    expect(symbolKind(null, null, "C1")).toBe("ground");
-    expect(symbolKind(null, null, null)).toBe("unknown");
   });
 });
 

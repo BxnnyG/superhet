@@ -21,7 +21,13 @@
             "lon": { "type": "number", "minimum": -180, "maximum": 180 },
             "rssi": { "type": "number" },
             "squawk": { "type": "string" },
-            "category": { "type": "string" }
+            "category": { "type": "string" },
+            "alt_geom_ft": { "type": "integer" },
+            "geom_rate_fpm": { "type": "integer" },
+            "ias_kt": { "type": "number", "minimum": 0 },
+            "tas_kt": { "type": "number", "minimum": 0 },
+            "mach": { "type": "number", "minimum": 0 },
+            "heading_deg": { "type": "number", "minimum": 0, "maximum": 360 }
           },
           "required": ["summary", "icao"],
           "dependentRequired": { "lat": ["lon"], "lon": ["lat"] }
