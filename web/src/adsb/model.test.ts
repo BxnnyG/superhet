@@ -3,9 +3,17 @@ import {
   STALE_AFTER_S,
   ageOf,
   altitudeColor,
+  altitudeLegend,
+  emergencyOf,
   fadeOf,
   formatAlt,
+  formatDistance,
+  formatGeomAlt,
+  formatMach,
+  formatSpeed,
   formatTrack,
+  formatVrate,
+  vrateArrow,
   matchesFilter,
   parseReply,
   parseStatus,
@@ -137,10 +145,100 @@ describe("table helpers", () => {
   it("formats numbers and bands for the view", () => {
     const [dlh, ezy] = list;
     if (!dlh || !ezy) throw new Error("fixture");
-    expect(formatAlt(dlh)).toBe("35,000 ft");
-    expect(formatAlt(ezy)).toBe("ground");
-    expect(formatTrack(dlh)).toBe("124°");
+    expect(formatAlt(dlh, "aviation").text).toBe("35,000 ft");
+    expect(formatAlt(ezy, "aviation").text).toBe("ground");
+    expect(formatTrack(dlh.trackDeg)).toBe("124°");
     expect(altitudeColor(ezy)).not.toBe(altitudeColor(dlh));
     expect(altitudeColor({ ...dlh, altFt: 3000 })).not.toBe(altitudeColor(dlh));
+  });
+});
+
+describe("units in the view helpers", () => {
+  const status = parseStatus(adsbStatusRaw());
+  const [dlh] = tracked(status ?? ({ aircraft: [] } as never), 0, 0);
+  if (!dlh) throw new Error("fixture");
+
+  it("writes altitude, speed and climb rate in the chosen system with the other one as tooltip", () => {
+    expect(formatAlt(dlh, "metric")).toEqual({ text: "10,668 m", other: "35,000 ft" });
+    expect(formatSpeed(dlh.speedKt, "metric")).toEqual({ text: "836 km/h", other: "451 kt" });
+    expect(formatSpeed(dlh.speedKt, "aviation").text).toBe("451 kt");
+    expect(formatVrate(dlh, "metric")).toEqual({ text: "\u22120.3 m/s", other: "\u221264 ft/min" });
+    // Mixed: feet and feet per minute like a flight deck, speed and distance metric.
+    expect(formatAlt(dlh, "mixed").text).toBe("35,000 ft");
+    expect(formatSpeed(dlh.speedKt, "mixed").text).toBe("836 km/h");
+    expect(formatVrate(dlh, "mixed").text).toBe("\u221264 ft/min");
+    expect(formatSpeed(null, "metric").text).toBe("\u2013");
+  });
+
+  it("measures distance and bearing from the receiver", () => {
+    // Receiver at 51.0 / 7.0, aircraft at 51.12345 / 6.98765: about 14 km north.
+    expect(dlh.distKm).toBeGreaterThan(13);
+    expect(dlh.distKm).toBeLessThan(15);
+    expect(dlh.bearing).toBeGreaterThan(340);
+    expect(formatDistance(dlh.distKm, "metric").text).toMatch(/^1[34]\.\d km$/);
+    expect(formatDistance(dlh.distKm, "aviation").text).toMatch(/^7\.\d NM$/);
+    expect(formatDistance(null, "metric").text).toBe("\u2013");
+  });
+
+  it("sorts by distance, aircraft without a position last", () => {
+    const list = tracked(status ?? ({ aircraft: [] } as never), 0, 0);
+    const asc = sortAircraft(list, "distance", "asc").map((a) => a.icao);
+    expect(asc[2]).toBe("4ca7b2");
+    expect(asc[0]).toBe("3c6444");
+    expect(sortAircraft(list, "distance", "desc").map((a) => a.icao)[2]).toBe("4ca7b2");
+  });
+
+  it("reads the extra fields and falls back to the geometric climb rate", () => {
+    const parsed = parseStatus(
+      adsbStatusRaw({
+        aircraft: [
+          aircraftRaw({
+            vrate_fpm: undefined,
+            geom_rate_fpm: 640,
+            alt_geom_ft: 35525,
+            ias_kt: 281,
+            tas_kt: 468,
+            mach: 0.812,
+            heading_deg: 124.8,
+          }),
+        ],
+      }),
+    );
+    const a = parsed?.aircraft[0];
+    expect(a).toMatchObject({ altGeomFt: 35525, iasKt: 281, tasKt: 468, mach: 0.812 });
+    expect(a?.vrateFpm).toBe(640);
+    expect(a?.headingDeg).toBe(124.8);
+    if (!a) throw new Error("fixture");
+    expect(formatGeomAlt(a, "aviation").text).toBe("35,525 ft");
+    expect(formatMach(a.mach)).toBe("M 0.812");
+    expect(formatMach(null)).toBe("\u2013");
+  });
+
+  it("points an arrow along the vertical rate", () => {
+    expect(vrateArrow(1500)).toBe("\u2191");
+    expect(vrateArrow(-1500)).toBe("\u2193");
+    expect(vrateArrow(40)).toBe("\u2192");
+    expect(vrateArrow(null)).toBe("");
+  });
+
+  it("labels the altitude colours in the chosen unit", () => {
+    expect(altitudeLegend("aviation").map(([, t]) => t)).toContain("< 5,000 ft");
+    expect(altitudeLegend("metric").map(([, t]) => t)).toContain("< 1,524 m");
+  });
+});
+
+describe("emergency squawks", () => {
+  it.each([
+    ["7500", "Unlawful interference (hijack)"],
+    ["7600", "Radio failure"],
+    ["7700", "General emergency"],
+  ])("%s means %s", (squawk, meaning) => {
+    expect(emergencyOf({ squawk })).toBe(meaning);
+  });
+
+  it("ignores every other code", () => {
+    for (const squawk of ["1000", "7000", "7777", "2000", null]) {
+      expect(emergencyOf({ squawk })).toBeNull();
+    }
   });
 });

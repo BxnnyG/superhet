@@ -3,7 +3,8 @@ import { describeHttpError } from "../http";
 import { Alert, Button, ConfirmDialog, Select, Toggle, toasts } from "../ui";
 import type { AdsbApi } from "./api";
 import {
-  BAND_LABELS,
+  bandLabel,
+  BAND_COUNT,
   SECTOR_DEG,
   SECTORS,
   bandMax,
@@ -15,6 +16,7 @@ import {
   type RangeData,
 } from "./range";
 import type { RangeState } from "./useRange";
+import { distanceUnitName, formatDistanceKm, kmPerDistanceUnit, type UnitSystem } from "./units";
 
 export const HOURS_OPTIONS = [
   { value: "6", label: "Last 6 hours" },
@@ -23,12 +25,15 @@ export const HOURS_OPTIONS = [
   { value: "720", label: "Last 30 days" },
 ];
 
-const BAND_OPTIONS = [
+const bandOptions = (units: UnitSystem) => [
   { value: "all", label: "All altitudes" },
-  ...BAND_LABELS.map((label, i) => ({ value: String(i), label })),
+  ...Array.from({ length: BAND_COUNT }, (_, i) => ({
+    value: String(i),
+    label: bandLabel(i, units),
+  })),
 ];
 
-const fmtKm = (km: number): string => (km >= 100 ? `${Math.round(km)} km` : `${km.toFixed(1)} km`);
+const fmtKm = (km: number, units: UnitSystem): string => formatDistanceKm(km, units).text;
 
 /** Range statistics: polar plot, altitude bands and activity history. */
 export function RangePanel({
@@ -40,7 +45,10 @@ export function RangePanel({
   canReset,
   showOutline,
   onShowOutline,
+  units = "aviation",
 }: {
+  /** Distances and altitude bands are written in these units. */
+  units?: UnitSystem;
   api: AdsbApi;
   device: string;
   range: RangeState;
@@ -92,6 +100,7 @@ export function RangePanel({
           onHours={onHours}
           showOutline={showOutline}
           onShowOutline={onShowOutline}
+          units={units}
           canReset={canReset}
           onReset={() => setConfirming(true)}
         />
@@ -122,9 +131,11 @@ function Body({
   onHours,
   showOutline,
   onShowOutline,
+  units,
   canReset,
   onReset,
 }: {
+  units: UnitSystem;
   data: RangeData;
   band: string;
   onBand: (band: string) => void;
@@ -152,7 +163,7 @@ function Body({
           <Select
             label="Altitude"
             size="sm"
-            options={BAND_OPTIONS}
+            options={bandOptions(units)}
             value={band}
             onChange={onBand}
             className="w-44"
@@ -167,14 +178,15 @@ function Body({
         {hasCells ? (
           <>
             <PolarPlot
+              units={units}
               maxima={maxima}
-              label={selected === null ? "all altitudes" : (BAND_LABELS[selected] ?? "")}
+              label={selected === null ? "all altitudes" : bandLabel(selected, units)}
             />
             <p data-testid="adsb-range-best" className="text-fg-muted">
               {best === null ? null : (
                 <>
-                  Farthest: <strong className="text-fg">{fmtKm(best.km)}</strong> towards{" "}
-                  {compass(best.sector)}, {BAND_LABELS[best.band]}
+                  Farthest: <strong className="text-fg">{fmtKm(best.km, units)}</strong> towards{" "}
+                  {compass(best.sector)}, {bandLabel(best.band, units)}
                   {best.icao !== "" && (
                     <>
                       {" "}
@@ -193,7 +205,7 @@ function Body({
               onChange={onShowOutline}
               label="Coverage outline on the map"
             />
-            <BandBars cells={data} />
+            <BandBars cells={data} units={units} />
           </>
         ) : (
           <p role="status" className="text-fg-muted">
@@ -244,10 +256,21 @@ const CENTRE = SIZE / 2;
 const RADIUS = 100;
 
 /** Polar plot: distance from the middle is the longest reception in that direction (north up). */
-function PolarPlot({ maxima, label }: { maxima: readonly number[]; label: string }) {
+function PolarPlot({
+  maxima,
+  label,
+  units,
+}: {
+  maxima: readonly number[];
+  label: string;
+  units: UnitSystem;
+}) {
   const titleId = useId();
   const top = Math.max(...maxima, 1);
-  const step = ringStep(top);
+  // Rings are round numbers of the chosen unit; the plot itself is drawn in kilometres.
+  const perUnit = kmPerDistanceUnit(units);
+  const stepUnits = ringStep(top / perUnit);
+  const step = stepUnits * perUnit;
   const rings = Math.max(1, Math.ceil(top / step));
   const scale = RADIUS / (rings * step);
   const point = (sector: number, edge: number, km: number): string => {
@@ -289,7 +312,7 @@ function PolarPlot({ maxima, label }: { maxima: readonly number[]; label: string
             fill="currentColor"
             className="text-fg-subtle"
           >
-            {(i + 1) * step} km
+            {(i + 1) * stepUnits} {distanceUnitName(units)}
           </text>
         </g>
       ))}
@@ -336,12 +359,12 @@ function PolarPlot({ maxima, label }: { maxima: readonly number[]; label: string
   );
 }
 
-function BandBars({ cells }: { cells: RangeData }) {
+function BandBars({ cells, units }: { cells: RangeData; units: UnitSystem }) {
   const maxima = bandMax(cells.cells);
   const top = Math.max(...maxima, 1);
   return (
     <ul aria-label="Longest reception per altitude band" className="flex flex-col gap-1">
-      {BAND_LABELS.map((name, i) => {
+      {Array.from({ length: BAND_COUNT }, (_, i) => bandLabel(i, units)).map((name, i) => {
         const km = maxima[i] ?? 0;
         return (
           <li key={name} className="grid grid-cols-[8.5rem_1fr_3.5rem] items-center gap-2">
@@ -352,7 +375,7 @@ function BandBars({ cells }: { cells: RangeData }) {
                 style={{ width: `${(km / top) * 100}%` }}
               />
             </span>
-            <span className="text-right tabular-nums">{km > 0 ? fmtKm(km) : "–"}</span>
+            <span className="text-right tabular-nums">{km > 0 ? fmtKm(km, units) : "–"}</span>
           </li>
         );
       })}

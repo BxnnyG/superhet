@@ -1,6 +1,5 @@
 // Facts derived from an aircraft's own data, without any lookup: the state that holds its ICAO
-// address block (country and flag), the airline designator in its callsign, the kind of symbol to
-// draw, and the links out to photo sites (links only, nothing is fetched from them).
+// address block (country and flag), the airline designator in its callsign, and the links out to photo sites (links only, nothing is fetched from them).
 
 import { ICAO_RANGES } from "./icaoRanges";
 
@@ -40,68 +39,6 @@ export function operatorCode(callsign: string | null): string | null {
   return match?.[1] ?? null;
 }
 
-export type SymbolKind =
-  "jet" | "heavy" | "prop" | "heli" | "glider" | "balloon" | "uav" | "ground" | "unknown";
-
-export const SYMBOL_LABEL: Record<SymbolKind, string> = {
-  jet: "Jet",
-  heavy: "Heavy jet",
-  prop: "Propeller aircraft",
-  heli: "Helicopter",
-  glider: "Glider or ultralight",
-  balloon: "Balloon or airship",
-  uav: "Drone",
-  ground: "Ground vehicle",
-  unknown: "Aircraft",
-};
-
-/**
- * Symbol for an aircraft. The ICAO type class from the database (`L2J`: land plane, two engines,
- * jet; `H1T`: helicopter) is the better source; the emitter category the aircraft itself sends
- * (`A3`, `B2`, ...) covers aircraft the database does not know.
- */
-export function symbolKind(
-  typeClass: string | null,
-  wake: string | null,
-  category: string | null,
-): SymbolKind {
-  const cls = typeClass?.toUpperCase() ?? "";
-  if (/^[HGT]/.test(cls)) return "heli";
-  const parsed = /^[LSA](\d)([PTJE])$/.exec(cls);
-  if (parsed !== null) {
-    if (parsed[2] === "J") {
-      return wake === "H" || wake === "J" || Number(parsed[1]) >= 4 ? "heavy" : "jet";
-    }
-    return "prop";
-  }
-  switch (category?.toUpperCase()) {
-    case "A1":
-    case "A2":
-      return "prop";
-    case "A3":
-    case "A4":
-    case "A6":
-      return "jet";
-    case "A5":
-      return "heavy";
-    case "A7":
-      return "heli";
-    case "B1":
-    case "B4":
-      return "glider";
-    case "B2":
-      return "balloon";
-    case "B6":
-      return "uav";
-    case "C1":
-    case "C2":
-    case "C3":
-      return "ground";
-    default:
-      return "unknown";
-  }
-}
-
 export interface PhotoLink {
   label: string;
   url: string;
@@ -125,6 +62,28 @@ export function photoLinks(icao: string, registration: string | null): PhotoLink
       label: "JetPhotos",
       url: `https://www.jetphotos.com/registration/${encodeURIComponent(registration.toUpperCase())}`,
     });
+  }
+  return links;
+}
+
+/**
+ * Links to follow the flight on public trackers: the ICAO address on ADS-B Exchange, an airline
+ * callsign on FlightAware and Flightradar24. Plain links like `photoLinks`; nothing is fetched.
+ */
+export function trackerLinks(a: { icao: string; callsign: string | null }): PhotoLink[] {
+  const links: PhotoLink[] = [];
+  if (/^[0-9a-f]{6}$/i.test(a.icao)) {
+    links.push({
+      label: "ADS-B Exchange",
+      url: `https://globe.adsbexchange.com/?icao=${a.icao.toLowerCase()}`,
+    });
+  }
+  const callsign = a.callsign?.trim().toUpperCase() ?? "";
+  if (/^[A-Z]{3}[0-9][0-9A-Z]{0,4}$/.test(callsign)) {
+    links.push(
+      { label: "FlightAware", url: `https://www.flightaware.com/live/flight/${callsign}` },
+      { label: "Flightradar24", url: `https://www.flightradar24.com/${callsign}` },
+    );
   }
   return links;
 }

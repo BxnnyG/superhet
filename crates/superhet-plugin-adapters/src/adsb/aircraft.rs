@@ -23,6 +23,18 @@ pub struct Aircraft {
     pub track_deg: Option<f64>,
     /// Barometric climb rate in feet per minute.
     pub vrate_fpm: Option<i64>,
+    /// Geometric (GNSS) altitude in feet.
+    pub alt_geom_ft: Option<i64>,
+    /// Geometric climb rate in feet per minute (`baro_rate` is preferred when both are sent).
+    pub geom_rate_fpm: Option<i64>,
+    /// Indicated airspeed in knots.
+    pub ias_kt: Option<f64>,
+    /// True airspeed in knots.
+    pub tas_kt: Option<f64>,
+    /// Mach number.
+    pub mach: Option<f64>,
+    /// Heading in degrees (0..360): true heading, else magnetic heading.
+    pub heading_deg: Option<f64>,
     /// Position, degrees (both or neither).
     pub lat: Option<f64>,
     /// See `lat`.
@@ -117,6 +129,13 @@ fn parse_aircraft(entry: &Value) -> Option<Aircraft> {
         speed_kt: number(&entry["gs"], 0.0, 2_000.0),
         track_deg: number(&entry["track"], 0.0, 360.0),
         vrate_fpm: rounded(&entry["baro_rate"], -20_000.0, 20_000.0),
+        alt_geom_ft: rounded(&entry["alt_geom"], -2_000.0, 100_000.0),
+        geom_rate_fpm: rounded(&entry["geom_rate"], -20_000.0, 20_000.0),
+        ias_kt: number(&entry["ias"], 0.0, 1_000.0),
+        tas_kt: number(&entry["tas"], 0.0, 2_000.0),
+        mach: number(&entry["mach"], 0.0, 10.0),
+        heading_deg: number(&entry["true_heading"], 0.0, 360.0)
+            .or_else(|| number(&entry["mag_heading"], 0.0, 360.0)),
         lat,
         lon,
         rssi: number(&entry["rssi"], -100.0, 10.0),
@@ -155,6 +174,15 @@ impl Aircraft {
         put("rssi", self.rssi.map(|v| json!(round1(v))));
         put("squawk", self.squawk.as_ref().map(|v| json!(v)));
         put("category", self.category.as_ref().map(|v| json!(v)));
+        put("alt_geom_ft", self.alt_geom_ft.map(|v| json!(v)));
+        put("geom_rate_fpm", self.geom_rate_fpm.map(|v| json!(v)));
+        put("ias_kt", self.ias_kt.map(|v| json!(round1(v))));
+        put("tas_kt", self.tas_kt.map(|v| json!(round1(v))));
+        put(
+            "mach",
+            self.mach.map(|v| json!((v * 1000.0).round() / 1000.0)),
+        );
+        put("heading_deg", self.heading_deg.map(|v| json!(round1(v))));
         m
     }
 
@@ -202,6 +230,28 @@ mod tests {
         assert_eq!(dlh.vrate_fpm, Some(-64));
         assert_eq!(dlh.squawk.as_deref(), Some("1000"));
         assert_eq!(dlh.summary(), "DLH123 35000 ft 451 kt 123\u{b0}");
+    }
+
+    #[test]
+    fn passes_the_extra_readsb_fields_through() {
+        let snap = parse_snapshot(SAMPLE).expect("parse");
+        let dlh = &snap.aircraft[0];
+        assert_eq!(dlh.alt_geom_ft, Some(35_525));
+        assert_eq!(dlh.ias_kt, Some(281.0));
+        assert_eq!(dlh.tas_kt, Some(468.0));
+        assert_eq!(dlh.mach, Some(0.812));
+        // True heading wins over the magnetic one.
+        assert_eq!(dlh.heading_deg, Some(124.8));
+        assert_eq!(dlh.geom_rate_fpm, Some(-32));
+        let fields = dlh.fields();
+        assert_eq!(fields["alt_geom_ft"], 35_525);
+        assert_eq!(fields["mach"], 0.812);
+        // Aircraft that sent none of them carry none.
+        let bare = snap.aircraft[1].fields();
+        assert!(!bare.contains_key("ias_kt") && !bare.contains_key("heading_deg"));
+        let mag = parse_snapshot(r#"{"aircraft":[{"hex":"abcdef","mag_heading":90.04}]}"#)
+            .expect("parse");
+        assert_eq!(mag.aircraft[0].heading_deg, Some(90.04));
     }
 
     #[test]
