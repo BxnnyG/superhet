@@ -6,6 +6,7 @@ import { BookmarksPanel } from "../bookmarks/BookmarksPanel";
 import { ChannelsPanel } from "../channels/ChannelsPanel";
 import { AdsbPanel } from "../adsb/AdsbPanel";
 import { DabPanel } from "../dab/DabPanel";
+import { RecordingsPanel } from "../recordings/RecordingsPanel";
 import { ScannerPanel } from "../scanner/ScannerPanel";
 import { DecodersTab } from "../decoders/DecodersTab";
 import { PanelsTab } from "../panels/PanelsTab";
@@ -68,9 +69,9 @@ export function Inspector({ r, inspector }: Props) {
         className={cn(
           "flex min-h-0 flex-col bg-surface-1",
           // Docked column.
-          "shell:static shell:z-auto shell:w-[22rem] shell:shrink-0 shell:border-l shell:border-border",
+          "shell:static shell:z-auto shell:w-[24rem] shell:shrink-0 shell:border-l shell:border-border",
           // Right sheet (600-900 px).
-          "max-shell:fixed max-shell:inset-y-0 max-shell:right-0 max-shell:z-40 max-shell:w-[23rem] max-shell:max-w-[92vw]",
+          "max-shell:fixed max-shell:inset-y-0 max-shell:right-0 max-shell:z-40 max-shell:w-[25rem] max-shell:max-w-[92vw]",
           "max-shell:border-l max-shell:border-border max-shell:transition-[transform,visibility] max-shell:duration-150",
           // Bottom sheet above the tab bar (< 600 px).
           "max-phone:inset-x-0 max-phone:top-auto max-phone:bottom-14 max-phone:h-[65dvh] max-phone:w-auto max-phone:max-w-none",
@@ -139,6 +140,7 @@ function TabBody({ r, tab, phoneUp }: { r: Receiver; tab: InspectorTab; phoneUp:
           centreHz={r.tuningSnap.display?.centerHz ?? null}
           showDemodulator={!phoneUp}
           digital={{ device: r.device, plugins: r.plugins }}
+          device={r.device}
           sampleRateHz={r.tuningSnap.state?.sampleRate}
           onUpdate={(id, patch) => r.vfoCtl.update(id, patch)}
           onRemove={(id) => r.vfoCtl.remove(id)}
@@ -161,6 +163,8 @@ function TabBody({ r, tab, phoneUp }: { r: Receiver; tab: InspectorTab; phoneUp:
       return <ChannelsPanel r={r} />;
     case "scanner":
       return <ScannerPanel r={r} />;
+    case "recordings":
+      return <RecordingsPanel device={r.device} />;
     case "decoders":
       return (
         <DecodersTab

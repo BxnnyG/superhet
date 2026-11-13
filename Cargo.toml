@@ -37,6 +37,7 @@ superhet-device = { path = "crates/superhet-device" }
 superhet-dsp = { path = "crates/superhet-dsp" }
 superhet-db = { path = "crates/superhet-db" }
 superhet-plugin-protocol = { path = "crates/superhet-plugin-protocol" }
+superhet-recording = { path = "crates/superhet-recording" }
 
 # DSP code is unusably slow unoptimised; keep debug builds and tests responsive.
 [profile.dev.package.superhet-dsp]
