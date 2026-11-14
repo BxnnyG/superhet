@@ -187,6 +187,15 @@ services:
       SUPERHET_SMTP_FROM: ${SUPERHET_SMTP_FROM:-}
       SUPERHET_SMTP_TLS: ${SUPERHET_SMTP_TLS:-starttls}
       SUPERHET_VAPID_SUBJECT: ${SUPERHET_VAPID_SUBJECT:-}
+      # Scheduled logical backups (docs/backup.md, ADR-0030): set SUPERHET_BACKUP_DIR=/data/backups.
+      SUPERHET_BACKUP_DIR: ${SUPERHET_BACKUP_DIR:-}
+      SUPERHET_BACKUP_SCHEDULE: ${SUPERHET_BACKUP_SCHEDULE:-}
+      SUPERHET_BACKUP_KEEP: ${SUPERHET_BACKUP_KEEP:-}
+      SUPERHET_BACKUP_PASSPHRASE: ${SUPERHET_BACKUP_PASSPHRASE:-}
+      SUPERHET_BACKUP_CREDENTIALS: ${SUPERHET_BACKUP_CREDENTIALS:-}
+      SUPERHET_BACKUP_HISTORY: ${SUPERHET_BACKUP_HISTORY:-}
+    volumes:
+      - backups:/data/backups
     depends_on:
       postgres: { condition: service_healthy }
       nats: { condition: service_healthy }
@@ -207,3 +216,4 @@ volumes:
   plugin-data:
   tile-cache:
   recordings:
+  backups:
