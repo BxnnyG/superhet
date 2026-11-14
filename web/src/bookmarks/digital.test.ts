@@ -36,7 +36,8 @@ const saved = (id: string, over: Partial<Bookmark> = {}): Bookmark => ({
 
 describe("digital modes in bookmarks", () => {
   it("offers every mode of the Digital picker as a protocol", () => {
-    for (const m of DIGITAL_MODES) {
+    // FT8, FT4 and WSPR are tuned by frequency and USB; a bookmark does not start them.
+    for (const m of DIGITAL_MODES.filter((m) => !["ft8", "ft4", "wspr"].includes(m.id))) {
       expect(DIGITAL_PROTOCOLS).toContain(m.id);
       expect(PROTOCOL_LABEL[m.id as keyof typeof PROTOCOL_LABEL]).toBe(m.label);
       expect(modeOfProtocol(m.id)?.pluginId).toBe(m.pluginId);

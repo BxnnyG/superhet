@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FT8 / FT4 / WSPR instance configuration",
+  "type": "object",
+  "properties": {
+    "mode": {
+      "description": "Which mode to decode: FT8 (15 s slots), FT4 (7.5 s slots) or WSPR (2 min slots).",
+      "enum": ["ft8", "ft4", "wspr"]
+    },
+    "depth": {
+      "description": "Decoder search depth, 1 (fast) to 3 (finds the most, needs the most CPU). Default 2.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3
+    },
+    "dial_hz": {
+      "description": "Dial frequency in Hz that the audio offsets are added to for the absolute frequency of a signal. Default: the frequency the decoder was started on.",
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "additionalProperties": false
+}

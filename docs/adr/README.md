@@ -34,3 +34,4 @@ Format: one file per decision, `NNNN-short-title.md`, sections *Status*, *Contex
 | [0028](0028-recordings-and-instant-replay.md) | Recordings and instant replay in the API service, no re-encoding | accepted |
 | [0029](0029-share-links.md) | Public receiver page: share links and the embeddable player | accepted |
 | [0030](0030-backup-and-restore.md) | Backup and restore: logical archive (optionally encrypted), ops scripts, scheduled backups | accepted |
+| [0032](0032-ft8-ft4-wspr-plugin.md) | FT8 / FT4 / WSPR through the WSJT-X decoders (`jt9`, `wsprd`), UTC slots cut by the adapter | accepted |

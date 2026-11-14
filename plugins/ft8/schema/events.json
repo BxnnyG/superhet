@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FT8 / FT4 / WSPR events",
+  "description": "Validated against the complete event object (envelope included).",
+  "oneOf": [
+    {
+      "properties": {
+        "type": { "const": "ft8.message" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "mode": { "enum": ["ft8", "ft4"] },
+            "time": { "type": "string", "description": "UTC start of the time slot, ISO 8601." },
+            "snr": { "type": "integer", "description": "dB in a 2500 Hz bandwidth." },
+            "dt": { "type": "number", "description": "Time offset of the signal from the slot start, seconds." },
+            "freq_hz": { "type": "integer", "description": "Audio frequency offset from the dial frequency." },
+            "dial_hz": { "type": "integer" },
+            "rf_hz": { "type": "integer", "description": "dial_hz + freq_hz." },
+            "message": { "type": "string" },
+            "cq": { "type": "boolean" },
+            "callsign": { "type": "string", "description": "The sending station." },
+            "to": { "type": "string", "description": "The station a directed message is addressed to." },
+            "grid": { "type": "string", "description": "Maidenhead locator." },
+            "summary": { "type": "string" }
+          },
+          "required": ["mode", "time", "snr", "dt", "freq_hz", "message", "cq", "summary"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["type", "data"]
+    },
+    {
+      "properties": {
+        "type": { "const": "wspr.spot" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "mode": { "const": "wspr" },
+            "time": { "type": "string", "description": "UTC start of the 2 minute slot, ISO 8601." },
+            "snr": { "type": "integer" },
+            "dt": { "type": "number" },
+            "freq_hz": { "type": "integer", "description": "Audio frequency offset from the dial frequency (about 1400 to 1600 Hz)." },
+            "dial_hz": { "type": "integer" },
+            "rf_hz": { "type": "integer" },
+            "drift": { "type": "integer", "description": "Hz per minute." },
+            "callsign": { "type": "string" },
+            "grid": { "type": "string" },
+            "power_dbm": { "type": "integer" },
+            "message": { "type": "string" },
+            "summary": { "type": "string" }
+          },
+          "required": ["mode", "time", "snr", "dt", "freq_hz", "drift", "callsign", "power_dbm", "message", "summary"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["type", "data"]
+    }
+  ]
+}

@@ -27,5 +27,9 @@ First-party plugins live here. The contract (manifest, transports, supervision, 
 
 - `tetra/` – TETRA TMO (downlink): the adapter demodulates the 25 kHz channel itself and feeds `tetra-rx` (osmo-tetra-sq5bpf, built into the image); cell, neighbours, calls, SDS and status events, encryption flags (never decrypted), voice through the **user-installed** ETSI codec (`SUPERHET_TETRA_CODEC_DIR`, never shipped; without it the plugin reports "voice needs the ETSI codec"). Non-exclusive, framed transport, IQ input (`docs/plugins-tetra.md`, ADR-0021).
 
+- `ft8/` – FT8, FT4 and WSPR (`jt9` / `wsprd` of WSJT-X behind `superhet-plugin-adapter ft8`): simple transport, takes the
+  audio of a USB receiver on the dial frequency, cuts it into UTC time slots, one decoder run per slot,
+  `ft8.message` and `wspr.spot` events (`docs/plugins-ft8.md`, ADR-0032).
+
 Install a plugin through the admin API (`POST /api/v1/plugins`, `docs/api-plugins.md`) or the host's `install` command; the host copies it to
 `$SUPERHET_PLUGIN_DIR/<id>/<version>` (default `/data/plugins`).

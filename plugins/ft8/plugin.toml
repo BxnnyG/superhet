@@ -1,0 +1,33 @@
+# FT8, FT4 and WSPR weak-signal amateur modes, decoded by jt9 and wsprd from WSJT-X (separate
+# GPL-3.0 processes). Bind it to a USB VFO on the dial frequency of the mode (14.074 MHz for FT8
+# on 20 m, ...; HF needs an upconverter or direct sampling, docs/plugins-ft8.md).
+
+[plugin]
+id = "org.superhet.decoder.ft8"
+name = "FT8 / FT4 / WSPR"
+version = "0.1.0"
+protocol = 1
+license = "AGPL-3.0-only"
+type = "decoder"
+description = "Decodes FT8, FT4 and WSPR with the WSJT-X decoders: time slot, SNR, time offset, audio frequency, message, callsign, locator (WSPR: power, drift)"
+homepage = "https://github.com/BxnnyG/superhet"
+
+[runtime]
+kind = "process"
+transport = "simple"
+command = ["superhet-plugin-adapter", "ft8"]
+
+[input]
+kind = "audio"
+sample_rate = 12000
+format = "s16le"
+bandwidth_hz = 3000
+
+[output]
+events_schema = "schema/events.json"
+
+[config]
+schema = "schema/config.json"
+
+[install]
+acknowledge = { text = "Runs jt9 and wsprd from WSJT-X (GPL-3.0-or-later) as separate processes, receive only: it does not transmit and opens no network ports. FT8, FT4 and WSPR are open amateur radio modes and their messages are public by design, but callsigns and locators are personal data; decoded messages are kept in the decoder history until the retention period ends. Needs a receiver on USB at the dial frequency and an accurate system clock (NTP).", url = "https://wsjt.sourceforge.io/" }

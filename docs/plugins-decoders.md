@@ -13,6 +13,7 @@ the host feeds, `docs/plugin-contract.md`) and turns what the tool prints into c
 | `org.superhet.decoder.rtl433` | rtl_433 | `iq`, `cu8` 250 kHz (VFO bandwidth about 250 kHz) | `rtl433.reading` |
 | `org.superhet.decoder.adsb` | readsb | exclusive, `iq` `cu8` 2.4 MS/s at 1090 MHz, framed transport, live map | `adsb.aircraft`, `adsb.error` (own page: `docs/plugins-adsb.md`) |
 | `org.superhet.decoder.dab` | welle-cli | exclusive, `iq` `cu8` 2.048 MS/s, framed transport, audio out | `dab.ensemble`, `dab.dls`, `dab.play`, `dab.scan`, `dab.error` (own page: `docs/plugins-dab.md`) |
+| `org.superhet.decoder.ft8` | jt9, wsprd (WSJT-X) | `audio`, `s16le` 12 kHz (USB VFO on the dial frequency), UTC time slots cut by the adapter | `ft8.message`, `wspr.spot` (own page: `docs/plugins-ft8.md`) |
 
 All events land in the decoder history (`source` = plugin id, `kind` = event type, `value` = the
 `summary` field; `docs/api-decoder-events.md`). Event schemas: `plugins/<name>/schema/events.json`.

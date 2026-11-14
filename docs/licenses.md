@@ -33,7 +33,8 @@ External components run as **separate processes** (plugins) or are **dynamically
 | libosmocore | `tetra-rx` runtime library | GPL-2.0-or-later | runtime image (Debian package `libosmocore19`) | ADR-0021 |
 | ETSI TETRA ACELP reference codec | TETRA voice | ETSI IPR / download terms | **never distributed**; downloaded from etsi.org and built by the user; the TETRA plugin only runs the user's `cdecoder` / `sdecoder` from `SUPERHET_TETRA_CODEC_DIR` | `docs/plugins-tetra.md`; later a separate repo `superhet-codec-tetra` |
 | mbelib | AMBE/AMBE+2/IMBE voice | ISC; patent status unclear (DVSI) | **never distributed**; fetched and built by the user | separate repo `superhet-codec-mbe` |
-| ft8_lib | FT8/FT4 plugin (later) | MIT | plugin image | – |
+| WSJT-X (`jt9`, `wsprd`) | FT8 / FT4 / WSPR plugin (`docs/plugins-ft8.md`, ADR-0032) | GPL-3.0-or-later | runtime image (the two programs copied from Debian's `wsjtx` package, separate processes, `docs/third-party.md`) | – |
+| ft8_lib | FT8 decoder alternative (considered, not used) | MIT | not distributed | FT4 did not decode in our test, less sensitive than `jt9` |
 | SatDump | Meteor LRPT (optional, later) | GPL-3.0 | plugin image | – |
 | FutureSDR / seify | not used (ADR-0001), re-evaluated later | Apache-2.0 | – | – |
 
