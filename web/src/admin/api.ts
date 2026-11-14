@@ -215,6 +215,58 @@ export const openPolicy = (device: string): DevicePolicy => ({
   allowedUsers: [],
 });
 
+export type ShareFeature = "waterfall" | "audio" | "decoder_events" | "plugin_audio";
+export const SHARE_FEATURES: readonly ShareFeature[] = [
+  "waterfall",
+  "audio",
+  "decoder_events",
+  "plugin_audio",
+];
+export type ShareStatus = "active" | "expired" | "revoked";
+
+/** A public receiver share link (ADR-0029). The token itself is only known at creation. */
+export interface ShareLink {
+  id: number;
+  tokenHint: string;
+  label: string;
+  title: string;
+  description: string;
+  location: string;
+  device: string;
+  tuning: "follow" | "fixed";
+  freqHz: number | null;
+  mode: string | null;
+  tuneMinHz: number | null;
+  tuneMaxHz: number | null;
+  features: ShareFeature[];
+  maxListeners: number;
+  embedOrigins: string[];
+  expiresAtMs: number | null;
+  revokedAtMs: number | null;
+  createdAtMs: number;
+  createdBy: string | null;
+  status: ShareStatus;
+  listeners: number;
+}
+
+/** What an admin edits. */
+export interface ShareLinkInput {
+  label: string;
+  title: string;
+  description: string;
+  location: string;
+  device: string;
+  tuning: "follow" | "fixed";
+  freqHz: number | null;
+  mode: string | null;
+  tuneMinHz: number | null;
+  tuneMaxHz: number | null;
+  features: ShareFeature[];
+  maxListeners: number;
+  embedOrigins: string[];
+  expiresAtMs: number | null;
+}
+
 // ---------- parsing ----------
 
 function bad(what: string): never {
@@ -629,6 +681,61 @@ export function parseLimits(raw: unknown): Limits {
   };
 }
 
+export function parseShareLink(raw: unknown): ShareLink {
+  if (!isJson(raw) || typeof raw.id !== "number") return bad("share link");
+  const status: ShareStatus =
+    raw.status === "expired" || raw.status === "revoked" ? raw.status : "active";
+  return {
+    id: raw.id,
+    tokenHint: str(raw.token_hint),
+    label: str(raw.label),
+    title: str(raw.title),
+    description: str(raw.description),
+    location: str(raw.location),
+    device: str(raw.device),
+    tuning: raw.tuning === "fixed" ? "fixed" : "follow",
+    freqHz: numOrNull(raw.freq_hz),
+    mode: strOrNull(raw.mode),
+    tuneMinHz: numOrNull(raw.tune_min_hz),
+    tuneMaxHz: numOrNull(raw.tune_max_hz),
+    features: strList(raw.features).filter((f): f is ShareFeature =>
+      (SHARE_FEATURES as readonly string[]).includes(f),
+    ),
+    maxListeners: num(raw.max_listeners, 5),
+    embedOrigins: strList(raw.embed_origins),
+    expiresAtMs: numOrNull(raw.expires_at_ms),
+    revokedAtMs: numOrNull(raw.revoked_at_ms),
+    createdAtMs: num(raw.created_at_ms),
+    createdBy: strOrNull(raw.created_by),
+    status,
+    listeners: num(raw.listeners),
+  };
+}
+
+export function shareLinkBody(i: ShareLinkInput): Json {
+  return {
+    label: i.label,
+    title: i.title,
+    description: i.description,
+    location: i.location,
+    device: i.device,
+    tuning: i.tuning,
+    ...(i.tuning === "fixed"
+      ? {
+          freq_hz: i.freqHz,
+          mode: i.mode,
+          ...(i.tuneMinHz !== null && i.tuneMaxHz !== null
+            ? { tune_min_hz: i.tuneMinHz, tune_max_hz: i.tuneMaxHz }
+            : {}),
+        }
+      : {}),
+    features: i.features,
+    max_listeners: i.maxListeners,
+    embed_origins: i.embedOrigins,
+    expires_at_ms: i.expiresAtMs,
+  };
+}
+
 export function parseDevicePolicy(raw: unknown): DevicePolicy {
   if (!isJson(raw) || typeof raw.device !== "string") return bad("device policy");
   return {
@@ -718,6 +825,14 @@ export interface AdminApi {
   putDevicePolicy(p: DevicePolicy): Promise<{ policy: DevicePolicy; endedSessions: number }>;
   /** Back to the open default. */
   resetDevicePolicy(device: string): Promise<DevicePolicy>;
+  getShareLinks(signal?: AbortSignal): Promise<ShareLink[]>;
+  /** Resolves with the new link and its token, which is never shown again. */
+  createShareLink(input: ShareLinkInput): Promise<{ link: ShareLink; token: string }>;
+  updateShareLink(id: number, input: ShareLinkInput): Promise<ShareLink>;
+  revokeShareLink(id: number): Promise<ShareLink>;
+  /** A new token; the old one stops working at once. */
+  rotateShareLink(id: number): Promise<{ link: ShareLink; token: string }>;
+  deleteShareLink(id: number): Promise<void>;
   getClientReportPolicy(signal?: AbortSignal): Promise<ClientReportPolicy>;
   putClientReportPolicy(p: ClientReportPolicy): Promise<ClientReportPolicy>;
   getOidc(signal?: AbortSignal): Promise<OidcView>;
@@ -878,6 +993,31 @@ export function createAdminApi(fetchImpl?: FetchLike): AdminApi {
     async resetDevicePolicy(device) {
       const r = await call("DELETE", `${ADMIN}/device-policies/${id(device)}`);
       return isJson(r.body) ? parseDevicePolicy(r.body.policy) : bad("device policy");
+    },
+    async getShareLinks(signal) {
+      const r = await call("GET", `${ADMIN}/share-links`, undefined, signal);
+      return isJson(r.body) ? list(r.body.links).map(parseShareLink) : bad("share links");
+    },
+    async createShareLink(input) {
+      const r = await call("POST", `${ADMIN}/share-links`, shareLinkBody(input));
+      if (!isJson(r.body) || typeof r.body.token !== "string") return bad("create share link");
+      return { link: parseShareLink(r.body.link), token: r.body.token };
+    },
+    async updateShareLink(linkId, input) {
+      const r = await call("PUT", `${ADMIN}/share-links/${linkId}`, shareLinkBody(input));
+      return isJson(r.body) ? parseShareLink(r.body.link) : bad("share link");
+    },
+    async revokeShareLink(linkId) {
+      const r = await call("POST", `${ADMIN}/share-links/${linkId}/revoke`);
+      return isJson(r.body) ? parseShareLink(r.body.link) : bad("share link");
+    },
+    async rotateShareLink(linkId) {
+      const r = await call("POST", `${ADMIN}/share-links/${linkId}/rotate`);
+      if (!isJson(r.body) || typeof r.body.token !== "string") return bad("rotate share link");
+      return { link: parseShareLink(r.body.link), token: r.body.token };
+    },
+    async deleteShareLink(linkId) {
+      await call("DELETE", `${ADMIN}/share-links/${linkId}`);
     },
     async putLimits(l) {
       return parseLimits(

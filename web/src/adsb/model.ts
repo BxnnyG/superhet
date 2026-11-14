@@ -4,6 +4,15 @@
 
 import { INSTANCE_STATES, type InstanceState } from "../plugins/api";
 import { ApiError, isRec } from "../spectrum/api";
+import { bearingDeg, distanceKm } from "./geo";
+import {
+  formatAltFt,
+  formatDistanceKm,
+  formatSpeedKt,
+  formatVrateFpm,
+  type Measure,
+  type UnitSystem,
+} from "./units";
 
 export const ADSB_PLUGIN_ID = "org.superhet.decoder.adsb";
 
@@ -23,8 +32,16 @@ export interface Aircraft {
   onGround: boolean;
   speedKt: number | null;
   trackDeg: number | null;
-  /** Climb rate, feet per minute. */
+  /** Climb rate, feet per minute (barometric, else geometric). */
   vrateFpm: number | null;
+  /** Geometric (GNSS) altitude, feet. */
+  altGeomFt: number | null;
+  /** Indicated and true airspeed, knots. */
+  iasKt: number | null;
+  tasKt: number | null;
+  mach: number | null;
+  /** Where the nose points (true, else magnetic heading), degrees; differs from the track in wind. */
+  headingDeg: number | null;
   lat: number | null;
   lon: number | null;
   /** Mean signal level, dBFS. */
@@ -81,7 +98,12 @@ function parseAircraft(raw: unknown): Aircraft | null {
     onGround: raw.on_ground === true,
     speedKt: numOrNull(raw.speed_kt),
     trackDeg: numOrNull(raw.track_deg),
-    vrateFpm: numOrNull(raw.vrate_fpm),
+    vrateFpm: numOrNull(raw.vrate_fpm) ?? numOrNull(raw.geom_rate_fpm),
+    altGeomFt: numOrNull(raw.alt_geom_ft),
+    iasKt: numOrNull(raw.ias_kt),
+    tasKt: numOrNull(raw.tas_kt),
+    mach: numOrNull(raw.mach),
+    headingDeg: numOrNull(raw.heading_deg),
     lat: located ? lat : null,
     lon: located ? lon : null,
     rssi: numOrNull(raw.rssi),
@@ -148,6 +170,10 @@ export function fadeOf(ageS: number, staleAfterS: number = STALE_AFTER_S): numbe
 export interface Tracked extends Aircraft {
   ageS: number;
   opacity: number;
+  /** Great-circle distance from the receiver, km; null without a receiver position or a fix. */
+  distKm: number | null;
+  /** Bearing from the receiver to the aircraft, degrees. */
+  bearing: number | null;
 }
 
 /** Aircraft that are still on the picture at `nowMs`, with age and opacity. */
@@ -156,12 +182,30 @@ export function tracked(status: AdsbStatus, receivedAtMs: number, nowMs: number)
   for (const a of status.aircraft) {
     const ageS = ageOf(a, receivedAtMs, nowMs);
     const opacity = fadeOf(ageS, status.staleAfterS);
-    if (opacity > 0) out.push({ ...a, ageS, opacity });
+    if (opacity <= 0) continue;
+    const from = status.receiver;
+    const at = a.lat !== null && a.lon !== null ? { lat: a.lat, lon: a.lon } : null;
+    out.push({
+      ...a,
+      ageS,
+      opacity,
+      distKm: from !== null && at !== null ? distanceKm(from, at) : null,
+      bearing: from !== null && at !== null ? bearingDeg(from, at) : null,
+    });
   }
   return out;
 }
 
-export const SORT_KEYS = ["callsign", "icao", "alt", "speed", "track", "rssi", "age"] as const;
+export const SORT_KEYS = [
+  "callsign",
+  "icao",
+  "alt",
+  "speed",
+  "track",
+  "distance",
+  "rssi",
+  "age",
+] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
 export type SortDir = "asc" | "desc";
 
@@ -177,6 +221,8 @@ const sortValue = (a: Tracked, key: SortKey): string | number | null => {
       return a.speedKt;
     case "track":
       return a.trackDeg;
+    case "distance":
+      return a.distKm;
     case "rssi":
       return a.rssi;
     case "age":
@@ -211,42 +257,84 @@ export function matchesFilter(a: Aircraft, query: string): boolean {
 
 export const label = (a: Aircraft): string => a.callsign ?? a.icao;
 
-export function formatAlt(a: Aircraft): string {
-  if (a.onGround) return "ground";
-  return a.altFt === null ? "–" : `${a.altFt.toLocaleString("en-US")} ft`;
+/** Emergency squawk codes and what they mean (ICAO Doc 4444). */
+export const EMERGENCY_SQUAWKS: Readonly<Record<string, string>> = {
+  "7500": "Unlawful interference (hijack)",
+  "7600": "Radio failure",
+  "7700": "General emergency",
+};
+
+/** The meaning of an emergency squawk, or null for any other code. */
+export const emergencyOf = (a: Pick<Aircraft, "squawk">): string | null =>
+  a.squawk === null ? null : (EMERGENCY_SQUAWKS[a.squawk] ?? null);
+
+const DASH: Measure = { text: "\u2013", other: "" };
+
+export function formatAlt(a: Aircraft, u: UnitSystem): Measure {
+  if (a.onGround) return { text: "ground", other: "" };
+  return a.altFt === null ? DASH : formatAltFt(a.altFt, u);
 }
 
-export const formatSpeed = (a: Aircraft): string =>
-  a.speedKt === null ? "–" : `${Math.round(a.speedKt)} kt`;
+export const formatGeomAlt = (a: Aircraft, u: UnitSystem): Measure =>
+  a.altGeomFt === null ? DASH : formatAltFt(a.altGeomFt, u);
 
-export const formatTrack = (a: Aircraft): string =>
-  a.trackDeg === null ? "–" : `${Math.round(a.trackDeg) % 360}°`;
+export const formatSpeed = (kt: number | null, u: UnitSystem): Measure =>
+  kt === null ? DASH : formatSpeedKt(kt, u);
+
+export const formatVrate = (a: Aircraft, u: UnitSystem): Measure =>
+  a.vrateFpm === null ? DASH : formatVrateFpm(a.vrateFpm, u);
+
+export const formatDistance = (km: number | null, u: UnitSystem): Measure =>
+  km === null ? DASH : formatDistanceKm(km, u);
+
+/** Arrow for the vertical rate: climbing, descending or level (under 100 ft/min). */
+export function vrateArrow(fpm: number | null): "\u2191" | "\u2193" | "\u2192" | "" {
+  if (fpm === null) return "";
+  if (fpm >= 100) return "\u2191";
+  if (fpm <= -100) return "\u2193";
+  return "\u2192";
+}
+
+export const formatTrack = (deg: number | null): string =>
+  deg === null ? "\u2013" : `${Math.round(deg) % 360}\u00b0`;
 
 export const formatRssi = (a: Aircraft): string =>
-  a.rssi === null ? "–" : `${a.rssi.toFixed(1)} dB`;
+  a.rssi === null ? "\u2013" : `${a.rssi.toFixed(1)} dB`;
+
+export const formatMach = (mach: number | null): string =>
+  mach === null ? "\u2013" : `M ${mach.toFixed(3).replace(/0$/, "")}`;
 
 export function formatAge(ageS: number): string {
   return ageS < 1 ? "now" : `${Math.round(ageS)} s`;
 }
 
-/** Colour of an altitude band for the map symbol (low = warm, high = cool). */
-export function altitudeColor(a: Aircraft): string {
-  if (a.onGround) return "#a1a1aa";
-  const ft = a.altFt ?? 0;
-  if (a.altFt === null) return "#818cf8";
-  if (ft < 5_000) return "#fb923c";
-  if (ft < 15_000) return "#fbbf24";
-  if (ft < 25_000) return "#4ade80";
-  if (ft < 35_000) return "#38bdf8";
-  return "#818cf8";
+/** The altitude bands of the map colours: upper limit in feet and colour. */
+const BANDS: readonly (readonly [number, string])[] = [
+  [5_000, "#fb923c"],
+  [15_000, "#fbbf24"],
+  [25_000, "#4ade80"],
+  [35_000, "#38bdf8"],
+];
+const HIGH = "#818cf8";
+const GROUND = "#a1a1aa";
+
+/** Colour of an altitude for the map symbol and trail (low = warm, high = cool). */
+export function altColor(altFt: number | null, onGround: boolean): string {
+  if (onGround) return GROUND;
+  if (altFt === null) return HIGH;
+  for (const [limit, color] of BANDS) if (altFt < limit) return color;
+  return HIGH;
 }
 
-/** Legend of [`altitudeColor`]. */
-export const ALTITUDE_LEGEND: readonly (readonly [string, string])[] = [
-  ["#a1a1aa", "ground"],
-  ["#fb923c", "< 5 000 ft"],
-  ["#fbbf24", "< 15 000 ft"],
-  ["#4ade80", "< 25 000 ft"],
-  ["#38bdf8", "< 35 000 ft"],
-  ["#818cf8", "higher"],
-];
+export const altitudeColor = (a: Pick<Aircraft, "altFt" | "onGround">): string =>
+  altColor(a.altFt, a.onGround);
+
+/** Legend of [`altColor`] in the chosen unit. */
+export function altitudeLegend(u: UnitSystem): readonly (readonly [string, string])[] {
+  const names = BANDS.map(([limit]) => `< ${formatAltFt(limit, u).text}`);
+  return [
+    [GROUND, "ground"],
+    ...BANDS.map(([, color], i) => [color, names[i] ?? ""] as const),
+    [HIGH, "higher"],
+  ];
+}

@@ -5,4 +5,4 @@ ALTER TABLE superhet.bookmarks
     ADD CONSTRAINT bookmarks_digital_protocol_check CHECK (digital_protocol IN
         ('tetra', 'dmr', 'dpmr', 'nxdn', 'p25', 'pocsag', 'aprs', 'ism', 'm17'));
 
-UPDATE superhet.schema_version SET version = 18, applied_at = now();
+UPDATE superhet.schema_version SET version = 20, applied_at = now();

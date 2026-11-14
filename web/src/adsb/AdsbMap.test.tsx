@@ -6,6 +6,7 @@ import { AdsbMap } from "./AdsbMap";
 import { DEFAULT_MAP } from "../map/mapConfig";
 import { parseStatus, tracked, type Tracked } from "./model";
 import { adsbStatusRaw } from "./testing";
+import { SYMBOL_KINDS, SYMBOL_SIZE, type SymbolKind } from "./symbols";
 
 // Leaflet runs in jsdom without layout (the map is 0 x 0 pixels), which is enough to check that
 // the right markers, labels and tiles exist.
@@ -82,19 +83,44 @@ describe("AdsbMap", () => {
     layer.mockRestore();
   });
 
-  it("draws a labelled marker per aircraft with a position and one for the receiver", () => {
+  it("draws a marker per aircraft with a position and one for the receiver", () => {
     const { container } = render(<AdsbMap aircraft={picture()} {...props} />);
     expect(container.querySelectorAll(".leaflet-marker-icon")).toHaveLength(2);
-    const labels = [...container.querySelectorAll(".adsb-label")].map((e) => e.textContent);
-    expect(labels.sort()).toEqual(["DLH123", "EZY45K"]);
     expect(container.querySelectorAll("path.leaflet-interactive")).toHaveLength(1);
   });
 
-  it("rotates the symbol to the track and colours it by altitude", () => {
-    const { container } = render(<AdsbMap aircraft={picture()} {...props} />);
-    const plane = container.querySelector<HTMLElement>(".adsb-plane");
-    expect(plane?.style.transform).toBe("rotate(125deg)");
-    expect(plane?.style.color).not.toBe("");
+  it("labels aircraft with the callsign, and with altitude and speed when asked", () => {
+    const { container, rerender } = render(<AdsbMap aircraft={picture()} {...props} />);
+    const l1 = () => [...container.querySelectorAll(".adsb-l1")].map((e) => e.textContent).sort();
+    expect(l1()).toEqual(["DLH123", "EZY45K"]);
+    expect(container.querySelectorAll(".adsb-l2:not(:empty)")).toHaveLength(0);
+    const fields = { callsign: true, altitude: true, speed: true };
+    rerender(<AdsbMap aircraft={picture()} {...props} labels={fields} units="metric" />);
+    expect([...container.querySelectorAll(".adsb-l2")].map((e) => e.textContent).sort()).toEqual([
+      "10,668 m 836 km/h",
+      "ground 22 km/h",
+    ]);
+    rerender(<AdsbMap aircraft={picture()} {...props} labels={fields} units="aviation" />);
+    expect([...container.querySelectorAll(".adsb-l2")].map((e) => e.textContent).sort()).toEqual([
+      "35,000 ft 451 kt",
+      "ground 12 kt",
+    ]);
+    rerender(
+      <AdsbMap
+        aircraft={picture()}
+        {...props}
+        labels={{ callsign: false, altitude: false, speed: false }}
+      />,
+    );
+    expect(l1()).toEqual(["", ""]);
+  });
+
+  it("shows the value in the other unit as the tooltip of the symbol", () => {
+    const { container } = render(<AdsbMap aircraft={picture()} {...props} units="metric" />);
+    const titles = [...container.querySelectorAll<HTMLElement>(".adsb-plane")].map((e) => e.title);
+    expect(titles.find((t) => t.startsWith("DLH123"))).toBe(
+      "DLH123 \u00b7 10,668 m (35,000 ft) \u00b7 836 km/h (451 kt)",
+    );
   });
 
   it("fades markers with the aircraft and removes the ones that left", () => {
@@ -107,7 +133,7 @@ describe("AdsbMap", () => {
     expect(Number(icons[0]?.style.opacity)).toBeLessThan(0.6);
     rerender(<AdsbMap aircraft={[]} {...props} />);
     expect(container.querySelectorAll(".leaflet-marker-icon")).toHaveLength(0);
-    expect(container.querySelectorAll(".adsb-label")).toHaveLength(0);
+    expect(container.querySelectorAll(".adsb-tag")).toHaveLength(0);
   });
 
   it("marks the selected aircraft and reports clicks", () => {
@@ -115,36 +141,80 @@ describe("AdsbMap", () => {
     const { container, rerender } = render(
       <AdsbMap aircraft={picture()} {...props} onSelect={onSelect} />,
     );
-    expect(container.querySelector(".adsb-ring")).toBeNull();
+    expect([...container.querySelectorAll<HTMLElement>(".adsb-ring")].every((e) => e.hidden)).toBe(
+      true,
+    );
     const icon = container.querySelector(".leaflet-marker-icon");
     if (!icon) throw new Error("no marker");
     fireEvent.click(icon);
     expect(onSelect).toHaveBeenCalledWith("3c6444");
     rerender(<AdsbMap aircraft={picture()} {...props} selected="3c6444" onSelect={onSelect} />);
-    expect(container.querySelectorAll(".adsb-ring")).toHaveLength(1);
+    expect(container.querySelectorAll(".adsb-ring:not([hidden])")).toHaveLength(1);
   });
 
-  it("draws a trail that grows when the aircraft moves", () => {
+  it("keeps the marker element when the aircraft moves and turns the short way", () => {
     const { container, rerender } = render(<AdsbMap aircraft={picture()} {...props} />);
-    const moved = picture().map((a) => (a.icao === "3c6444" ? { ...a, lat: 51.2, lon: 7.1 } : a));
+    const icon = container.querySelector(".leaflet-marker-icon");
+    const moved = picture().map((a) =>
+      a.icao === "3c6444" ? { ...a, lat: 51.2, lon: 7.1, trackDeg: 355 } : a,
+    );
     rerender(<AdsbMap aircraft={moved} {...props} />);
-    // Two trails (one per aircraft) and the receiver circle.
-    expect(container.querySelectorAll("path.leaflet-interactive").length).toBeGreaterThanOrEqual(1);
-    expect(container.querySelectorAll(".leaflet-overlay-pane path")).toHaveLength(3);
+    expect(container.querySelectorAll(".leaflet-marker-icon")[0]).toBe(icon);
+    expect(container.querySelector<HTMLElement>(".adsb-plane")?.style.transform).toBe(
+      "rotate(-5deg)",
+    );
+    const north = moved.map((a) => (a.icao === "3c6444" ? { ...a, trackDeg: 5 } : a));
+    rerender(<AdsbMap aircraft={north} {...props} />);
+    // 355 -> 5 degrees is a turn of 10 degrees (-5 -> 5), not 350 back.
+    expect(container.querySelector<HTMLElement>(".adsb-plane")?.style.transform).toBe(
+      "rotate(5deg)",
+    );
   });
 
-  it("draws the symbol of the aircraft type", () => {
-    const symbols = new Map([
-      ["3c6444", "heavy" as const],
-      ["406a3d", "heli" as const],
+  it("draws trails on a canvas under the symbols, not as thousands of paths", () => {
+    const { container } = render(<AdsbMap aircraft={picture()} {...props} trailMinutes={5} />);
+    expect(container.querySelectorAll(".leaflet-adsb-trails-pane canvas")).toHaveLength(1);
+    // Only the receiver is an SVG path.
+    expect(container.querySelectorAll(".leaflet-overlay-pane path")).toHaveLength(1);
+  });
+
+  it("draws range rings in the chosen unit and removes them", () => {
+    const { container, rerender } = render(<AdsbMap aircraft={picture()} {...props} rings />);
+    expect(container.querySelectorAll("path.adsb-range-ring").length).toBeGreaterThan(0);
+    const text = container.querySelector(".adsb-ring-label")?.textContent ?? "";
+    expect(text).toMatch(/ km$/);
+    rerender(<AdsbMap aircraft={picture()} {...props} rings units="aviation" />);
+    expect(container.querySelector(".adsb-ring-label")?.textContent).toMatch(/ NM$/);
+    rerender(<AdsbMap aircraft={picture()} {...props} rings={false} />);
+    expect(container.querySelectorAll("path.adsb-range-ring")).toHaveLength(0);
+  });
+
+  it("draws the symbol of the aircraft type, sized by class", () => {
+    const symbols = new Map<string, SymbolKind>([
+      ["3c6444", "wide"],
+      ["406a3d", "heli"],
     ]);
     const { container } = render(<AdsbMap aircraft={picture()} {...props} symbols={symbols} />);
     const kinds = [...container.querySelectorAll(".adsb-plane")].map((e) =>
       e.getAttribute("data-kind"),
     );
-    expect(kinds.sort()).toEqual(["heavy", "heli"]);
+    expect(kinds.sort()).toEqual(["heli", "wide"]);
+    const sizes = new Map(
+      [...container.querySelectorAll<HTMLElement>(".leaflet-marker-icon")].map((e) => [
+        e.querySelector(".adsb-plane")?.getAttribute("data-kind"),
+        e.style.width,
+      ]),
+    );
+    expect(sizes.get("wide")).toBe(`${SYMBOL_SIZE.wide}px`);
+    expect(sizes.get("heli")).toBe(`${SYMBOL_SIZE.heli}px`);
+    // A changed type swaps the symbol.
+    symbols.set("3c6444", "light");
+    const { container: c2 } = render(
+      <AdsbMap aircraft={picture()} {...props} symbols={new Map([["3c6444", "light"]])} />,
+    );
+    expect(c2.querySelector('.adsb-plane[data-kind="light"]')).not.toBeNull();
     // Every kind has a shape, so no aircraft is ever drawn as nothing.
-    for (const kind of ["jet", "prop", "glider", "balloon", "uav", "ground", "unknown"] as const) {
+    for (const kind of SYMBOL_KINDS) {
       const { container: c } = render(
         <AdsbMap
           aircraft={picture().slice(0, 1)}
@@ -154,6 +224,16 @@ describe("AdsbMap", () => {
       );
       expect(c.querySelector(".adsb-plane svg")?.innerHTML.length).toBeGreaterThan(20);
     }
+  });
+
+  it("marks an emergency squawk on the map", () => {
+    const sos = picture().map((a) => (a.icao === "3c6444" ? { ...a, squawk: "7700" } : a));
+    const { container } = render(<AdsbMap aircraft={sos} {...props} />);
+    const rings = [...container.querySelectorAll<HTMLElement>(".adsb-ring")].filter(
+      (e) => !e.hidden,
+    );
+    expect(rings).toHaveLength(1);
+    expect(rings[0]?.dataset.emergency).toBe("true");
   });
 
   it("draws and removes the coverage outline", () => {

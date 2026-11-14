@@ -72,6 +72,9 @@ if [ "$update" = 1 ]; then
     env_tag="$(sed -n 's/^SUPERHET_TAG=//p' "$dir/.env" | tail -n 1 | tr -d "\"' \r")"
     default_version=''
 fi
+if [ "$update" != 1 ] && [ -z "$dir" ] && [ -f .env ] && [ -f compose.yaml ]; then
+    die "this directory already holds a Superhet install (.env + compose.yaml); to update it run: curl -fsSL https://raw.githubusercontent.com/BxnnyG/superhet/main/scripts/install.sh | sh -s -- --update"
+fi
 dir="${dir:-superhet}"
 
 latest_release() { # latest_release stable|any

@@ -365,6 +365,13 @@ pub const DEVICE_RULES: &[DeviceRule] = &[
     dev("DELETE", "/api/v1/devices/{dev}/vfos/{id}", Control),
     dev("POST", "/api/v1/devices/{dev}/profile/save", Control),
     dev("POST", "/api/v1/devices/{dev}/profile/load", Control),
+    dev("POST", "/api/v1/devices/{dev}/recordings", Control),
+    dev("GET", "/api/v1/devices/{dev}/vfos/{id}/replay", View),
+    dev(
+        "POST",
+        "/api/v1/devices/{dev}/vfos/{id}/replay/save",
+        Control,
+    ),
     dev("GET", "/api/v1/ws/spectrum", View),
     dev("GET", "/api/v1/ws/audio", View),
     dev("GET", "/api/v1/ws/state", View),

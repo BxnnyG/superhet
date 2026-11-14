@@ -12,7 +12,9 @@ pub mod notifications;
 pub mod oidc;
 pub mod plugin_instances;
 pub mod profiles;
+pub mod recordings;
 pub mod settings;
+pub mod share_links;
 pub mod users;
 
 use std::time::Duration;

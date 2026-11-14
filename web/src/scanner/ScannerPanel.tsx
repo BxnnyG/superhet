@@ -16,6 +16,7 @@ import {
   Select,
   Section,
   StopIcon,
+  Toggle,
   cn,
 } from "../ui";
 import { VFO_MODES, type VfoMode } from "../vfo/api";
@@ -111,9 +112,8 @@ export function ScannerPanel({ r }: { r: Receiver }) {
 
   const start = () => {
     if (problem !== null) return;
-    void r.scan.start(
-      startBody(source, prefs.settings, r.selected?.id ?? null, scanner?.lockouts ?? []),
-    );
+    const body = startBody(source, prefs.settings, r.selected?.id ?? null, scanner?.lockouts ?? []);
+    void r.scan.start(prefs.recordHits ? { ...body, record_hits: true } : body);
   };
   const noVfo = r.selected === null && !running;
   const hint = canControl ? null : "Operators and admins control the scanner.";
@@ -312,6 +312,13 @@ export function ScannerPanel({ r }: { r: Receiver }) {
               onCommit={(v) => updateSettings({ timeoutMs: v })}
             />
           )}
+          <Toggle
+            className="col-span-2"
+            checked={prefs.recordHits}
+            onChange={(v) => update({ recordHits: v })}
+            label="Record hits (audio, until the scan stops)"
+            disabled={!canControl}
+          />
           <NumberField
             label="Priority channel (MHz)"
             value={prefs.settings.priorityHz === null ? 0 : prefs.settings.priorityHz / 1e6}

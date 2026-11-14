@@ -23,9 +23,12 @@ mod origin;
 mod plugin_ui;
 mod plugins;
 mod profiles;
+mod recorder;
+mod recordings;
 mod registry;
 mod scanner;
 mod settings;
+mod share;
 mod state_ws;
 mod tiles;
 mod view;
@@ -58,7 +61,9 @@ fn app(
     ws: ws::WsState,
     audio: audio_ws::AudioState,
     devices: devices::DevicesState,
+    recorder: Arc<recorder::Manager>,
 ) -> Router {
+    let share = share::ShareState::new(devices.clone(), ws.hub(), audio.hub());
     // Public by design (opaque-origin frames cannot send the session cookie, the files are plugin
     // code): the sandboxed panel assets, `plugin_ui` explains.
     let panel_assets = plugin_ui::router(devices.clone());
@@ -94,13 +99,18 @@ fn app(
             deps.db.clone(),
         )))
         .merge(device_list::router(devices.clone()))
-        .merge(scanner::router(devices.clone()))
+        .merge(scanner::router(devices.clone(), recorder.clone()))
+        .merge(recordings::router(recordings::RecordingsState::new(
+            devices.clone(),
+            recorder,
+        )))
         .merge(devices::router(devices));
     let router = Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .with_state(deps)
         .merge(panel_assets)
+        .merge(share::router(share))
         .merge(auth::router(auth.clone()))
         .merge(auth::protect(protected, auth.clone()))
         .layer(middleware::from_fn_with_state(web, web::layer));
@@ -176,6 +186,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         devices.clone(),
     );
 
+    let recorder = recorder::Manager::new(
+        recorder::Config::from_env(),
+        nats.clone(),
+        db.clone(),
+        auth.audit().clone(),
+    );
+    tokio::spawn(Arc::clone(&recorder).run());
+
     let listen = std::env::var("SUPERHET_LISTEN").unwrap_or_else(|_| DEFAULT_LISTEN.to_owned());
     let addr: SocketAddr = listen.parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -192,15 +210,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
     }
-    let web = web::Web::from_env();
+    let web = web::Web::from_env().with_shares(Arc::clone(auth.share_links()));
     maintenance::spawn(auth.clone(), devices.clone());
-    let app = app(web, Deps { db, nats }, auth, ws, audio, devices);
+    share::spawn_upkeep(auth.clone(), devices.clone());
+    let app = app(
+        web,
+        Deps { db, nats },
+        auth,
+        ws,
+        audio,
+        devices,
+        Arc::clone(&recorder),
+    );
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(shutdown_signal())
     .await?;
+    // Close the files of running recordings so they end with a valid last page.
+    recorder.stop_all().await;
     Ok(())
 }
 
@@ -240,6 +269,7 @@ mod tests {
             ws,
             audio,
             devices,
+            recorder::Manager::for_tests(std::env::temp_dir().join("superhet-api-test")),
         )
         .oneshot(
             Request::builder()
@@ -281,6 +311,10 @@ mod tests {
             "/api/v1/ws/audio?dev=rtl0",
             "/api/v1/ws/state?dev=rtl0",
             "/api/v1/profiles",
+            "/api/v1/recordings",
+            "/api/v1/recordings/config",
+            "/api/v1/recordings/1/file",
+            "/api/v1/devices/rtl0/vfos/1/replay",
             "/api/v1/bookmarks",
             "/api/v1/decoder-events",
             "/api/v1/decoder-events/export.csv",

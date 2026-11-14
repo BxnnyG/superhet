@@ -763,7 +763,7 @@ pub(crate) async fn ctl_state(
 }
 
 /// The state object of a device as JSON bytes: KV first, then a `ctl.state` request.
-async fn load_state(state: &DevicesState, device: &str) -> Result<Bytes, Box<Response>> {
+pub(crate) async fn load_state(state: &DevicesState, device: &str) -> Result<Bytes, Box<Response>> {
     let (Ok(key), Ok(subject)) = (subjects::state_key(device), subjects::ctl(device, "state"))
     else {
         return Err(Box::new(failure(

@@ -241,6 +241,12 @@ function fakeApi(over: Partial<AdminApi> = {}): AdminApi {
     putAuditSettings: vi.fn().mockImplementation((s) => Promise.resolve(s)),
     getLimits: vi.fn().mockResolvedValue({ listenerMaxVfos: 4, operatorMaxVfos: 0 }),
     putLimits: vi.fn().mockImplementation((l) => Promise.resolve(l)),
+    getShareLinks: vi.fn().mockResolvedValue([]),
+    createShareLink: vi.fn(),
+    updateShareLink: vi.fn(),
+    revokeShareLink: vi.fn(),
+    rotateShareLink: vi.fn(),
+    deleteShareLink: vi.fn(),
     getDevicePolicies: vi.fn().mockResolvedValue([]),
     putDevicePolicy: vi
       .fn()
@@ -297,6 +303,7 @@ describe("console shell", () => {
       "Device access",
       "Plugins",
       "Guest access",
+      "Share links",
       "Audit settings",
       "Limits",
     ]) {

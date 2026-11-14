@@ -1,3 +1,4 @@
+import { RecordReplay } from "../recordings/RecordReplay";
 import type { ReactNode } from "react";
 import { usePermissions } from "../auth/context";
 import { canModifyVfo, notEditableReason } from "../auth/permissions";
@@ -42,6 +43,8 @@ interface Props {
   sampleRateHz?: number | null;
   /** Digital-mode picker (POCSAG, APRS, ISM, ...) in the demodulator block; omitted = no picker. */
   digital?: { device: string; plugins: PluginStore };
+  /** Device id; enables the record and instant replay block (accounts only). */
+  device?: string;
   onUpdate: Update;
   onRemove: (id: number) => void;
 }
@@ -59,6 +62,7 @@ export function ReceiverPanel({
   showDemodulator,
   sampleRateHz,
   digital,
+  device,
   onUpdate,
   onRemove,
 }: Props) {
@@ -145,6 +149,16 @@ export function ReceiverPanel({
       <Block title="Output">
         <VolumeControl vfo={vfo} audio={audio} audioSnap={audioSnap} />
       </Block>
+      {device !== undefined && !perms.isGuest && (
+        <Block title="Record and replay">
+          <RecordReplay
+            key={vfo.id}
+            device={device}
+            vfoId={vfo.id}
+            canRecord={perms.isOperator && !perms.deviceReadOnly}
+          />
+        </Block>
+      )}
       <Decoders
         vfo={vfo}
         audio={audio}

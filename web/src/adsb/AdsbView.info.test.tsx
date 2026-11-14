@@ -84,8 +84,8 @@ describe("aircraft database in the ADS-B view", () => {
     await show();
     const props = mapProps.mock.calls.at(-1)?.[0] as { symbols: Map<string, string> };
     // A350 (L2J, heavy wake) and A320 (L2J, medium) from the database; no data and no category.
-    expect(props.symbols.get("3c6444")).toBe("heavy");
-    expect(props.symbols.get("406a3d")).toBe("jet");
+    expect(props.symbols.get("3c6444")).toBe("wide");
+    expect(props.symbols.get("406a3d")).toBe("narrow");
     expect(props.symbols.get("4ca7b2")).toBe("unknown");
   });
 
@@ -97,7 +97,7 @@ describe("aircraft database in the ADS-B view", () => {
     expect(details).toHaveTextContent("AIRBUS A-350-900");
     expect(details).toHaveTextContent("Lufthansa");
     expect(details).toHaveTextContent("Germany");
-    expect(details).toHaveTextContent("Heavy jet");
+    expect(details).toHaveTextContent("Wide-body airliner");
     const spotters = within(details).getByRole("link", { name: "Planespotters" });
     expect(spotters).toHaveAttribute("href", "https://www.planespotters.net/hex/3C6444");
     expect(spotters).toHaveAttribute("target", "_blank");
@@ -139,7 +139,7 @@ describe("range statistics in the ADS-B view", () => {
     await act(() => vi.advanceTimersByTimeAsync(0));
     expect(screen.getByTestId("adsb-polar")).toBeInTheDocument();
     expect(screen.getByTestId("adsb-range-best")).toHaveTextContent("210 km towards E");
-    expect(screen.getByTestId("adsb-range-best")).toHaveTextContent("30 000 to 40 000 ft");
+    expect(screen.getByTestId("adsb-range-best")).toHaveTextContent("9,100 to 12,200 m");
     expect(screen.getByRole("img", { name: /Messages per second/ })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /Aircraft from/ })).toBeInTheDocument();
     expect(screen.getByRole("list", { name: /per altitude band/ })).toHaveTextContent("95.3 km");

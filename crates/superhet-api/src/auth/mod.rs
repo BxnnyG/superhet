@@ -12,7 +12,7 @@
 
 mod accounts;
 pub(crate) mod bans;
-mod limiter;
+pub(crate) mod limiter;
 pub(crate) mod oidc;
 pub(crate) mod password;
 mod routes;
@@ -42,6 +42,7 @@ use crate::device_access::{self, DevicePolicies};
 use crate::origin::OriginPolicy;
 use crate::registry::Registry;
 use crate::settings::SettingsStore;
+use crate::share::{links::ShareLinks, live::Live};
 pub use limiter::Limits;
 pub use routes::router;
 pub(crate) use routes::{Reply, db_failed, flatten, guard_origin, invalid, json_reply, parse_json};
@@ -187,6 +188,8 @@ struct Inner {
     name_limiter: limiter::NameLimiter,
     settings: Arc<SettingsStore>,
     device_policies: Arc<DevicePolicies>,
+    share_links: Arc<ShareLinks>,
+    share_live: Arc<Live>,
     audit: Audit,
     registry: Registry,
     bans: Arc<bans::Bans>,
@@ -240,6 +243,8 @@ impl AuthState {
         let dummy_hash = password::hash(DUMMY_PASSWORD)?;
         let settings = Arc::new(SettingsStore::new(db.clone()));
         let device_policies = Arc::new(DevicePolicies::new(db.clone()));
+        let share_links = Arc::new(ShareLinks::new(db.clone()));
+        let share_live = crate::share::live_from_env();
         let audit = Audit::new(db.clone(), Arc::clone(&settings));
         let registry = Registry::new(audit.clone());
         let oidc = oidc::OidcState::new(config.oidc.clone());
@@ -255,6 +260,8 @@ impl AuthState {
             setup_done: AtomicBool::new(false),
             settings,
             device_policies,
+            share_links,
+            share_live,
             audit,
             registry,
             bans: Arc::new(bans::Bans::default()),
@@ -274,6 +281,17 @@ impl AuthState {
             Enricher::disabled(),
         )
         .expect("auth state")
+    }
+
+    /// Like [`AuthState::for_tests`] with a fixed set of share links.
+    #[cfg(test)]
+    #[must_use]
+    pub fn for_tests_with_shares(links: ShareLinks) -> Self {
+        let mut state = Self::for_tests();
+        if let Some(inner) = Arc::get_mut(&mut state.0) {
+            inner.share_links = Arc::new(links);
+        }
+        state
     }
 
     /// Address, user agent, reverse DNS and GeoIP enrichment for the admin views.
@@ -298,6 +316,30 @@ impl AuthState {
     #[must_use]
     pub fn device_policies(&self) -> &DevicePolicies {
         &self.0.device_policies
+    }
+
+    /// Public receiver share links (ADR-0029).
+    #[must_use]
+    pub fn share_links(&self) -> &Arc<ShareLinks> {
+        &self.0.share_links
+    }
+
+    /// Open connections of share links.
+    #[must_use]
+    pub fn share_live(&self) -> &Arc<Live> {
+        &self.0.share_live
+    }
+
+    /// Who is behind a request (resolved addresses, user agent), for routes that are not behind
+    /// the session check.
+    #[must_use]
+    pub(crate) fn client_info(&self, request: &Request) -> ClientInfo {
+        ClientInfo::from_request(
+            &self.0.config,
+            request.extensions(),
+            request.headers(),
+            request.uri(),
+        )
     }
 
     /// Guest sessions and live connections.
@@ -472,12 +514,12 @@ impl AuthState {
 #[derive(Debug, Clone)]
 pub struct ClientInfo {
     /// The visitor's address: the forwarded one behind a trusted proxy, else the peer.
-    ip: Option<IpAddr>,
+    pub(crate) ip: Option<IpAddr>,
     /// The TCP peer (a proxy, or the Docker bridge gateway when no real address gets through).
-    peer: Option<IpAddr>,
+    pub(crate) peer: Option<IpAddr>,
     /// Forwarded chain reported by a trusted proxy.
-    chain: Vec<IpAddr>,
-    user_agent: Option<String>,
+    pub(crate) chain: Vec<IpAddr>,
+    pub(crate) user_agent: Option<String>,
     secure: bool,
 }
 

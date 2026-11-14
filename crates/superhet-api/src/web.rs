@@ -15,6 +15,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use tower::ServiceExt;
+
+use crate::share::links::ShareLinks;
 use tower_http::services::{ServeDir, ServeFile};
 
 /// Default directory of the built UI; override with `SUPERHET_WEB_DIR`.
@@ -44,7 +46,21 @@ pub fn set_lookup_origin(origin: Option<String>) {
 
 /// The CSP with the configured tile origin in `img-src` and the lookup origin added to
 /// `connect-src`, when there is one.
+#[cfg(test)]
 fn csp_header() -> HeaderValue {
+    csp_framed_by(&[])
+}
+
+/// An origin that is safe to put into `frame-ancestors` (a link's list was validated when it was
+/// saved; this refuses anything that could end the directive anyway).
+fn frameable(origin: &str) -> bool {
+    !origin.is_empty()
+        && !origin.contains([';', ',', '\'', '"', ' '])
+        && (!origin.contains('*') || origin.contains("://*."))
+}
+
+/// [`csp_header`] with `frame-ancestors` limited to `framers` (none = `'none'`).
+fn csp_framed_by(framers: &[String]) -> HeaderValue {
     // Proxy mode (default): tiles come from our own origin, `img-src` needs nothing extra.
     let csp = match crate::map::tile_origin() {
         Some(tiles) => CSP.replace("blob:; connect-src", &format!("blob: {tiles}; connect-src")),
@@ -62,6 +78,19 @@ fn csp_header() -> HeaderValue {
         }
         _ => csp,
     };
+    let framers: Vec<&str> = framers
+        .iter()
+        .map(String::as_str)
+        .filter(|o| frameable(o))
+        .collect();
+    let csp = if framers.is_empty() {
+        csp
+    } else {
+        csp.replace(
+            "frame-ancestors 'none'",
+            &format!("frame-ancestors {}", framers.join(" ")),
+        )
+    };
     HeaderValue::from_str(&csp).unwrap_or_else(|_| HeaderValue::from_static(CSP))
 }
 
@@ -78,6 +107,8 @@ pub struct Site {
     files: ServeDir,
     /// Files, falling back to `index.html` (client-side routes).
     spa: ServeDir<ServeFile>,
+    /// Share links, for the `frame-ancestors` list of `/embed/<token>`.
+    shares: Option<Arc<ShareLinks>>,
 }
 
 impl Web {
@@ -106,8 +137,28 @@ impl Web {
             spa: ServeDir::new(dir)
                 .append_index_html_on_directories(false)
                 .fallback(ServeFile::new(index)),
+            shares: None,
         }))
     }
+
+    /// Let `/embed/<token>` pages be framed by the origins their share link allows.
+    #[must_use]
+    pub fn with_shares(self, shares: Arc<ShareLinks>) -> Self {
+        match self {
+            Self::Dir(site) => Self::Dir(Arc::new(Site {
+                files: site.files.clone(),
+                spa: site.spa.clone(),
+                shares: Some(shares),
+            })),
+            missing => missing,
+        }
+    }
+}
+
+/// The token of an embed page `/embed/<token>`.
+fn embed_token(path: &str) -> Option<&str> {
+    let token = path.strip_prefix("/embed/")?.trim_end_matches('/');
+    (!token.is_empty() && !token.contains('/')).then_some(token)
 }
 
 /// Paths that belong to the backend and are never answered with UI files.
@@ -161,11 +212,21 @@ pub async fn layer(State(web): State<Web>, req: Request, next: Next) -> Response
         Ok(response) => response,
         Err(err) => match err {},
     };
-    decorate(&mut response, assets);
+    // Only an embed page whose link is active and lists origins may be framed, and only by
+    // those; every other page (the public page `/r/<token>` included) stays unframeable.
+    let framers = match (&site.shares, embed_token(&path)) {
+        (Some(shares), Some(token)) => {
+            shares
+                .embed_origins(&crate::auth::token::hash_token(token))
+                .await
+        }
+        _ => Vec::new(),
+    };
+    decorate(&mut response, assets, &framers);
     response
 }
 
-fn decorate(response: &mut Response, assets: bool) {
+fn decorate(response: &mut Response, assets: bool, framers: &[String]) {
     let status = response.status();
     let headers = response.headers_mut();
     if assets && (status.is_success() || status == StatusCode::NOT_MODIFIED) {
@@ -186,8 +247,11 @@ fn decorate(response: &mut Response, assets: bool) {
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.starts_with("text/html"));
     if is_html {
-        headers.insert(header::CONTENT_SECURITY_POLICY, csp_header());
-        headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+        headers.insert(header::CONTENT_SECURITY_POLICY, csp_framed_by(framers));
+        // `X-Frame-Options` cannot name origins: it is only left off where the CSP does.
+        if framers.is_empty() {
+            headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+        }
         headers.insert(
             header::REFERRER_POLICY,
             HeaderValue::from_static("same-origin"),
@@ -217,6 +281,139 @@ mod tests {
         assert_eq!(csp_header().to_str().unwrap_or_default(), CSP);
         set_lookup_origin(None);
         the_csp_img_src_follows_the_configured_tile_server();
+    }
+
+    fn html() -> Response {
+        let mut response = Response::new(Body::empty());
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/html; charset=utf-8"),
+        );
+        response
+    }
+
+    fn header_of(response: &Response, name: header::HeaderName) -> String {
+        response
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    #[test]
+    fn pages_are_unframeable_unless_a_link_lists_origins() {
+        let mut plain = html();
+        decorate(&mut plain, false, &[]);
+        assert!(
+            header_of(&plain, header::CONTENT_SECURITY_POLICY).contains("frame-ancestors 'none'")
+        );
+        assert_eq!(header_of(&plain, header::X_FRAME_OPTIONS), "DENY");
+
+        let mut embed = html();
+        let origins = vec![
+            "https://blog.example.org".to_owned(),
+            "https://*.example.net".to_owned(),
+        ];
+        decorate(&mut embed, false, &origins);
+        let csp = header_of(&embed, header::CONTENT_SECURITY_POLICY);
+        assert!(
+            csp.contains("frame-ancestors https://blog.example.org https://*.example.net"),
+            "{csp}"
+        );
+        assert!(!csp.contains("frame-ancestors 'none'"), "{csp}");
+        assert!(embed.headers().get(header::X_FRAME_OPTIONS).is_none());
+        // Everything else in the policy stays as strict as on every page.
+        assert!(csp.contains("default-src 'self'") && csp.contains("script-src 'self'"));
+    }
+
+    #[test]
+    fn a_framing_origin_cannot_smuggle_directives() {
+        for evil in [
+            "https://x.example; script-src *",
+            "https://x.example, https://y.example",
+            "*",
+            "https://a b",
+            "",
+        ] {
+            assert!(!frameable(evil), "{evil}");
+            let mut response = html();
+            decorate(&mut response, false, &[evil.to_owned()]);
+            let csp = header_of(&response, header::CONTENT_SECURITY_POLICY);
+            assert!(csp.contains("frame-ancestors 'none'"), "{evil}: {csp}");
+            assert!(!csp.contains("script-src *"), "{evil}: {csp}");
+        }
+    }
+
+    #[test]
+    fn embed_paths_are_recognised_exactly() {
+        assert_eq!(embed_token("/embed/abc"), Some("abc"));
+        assert_eq!(embed_token("/embed/abc/"), Some("abc"));
+        assert_eq!(embed_token("/embed/"), None);
+        assert_eq!(embed_token("/embed/a/b"), None);
+        assert_eq!(embed_token("/r/abc"), None);
+        assert_eq!(embed_token("/embedded/abc"), None);
+    }
+
+    async fn page(web: Web, path: &str) -> Response {
+        use axum::{Router, middleware};
+        use tower::ServiceExt;
+        Router::new()
+            .layer(middleware::from_fn_with_state(web, layer))
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(path)
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("infallible")
+    }
+
+    #[tokio::test]
+    async fn only_the_embed_page_of_an_active_link_may_be_framed_and_only_by_its_origins() {
+        use crate::share::links::{ShareLinks, test_link};
+        let dir = std::env::temp_dir().join(format!("superhet-web-csp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(dir.join("index.html"), "<!doctype html><title>x</title>").expect("index");
+        let mut open = test_link(1);
+        open.embed_origins = vec!["https://blog.example.org".into()];
+        let closed = test_link(2); // embeddable by nobody
+        let mut revoked = test_link(3);
+        revoked.embed_origins = vec!["https://blog.example.org".into()];
+        revoked.revoked_at_ms = Some(1);
+        let shares = Arc::new(ShareLinks::for_tests(vec![
+            ("open", open),
+            ("closed", closed),
+            ("revoked", revoked),
+        ]));
+        let web = Web::new(&dir).with_shares(shares);
+        let csp_of = |r: &Response| header_of(r, header::CONTENT_SECURITY_POLICY);
+
+        let r = page(web.clone(), "/embed/open").await;
+        assert!(
+            csp_of(&r).contains("frame-ancestors https://blog.example.org"),
+            "{}",
+            csp_of(&r)
+        );
+        assert!(r.headers().get(header::X_FRAME_OPTIONS).is_none());
+        for denied in [
+            "/embed/closed",
+            "/embed/revoked",
+            "/embed/unknown",
+            "/r/open",
+            "/",
+            "/admin",
+        ] {
+            let r = page(web.clone(), denied).await;
+            assert!(
+                csp_of(&r).contains("frame-ancestors 'none'"),
+                "{denied}: {}",
+                csp_of(&r)
+            );
+            assert_eq!(header_of(&r, header::X_FRAME_OPTIONS), "DENY", "{denied}");
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Part of the test above: both change process-wide values that `csp_header` reads.

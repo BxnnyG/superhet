@@ -57,6 +57,13 @@ impl AudioState {
     }
 }
 
+impl AudioState {
+    /// The audio hub (shared with the public share routes).
+    pub(crate) fn hub(&self) -> Arc<AudioHub> {
+        Arc::clone(&self.hub)
+    }
+}
+
 /// Routes of the gateway, behind the authentication hook.
 pub fn router(state: AudioState) -> Router {
     Router::new().route(PATH, get(audio_ws)).with_state(state)
@@ -158,7 +165,7 @@ async fn audio_ws(
 /// Whether `principal` may listen to every VFO in `wanted`: operators and admins hear all;
 /// everybody else only their own and shared (ownerless) VFOs. An id the daemon does not know is
 /// refused too, so nobody can pre-subscribe to a VFO somebody else creates later.
-async fn may_listen(
+pub(crate) async fn may_listen(
     devices: &DevicesState,
     principal: &Principal,
     device: &str,

@@ -46,6 +46,9 @@ and exported through the admin API. Not tamper-proof evidence: see "Append-only"
 | `guest.session_start`, `guest.session_end` | guest session starts / ends (idle, guest mode off) | `reason` |
 | `guest.policy_change` | guest policy saved | `changed` (keys), `enabled` |
 | `device.policy_change`, `device.policy_reset` | per-device access policy saved / reset (`target` = device) | `changed` (keys), `view_role`, `control_role`, `guests_visible`, `allowed_users` (count), `ended_sessions` |
+| `share.link_create`, `share.link_update`, `share.link_revoke`, `share.link_rotate`, `share.link_delete` | share link managed (`target` = link id; `docs/api-share.md`) | `label`, `device`, `features`, `expires_at_ms`, `embeddable` (create); `changed`, `ended_connections` (update); `ended_connections` (revoke, rotate, delete) |
+| `share.tune` | a share listener retuned (`outcome:"denied"` outside the link's range; coalesced; `target` = device) | `link`, `freq_hz` |
+| `share.denied` | a share token was refused (`outcome:"denied"`, coalesced; actor is a guest named `share`, or `share:<label>`) | `reason` (`unknown_token`, `expired`, `revoked`, `feature_off`, `device_restricted`, `link_full`, `server_full`, `too_many_from_address`), `link` |
 | `settings.change` | audit settings or VFO limits saved (`target`: `audit` / `limits`) | `changed` |
 | `device.tune` | centre/rate/gain/ppm/bias request (coalesced) | the request fields |
 | `device.lock`, `device.unlock` | tuning lock taken / released | `force` |

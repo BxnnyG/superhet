@@ -46,16 +46,52 @@ to start):
 ### The overlay
 
 - **Map:** Leaflet on OpenStreetMap tiles (attribution in the corner). One symbol per aircraft
-  with a position, rotated to its track and coloured by altitude (legend at the bottom left), a
-  label with the callsign (or ICAO address), a trail of the last 40 positions, the receiver as a
-  circle. Click an aircraft to select it. **Fit map** frames everything; the first picture is
-  framed automatically, afterwards the view is yours.
-- **Table:** callsign, ICAO, altitude, speed, track, signal (dBFS), seconds since last heard.
-  Click a header to sort (again to reverse), type in the filter to match callsign, ICAO address or
-  squawk, switch on "Only with position" to hide aircraft without a position. Click a row to
-  select the aircraft: the map pans to it and the details (climb rate, squawk, category, position,
-  message count) appear above the table. Aircraft that are in the table but not on the map have
-  not sent a position yet (a dot next to the name).
+  with a position, rotated to its track and coloured by altitude (legend at the bottom left,
+  in the chosen unit), the receiver as a circle. Click an aircraft to select it. **Fit map** frames
+  everything; the first picture is framed automatically, afterwards the view is yours. Markers are
+  plain DOM elements that are created once and then only touched where something changed, trails
+  are drawn on one canvas: 200+ aircraft cost a few attribute writes per second and no React
+  render per aircraft.
+- **Symbols by type:** original silhouettes (no third-party artwork) for light propeller aircraft,
+  twin propeller or turboprop, business jet, narrow-body, wide-body, four-engine, helicopter,
+  glider or ultralight, balloon or airship, drone, military fast jet, ground vehicle, tower or
+  obstacle, and a neutral arrow when nothing is known. The kind comes from the aircraft database
+  (ICAO type designator such as `A359`, ICAO type description such as `L2J`/`H1T`, wake category,
+  military flag), else from the emitter category the aircraft sends (`A1`..`A7`, `B1`, `B2`,
+  `B6`, `C1`..`C3`). Bigger aircraft get bigger symbols. Without an imported database only
+  aircraft that send an emitter category get a specific symbol, the rest show the arrow.
+- **Colours and contrast:** altitude bands (ground, below 5,000, 15,000, 25,000, 35,000 ft, higher)
+  for symbols and trails; the outline is dark on the light map and gets a light halo on the dark
+  map.
+- **Trails:** the browser keeps each aircraft's positions (one per 2 s at most, up to 30 minutes)
+  and draws them coloured by altitude, fading with age. Length: off, 1, 5 (default), 15 or 30
+  minutes (Map menu).
+- **Labels:** callsign (default), altitude and speed, any combination, from zoom 6 on; labels that
+  would overlap are hidden (the selected aircraft keeps its label).
+- **Units** (Map menu, kept in this browser's localStorage): *metric* km/h, m, km, m/s;
+  *aviation* kt, ft, NM, ft/min; *mixed* km/h, ft, km, ft/min. Applies to table, labels, details,
+  legend, range rings and the Range tab; the value in the other unit is the tooltip (hover a cell
+  or a symbol). Default is metric.
+- **Range rings** (Map menu): rings around the receiver at round steps of the chosen distance unit,
+  spaced to the zoom.
+- **Filter** (button in the header): altitude window (in the chosen unit), aircraft type groups,
+  military only, airborne / on ground. The badge counts active filters, the header says how many
+  aircraft are hidden; table and map follow the filter.
+- **Emergencies:** squawk 7500 (hijack), 7600 (radio failure) or 7700 (general emergency) gets a red
+  badge in the header (click selects the aircraft), a red row, a pulsing red ring on the map and a
+  highlighted squawk in the details.
+- **Table:** callsign, ICAO, type, altitude, speed, track, distance from the receiver, signal
+  (dBFS), seconds since last heard. Click a header to sort (again to reverse), type in the filter to
+  match callsign, ICAO address or squawk, switch on "Only with position" to hide aircraft without a
+  position. Click a row to select the aircraft: the map pans to it and the details appear above the
+  table. Aircraft that are in the table but not on the map have not sent a position yet (a dot next
+  to the name).
+- **Details:** callsign, registration, type, operator, country flag, squawk, barometric and GNSS
+  altitude, vertical rate with an arrow, ground speed, indicated and true airspeed, Mach (when the
+  aircraft sends them), track and heading, distance and bearing from the receiver, position and its
+  age, signal, message count, **Follow** (keeps the aircraft centred; dragging the map ends it) and
+  link-outs (Planespotters, JetPhotos, ADS-B Exchange, FlightAware, Flightradar24: plain links that
+  open the site on click, nothing is loaded from them).
 - **Fading:** an aircraft keeps full strength for 15 s after the last message, then fades; at
   60 s it is gone from map and table.
 - **Dark theme:** the tiles are darkened with a CSS filter in the dark theme.
@@ -107,7 +143,8 @@ and the OpenStreetMap default stays. The browser reads the source from `GET /api
  "total":3,"with_position":2,"truncated":false,"error":null,
  "aircraft":[{"icao":"3c6444","callsign":"DLH123","alt_ft":35000,"speed_kt":451.3,
    "track_deg":123.5,"vrate_fpm":-64,"lat":51.12345,"lon":6.98765,"rssi":-12.3,"squawk":"1000",
-   "category":"A3","messages":812,"seen_s":0.2,"seen_pos_s":0.4}]}
+   "category":"A3","alt_geom_ft":35525,"ias_kt":281,"tas_kt":468,"mach":0.812,"heading_deg":124.8,
+   "messages":812,"seen_s":0.2,"seen_pos_s":0.4}]}
 ```
 
 `mode` is `starting` until readsb wrote its first file, then `running`, or `error` when readsb
@@ -119,7 +156,9 @@ is the age when the document was written; the browser adds the time since it arr
 
 `adsb.aircraft`: `icao`, `summary` (e.g. `DLH123 35000 ft 451 kt 123°`), optional `callsign`,
 `alt_ft`, `on_ground`, `speed_kt`, `track_deg`, `vrate_fpm`, `lat`, `lon`, `rssi`, `squawk`,
-`category`. `adsb.error`: `summary`, `message` when readsb exited.
+`category`, and (when the aircraft sends them; added compatibly, older readers ignore them)
+`alt_geom_ft`, `geom_rate_fpm`, `ias_kt`, `tas_kt`, `mach`, `heading_deg` (true heading, else
+magnetic). `adsb.error`: `summary`, `message` when readsb exited.
 
 `adsb.range` (once a minute) is not a history event: the worker diverts it into the range
 statistics (below) instead of `decoder_events`. It carries `minute_ms`, `msgs_per_s`, `aircraft`,
@@ -154,8 +193,8 @@ anything is fetched.
 - **In the UI:** table columns type, registration (under the ICAO address), airline (under the
   callsign) and a country flag from the ICAO address block (a fixed table from ICAO Annex 10; flags
   are emoji, Windows shows the two letters of the country code); the map draws a symbol per kind
-  (jet, heavy jet, propeller, helicopter, glider, balloon, drone, ground vehicle) from the ICAO type
-  class, or from the emitter category for aircraft the database does not know; the details panel
+  (see "Symbols by type" above) from the type designator and ICAO type description, or from the
+  emitter category for aircraft the database does not know; the details panel
   adds type, operator, country, a military mark and **photo links** (Planespotters by ICAO
   address, JetPhotos by registration). They are plain links that open in a new tab; the page loads
   no image or script from those sites and does not use their APIs.

@@ -136,6 +136,8 @@ SUPERHET_LISTEN="127.0.0.1:$port" \
     SUPERHET_SETUP_TOKEN="${E2E_SETUP_TOKEN:-e2e-setup-token-0123456789}" \
     SUPERHET_COOKIE_SECURE=false \
     SUPERHET_WEB_DIR="$web" \
+    SUPERHET_RECORDINGS_DIR="$work/recordings" \
+    SUPERHET_RECORDINGS_MAX_GB=1 \
     "$bins/superhet-api" &
 pids+=($!)
 

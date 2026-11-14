@@ -52,6 +52,7 @@ it("phone width: a bottom tab bar opens the inspector sheet on a tab and moves m
     "Bookmarks",
     "Channels",
     "Scanner",
+    "Recordings",
     "Decoders",
     "DAB",
     "ADS-B",
