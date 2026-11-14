@@ -3,6 +3,7 @@ import { useAuth } from "../auth/context";
 import { navigate } from "../router";
 import {
   ActivityIcon,
+  ArchiveIcon,
   ArrowLeftIcon,
   Badge,
   BanIcon,
@@ -32,6 +33,7 @@ import { createAdminApi, type AdminApi } from "./api";
 import { AircraftDbSection } from "./AircraftDbSection";
 import { AuditSection } from "./AuditSection";
 import { AuditSettingsSection } from "./AuditSettingsSection";
+import { BackupSection } from "./BackupSection";
 import { BansSection } from "./BansSection";
 import { ClientReportSection } from "./ClientReportSection";
 import { DevicePoliciesSection } from "./DevicePoliciesSection";
@@ -65,6 +67,7 @@ export const ADMIN_SECTIONS: readonly NavItem[] = [
   { id: "client-info", label: "Client device info", Icon: MonitorIcon },
   { id: "audit-settings", label: "Audit settings", Icon: ShieldIcon },
   { id: "limits", label: "Limits", Icon: SlidersIcon },
+  { id: "backup", label: "Backup", Icon: ArchiveIcon },
 ];
 
 export function sectionPath(id: string): string {
@@ -253,6 +256,8 @@ function SectionBody({
       return <AuditSettingsSection api={api} />;
     case "limits":
       return <LimitsSection api={api} />;
+    case "backup":
+      return <BackupSection />;
     default:
       return null;
   }

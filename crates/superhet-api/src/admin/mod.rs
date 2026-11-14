@@ -6,6 +6,7 @@
 #![allow(clippy::result_large_err)]
 
 mod audit_routes;
+mod backup;
 mod bans;
 mod device_policies;
 mod notifications;
@@ -92,6 +93,16 @@ pub fn router(state: AdminState) -> Router {
         )
         .route("/api/v1/me/sessions", get(sessions::mine))
         .route("/api/v1/me/sessions/{sid}", delete(sessions::revoke_mine))
+        .route("/api/v1/admin/backup", get(backup::overview))
+        .route(
+            "/api/v1/admin/backup/export",
+            post(backup::export).layer(limit),
+        )
+        // The archive upload is streamed to disk under its own cap (SUPERHET_BACKUP_MAX_UPLOAD_MB).
+        .route(
+            "/api/v1/admin/backup/import",
+            post(backup::import).layer(DefaultBodyLimit::disable()),
+        )
         .route("/api/v1/admin/audit", get(audit_routes::query))
         .route("/api/v1/admin/audit/export", get(audit_routes::export))
         .route(

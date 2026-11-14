@@ -6,6 +6,7 @@
 
 mod adsb_range;
 mod audit;
+mod backup;
 mod consumer;
 mod metrics;
 mod notifications;
@@ -82,6 +83,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(notifications::run(pool, client, retention, stop))
     });
 
+    // Scheduled logical backups (only with SUPERHET_BACKUP_DIR).
+    let backups = db
+        .clone()
+        .map(|pool| tokio::spawn(backup::run(pool, stop_rx.clone())));
+
     let recorder = match (db, nats) {
         (Some(pool), Some(client)) => {
             let plugin_events = {
@@ -129,6 +135,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = task.await;
     }
     if let Some(task) = notifier {
+        let _ = task.await;
+    }
+    if let Some(task) = backups {
         let _ = task.await;
     }
     Ok(())

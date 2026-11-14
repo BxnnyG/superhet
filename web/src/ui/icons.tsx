@@ -49,6 +49,11 @@ export const MinusIcon = (p: IconProps) => (
     <path d="M5 12h14" />
   </Icon>
 );
+export const ArchiveIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 5h18v4H3zM5 9v10a1 1 0 001 1h12a1 1 0 001-1V9M10 13h4" />
+  </Icon>
+);
 export const TrashIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12M9 7V4h6v3" />

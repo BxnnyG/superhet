@@ -3359,6 +3359,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "sqlx",
+ "superhet-backup",
  "superhet-bus",
  "superhet-db",
  "superhet-notify",
@@ -3371,6 +3372,27 @@ dependencies = [
  "tower-http 0.7.1",
  "tracing",
  "tracing-subscriber",
+ "zip",
+]
+
+[[package]]
+name = "superhet-backup"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "futures-util",
+ "getrandom 0.4.3",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "sqlx",
+ "superhet-db",
+ "superhet-recording",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
  "zip",
 ]
 
@@ -3520,6 +3542,7 @@ dependencies = [
  "http-body-util",
  "serde_json",
  "sqlx",
+ "superhet-backup",
  "superhet-bus",
  "superhet-db",
  "superhet-notify",
