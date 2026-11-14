@@ -110,7 +110,7 @@ const FALLBACK_VIEWPORT_H = 480;
 const UNGROUPED = "none";
 
 type Row =
-  | { kind: "near"; key: string }
+  | { kind: "near"; key: string; title: string }
   | { kind: "group"; key: string; id: string; title: string; count: number; folded: boolean }
   | { kind: "item"; key: string; bookmark: Bookmark };
 
@@ -171,11 +171,14 @@ export function BookmarksPanel({ store, overlay, activeFreqHz, onTune, onTuneNew
   const rows = useMemo(() => {
     const out: Row[] = [];
     if (near.length > 0) {
-      out.push({ kind: "near", key: "near" });
+      out.push({ kind: "near", key: "near", title: "Near current frequency" });
       for (const b of near) out.push({ kind: "item", key: `near:${b.id}`, bookmark: b });
     }
     const sections = groupSections(shown, snap.groups, filtering);
     const flat = sections.length === 1 && sections[0]?.group === null;
+    // The near block repeats bookmarks that are also in the list below; a heading says so, so a
+    // bookmark saved at the current frequency does not look saved twice.
+    if (near.length > 0 && flat) out.push({ kind: "near", key: "all", title: "All bookmarks" });
     for (const s of sections) {
       const id = s.group?.id ?? UNGROUPED;
       const folded = !flat && !filtering && prefs.collapsed.includes(id);
@@ -416,7 +419,7 @@ export function BookmarksPanel({ store, overlay, activeFreqHz, onTune, onTuneNew
                     style={{ height: HEAD_H }}
                     className="flex items-center px-1 text-[11px] font-medium tracking-wide text-fg-subtle uppercase"
                   >
-                    Near current frequency
+                    {row.title}
                   </div>
                 );
               }

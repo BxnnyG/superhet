@@ -1,16 +1,20 @@
-import { useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
+import { useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
 import { CTCSS_TONES, formatCtcss } from "../audio/tones";
 import { formatFrequency, parseFrequency } from "../spectrum/freq";
 import { Alert, Button, Dialog, Select, TextField, Toggle, toasts } from "../ui";
 import { VFO_MODES, type VfoMode } from "../vfo/api";
 import { MODE_LABEL, STEPS_HZ, formatStep } from "../vfo/model";
 import { fromForm, toForm, type FormErrors, type FormState, type SquelchKind } from "./editorForm";
+import { modeOfProtocol } from "./digital";
 import {
   BOOKMARK_COLORS,
   DIGITAL_PROTOCOLS,
+  HAS_TALKGROUP,
   MAX_TIMESLOT,
   NAME_MAX,
   PROTOCOL_LABEL,
+  findSameChannel,
+  receiverPatch,
   toInput,
   type Bookmark,
   type BookmarkGroup,
@@ -28,6 +32,10 @@ interface FormProps {
   onCancel: () => void;
   /** Resolves with an error text to show, or null when saved. */
   onSubmit: (input: BookmarkInput) => Promise<string | null>;
+  /** A saved bookmark that already stands for this channel (same frequency, mode, digital mode). */
+  findSame?: (input: BookmarkInput) => Bookmark | null;
+  /** Update that bookmark with the new receiver state instead of adding another one. */
+  onUpdateSame?: (existing: Bookmark, input: BookmarkInput) => Promise<string | null>;
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -54,26 +62,59 @@ const TONE_OPTIONS: readonly { value: "" | ToneMode; label: string }[] = [
   { value: "dcs", label: "DCS (store only)" },
 ];
 
-function BookmarkForm({ title, submitLabel, initial, groups, onCancel, onSubmit }: FormProps) {
+function BookmarkForm({
+  title,
+  submitLabel,
+  initial,
+  groups,
+  onCancel,
+  onSubmit,
+  findSame,
+  onUpdateSame,
+}: FormProps) {
   const [f, setF] = useState<FormState>(() => toForm(initial));
   const [errors, setErrors] = useState<FormErrors>({});
   const [failure, setFailure] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const set = (patch: Partial<FormState>) => setF((prev) => ({ ...prev, ...patch }));
+  // The channel is already saved: ask before adding a second one.
+  const [same, setSame] = useState<{ existing: Bookmark; input: BookmarkInput } | null>(null);
+  // Set at once (state is only there after the next render): a second submit in the same tick,
+  // a double click or a repeated Enter, must not post the bookmark twice.
+  const busy = useRef(false);
+  const set = (patch: Partial<FormState>) => {
+    setSame(null);
+    setF((prev) => ({ ...prev, ...patch }));
+  };
+
+  const run = async (action: () => Promise<string | null>) => {
+    if (busy.current) return;
+    busy.current = true;
+    setPending(true);
+    setFailure(null);
+    try {
+      const error = await action();
+      if (error !== null) setFailure(error);
+    } finally {
+      busy.current = false;
+      setPending(false);
+    }
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (busy.current) return;
     const result = fromForm(f);
     if ("errors" in result) {
       setErrors(result.errors);
       return;
     }
     setErrors({});
-    setPending(true);
-    setFailure(null);
-    const error = await onSubmit(result.input);
-    setPending(false);
-    if (error !== null) setFailure(error);
+    const existing = same === null ? (findSame?.(result.input) ?? null) : null;
+    if (existing !== null) {
+      setSame({ existing, input: result.input });
+      return;
+    }
+    await run(() => onSubmit(result.input));
   };
 
   // A stored tone that is not one of the standard 50 stays selectable.
@@ -217,7 +258,14 @@ function BookmarkForm({ title, submitLabel, initial, groups, onCancel, onSubmit 
           <Select
             label="Protocol"
             value={f.protocol}
-            onChange={(protocol) => set({ protocol: protocol as FormState["protocol"] })}
+            onChange={(protocol) => {
+              const mode = modeOfProtocol(protocol);
+              // The picker mode's own decoder plugin is the sensible default for it.
+              set({
+                protocol: protocol as FormState["protocol"],
+                ...(mode !== null && f.decoder === "" ? { decoder: mode.pluginId } : {}),
+              });
+            }}
             options={[
               { value: "", label: "Analogue" },
               ...DIGITAL_PROTOCOLS.map((p) => ({ value: p, label: PROTOCOL_LABEL[p] })),
@@ -240,14 +288,16 @@ function BookmarkForm({ title, submitLabel, initial, groups, onCancel, onSubmit 
                     ]}
                   />
                 )}
-                <TextField
-                  label={f.protocol === "tetra" ? "Talkgroup / GSSI" : "Talkgroup"}
-                  value={f.talkgroup}
-                  error={errors.talkgroup}
-                  inputMode="numeric"
-                  autoComplete="off"
-                  onChange={(e) => set({ talkgroup: e.target.value })}
-                />
+                {HAS_TALKGROUP.has(f.protocol) && (
+                  <TextField
+                    label={f.protocol === "tetra" ? "Talkgroup / GSSI" : "Talkgroup"}
+                    value={f.talkgroup}
+                    error={errors.talkgroup}
+                    inputMode="numeric"
+                    autoComplete="off"
+                    onChange={(e) => set({ talkgroup: e.target.value })}
+                  />
+                )}
                 {f.protocol === "dmr" && (
                   <TextField
                     label="Colour code"
@@ -357,13 +407,41 @@ function BookmarkForm({ title, submitLabel, initial, groups, onCancel, onSubmit 
         </Section>
 
         {failure !== null && <Alert tone="danger">{failure}</Alert>}
-        <div className="flex justify-end gap-2">
+        {same !== null && (
+          <Alert tone="warn">
+            “{same.existing.name}” already stores this channel ({formatFrequency(same.input.freqHz)}{" "}
+            MHz
+            {same.input.mode === null ? "" : `, ${MODE_LABEL[same.input.mode]}`}
+            {same.input.digital === null ? "" : `, ${PROTOCOL_LABEL[same.input.digital.protocol]}`}
+            ). Update it with the current receiver state, or add this as a second bookmark.
+          </Alert>
+        )}
+        <div className="flex flex-wrap justify-end gap-2">
           <Button variant="secondary" onClick={onCancel}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" disabled={pending}>
-            {submitLabel}
-          </Button>
+          {same !== null && onUpdateSame !== undefined ? (
+            <>
+              <Button
+                variant="secondary"
+                disabled={pending}
+                onClick={() => void run(() => onSubmit(same.input))}
+              >
+                Save as new
+              </Button>
+              <Button
+                variant="primary"
+                disabled={pending}
+                onClick={() => void run(() => onUpdateSame(same.existing, same.input))}
+              >
+                Update “{same.existing.name}”
+              </Button>
+            </>
+          ) : (
+            <Button type="submit" variant="primary" disabled={pending}>
+              {submitLabel}
+            </Button>
+          )}
         </div>
       </form>
     </Dialog>
@@ -385,7 +463,7 @@ function freqHint(text: string): string | undefined {
 
 /** Renders the add/edit dialog while the store has an editor target. Mount once in the app. */
 export function BookmarkEditorHost({ store }: { store: BookmarkStore }) {
-  const { editor, groups } = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const { editor, groups, bookmarks } = useSyncExternalStore(store.subscribe, store.getSnapshot);
   if (editor === null) return null;
   const close = () => store.closeEditor();
   if (editor.kind === "create") {
@@ -397,6 +475,14 @@ export function BookmarkEditorHost({ store }: { store: BookmarkStore }) {
         initial={editor.draft}
         groups={groups}
         onCancel={close}
+        findSame={(input) => findSameChannel(bookmarks, input)}
+        onUpdateSame={async (existing, input) => {
+          const error = await store.update(existing.id, receiverPatch(input));
+          if (error !== null) return error;
+          toasts.push({ tone: "success", title: `Updated “${existing.name}”`, key: "bookmark" });
+          close();
+          return null;
+        }}
         onSubmit={async (input) => {
           const error = await store.create(input);
           if (error !== null) return error;

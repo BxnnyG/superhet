@@ -54,6 +54,8 @@ export function fake(vfos: Vfo[], selectedId: number | null, locks: LockHolder[]
     setListening: vi.fn(),
     toggleLock: vi.fn(),
     request: vi.fn(),
+    requestCentre: vi.fn(),
+    refuseCentreChange: vi.fn(() => false),
   };
   const state = { ...device, locks };
   const r = {
@@ -69,7 +71,11 @@ export function fake(vfos: Vfo[], selectedId: number | null, locks: LockHolder[]
     } as unknown as AudioController,
     autoSquelch: new AutoSquelch(),
     vfoCtl: { update: fns.update, select: fns.select, remove: fns.remove },
-    tuning: { request: fns.request },
+    tuning: {
+      request: fns.request,
+      requestCentre: fns.requestCentre,
+      refuseCentreChange: fns.refuseCentreChange,
+    },
     locks,
     claim: null,
     step: "auto",

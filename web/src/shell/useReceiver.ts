@@ -17,7 +17,7 @@ import {
 } from "../auth/permissions";
 import { builtinBandPlan, matchBandPlan, suggestName } from "../bandplan/model";
 import { OverlayStore } from "../bandplan/settings";
-import { newInput, receiverState } from "../bookmarks/model";
+import { activeChannel, draftFor, modeOfProtocol } from "../bookmarks/digital";
 import { BookmarkStore } from "../bookmarks/store";
 import { ADSB_PLUGIN_ID } from "../adsb/model";
 import { AdsbStore } from "../adsb/store";
@@ -27,6 +27,8 @@ import { channelTarget, matchChannel, stepChannelBy } from "../channels/lookup";
 import { modeOf, type Plan, type PlanChannel } from "../channels/schema";
 import { ChannelStore } from "../channels/store";
 import { DecoderEventStore } from "../decoders/store";
+import { enterDigital } from "../digital/actions";
+import { describeHttpError } from "../http";
 import { useM17Audio } from "../m17/audio";
 import { claimOwner } from "../plugins/claim";
 import { ScanControls } from "../scanner/controls";
@@ -37,7 +39,6 @@ import { createProfileApi } from "../profiles/api";
 import type { StateDoc } from "../state/doc";
 import { bindState, StateStore } from "../state/store";
 import type { AnnotationTarget } from "../spectrum/annotations";
-import { formatFrequency } from "../spectrum/freq";
 import { LevelController, loadLevelSettings } from "../spectrum/levels";
 import type { SocketStatus } from "../spectrum/socket";
 import { TuningController } from "../spectrum/tuning";
@@ -46,6 +47,7 @@ import { AutoSquelch } from "../vfo/autoSquelch";
 import { VfoController } from "../vfo/controller";
 import { defaultModeFor, snapFrequency, STEPS_HZ, stepFor, type StepChoice } from "../vfo/model";
 import { SpectrumMetrics } from "./metrics";
+import type { Vfo, VfoPatch } from "../vfo/api";
 import { createFor, patchFor } from "./annotationTuning";
 import { noticeLocked, noticeRetune } from "./notices";
 import { spectrumTuningView } from "./spectrumTuning";
@@ -165,22 +167,94 @@ export function useReceiver(device: string) {
       setStep(t.stepHz);
     }
   }, []);
+  // A bookmark with a digital mode starts that mode on the VFO, as the Digital picker would: the
+  // preset (NFM, bandwidth, open squelch) and the decoder plugin. The bookmark's own bandwidth wins
+  // over the preset's. Needs the plugin rights; a missing plugin or an unconfirmed notice is said.
+  const startDigital = useCallback(
+    (vfo: Vfo, t: AnnotationTarget) => {
+      const mode = t.digital === undefined ? null : modeOfProtocol(t.digital);
+      if (mode === null) return;
+      if (!canUsePlugins) {
+        toasts.push({
+          key: "digital-denied",
+          tone: "warn",
+          title: NEEDS_OPERATOR,
+          body: `Only operators and admins can start ${mode.label}; the frequency is tuned.`,
+        });
+        return;
+      }
+      const ctx = {
+        store: plugins,
+        device,
+        vfo: { ...vfo, freqHz: t.freqHz },
+        updateVfo: (id: number, patch: VfoPatch) =>
+          vfoCtl.update(id, {
+            ...patch,
+            freqHz: t.freqHz,
+            ...(t.bandwidthHz !== undefined ? { bandwidthHz: t.bandwidthHz } : {}),
+          }),
+      };
+      enterDigital(ctx, mode).then(
+        (result) => {
+          if (result === "notice") {
+            toasts.push({
+              key: "digital-notice",
+              tone: "info",
+              title: `Confirm the ${mode.label} notice first`,
+              body: "Pick the mode once in the Digital menu and read the notice; then bookmarks start it directly.",
+            });
+          }
+        },
+        (e: unknown) =>
+          toasts.push({
+            key: "digital-start",
+            tone: "warn",
+            title: `Could not start ${mode.label}`,
+            body: describeHttpError(e),
+          }),
+      );
+    },
+    [canUsePlugins, plugins, device, vfoCtl],
+  );
+  // The VFO a create call is about to add shows up in the controller's list later; run `then` once
+  // with it (gives up after a few seconds).
+  const onNewVfo = useCallback(
+    (before: ReadonlySet<number>, then: (vfo: Vfo) => void) => {
+      let off: () => void = () => undefined;
+      const timer = setTimeout(() => off(), 5000);
+      off = vfoCtl.subscribe(() => {
+        const fresh = vfoCtl.getSnapshot().vfos.find((v) => !before.has(v.id));
+        if (!fresh) return;
+        off();
+        clearTimeout(timer);
+        then(fresh);
+      });
+    },
+    [vfoCtl],
+  );
   const tuneTo = useCallback(
     (t: AnnotationTarget) => {
       const snap = vfoCtl.getSnapshot();
       const vfo = snap.vfos.find((v) => v.id === snap.selectedId) ?? snap.vfos[0];
-      if (vfo) vfoCtl.update(vfo.id, patchFor(vfo, t));
-      else if (snap.loaded) vfoCtl.create(createFor(t));
+      if (vfo) {
+        vfoCtl.update(vfo.id, patchFor(vfo, t));
+        startDigital(vfo, t);
+      } else if (snap.loaded) {
+        vfoCtl.create(createFor(t));
+        if (t.digital !== undefined) onNewVfo(new Set(), (v) => startDigital(v, t));
+      }
       applyStep(t);
     },
-    [vfoCtl, applyStep],
+    [vfoCtl, applyStep, startDigital, onNewVfo],
   );
   const tuneNew = useCallback(
     (t: AnnotationTarget) => {
+      const before = new Set(vfoCtl.getSnapshot().vfos.map((v) => v.id));
       vfoCtl.create(createFor(t));
+      if (t.digital !== undefined) onNewVfo(before, (v) => startDigital(v, t));
       applyStep(t);
     },
-    [vfoCtl, applyStep],
+    [vfoCtl, applyStep, startDigital, onNewVfo],
   );
 
   // A channel of a plan: voice channels tune a VFO like a bookmark; a DAB block moves the device
@@ -419,18 +493,28 @@ export function useReceiver(device: string) {
     }
     const freqHz = selected?.freqHz ?? centerHz;
     if (freqHz === null) return;
-    const name = suggestName(matchBandPlan(builtinBandPlan(), freqHz));
     bookmarks.openEditor({
       kind: "create",
-      draft: newInput({
-        name: name || `${formatFrequency(freqHz).slice(0, -4)} MHz`,
+      draft: draftFor({
         freqHz,
-        mode: selected?.mode ?? null,
-        bandwidthHz: selected?.bandwidthHz ?? null,
-        ...receiverState(selected, selected !== null && autoSquelch.isAuto(selected), step),
+        planName: suggestName(matchBandPlan(builtinBandPlan(), freqHz)),
+        vfo: selected,
+        squelchIsAuto: selected !== null && autoSquelch.isAuto(selected),
+        step,
+        // A digital mode running on the VFO is part of the state to save (and restored on load).
+        digital: activeChannel(pluginSnap.instances, device, selected?.id ?? null),
       }),
     });
-  }, [bookmarks, selected, centerHz, autoSquelch, step, canEditBookmarks]);
+  }, [
+    bookmarks,
+    selected,
+    centerHz,
+    autoSquelch,
+    step,
+    canEditBookmarks,
+    pluginSnap.instances,
+    device,
+  ]);
   const errors = [spectrumError, tuningSnap.error, vfoSnap.error, audioSnap.error].filter(
     (e): e is string => e !== null,
   );

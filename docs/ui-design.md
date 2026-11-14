@@ -158,7 +158,14 @@ The decided layout and its responsive rules are in `docs/design/ui-layout.md`. C
   to the mode default), bandwidth, squelch with an **Auto** button and the live channel-power tick,
   and an inline S-meter (the tick and meter update their DOM outside React). With no VFO it shows
   "Create receiver". The centre pill opens the source settings popover (`shell/SourceSettings.tsx`,
-  also the top of the Source tab) with the tuning lock.
+  also the top of the Source tab) with the tuning lock. The pill is also a handle for the device
+  centre: wheel over it steps the centre (a tenth of the span as a 1-2-5 number; Shift a hundredth,
+  Ctrl half), press-and-drag left/right moves it by steps, arrow / PageUp / PageDown keys step it
+  while it has focus. A thin **pan bar** on the top edge of the waterfall (`spectrum/CentreBar.tsx`)
+  drags the centre with the picture: the canvas follows the pointer live (a transform, no React
+  render) and the new centre is sent on release; it also works with touch and the arrow keys. A locked
+  tuning or a plugin claim is announced (lock notice) instead of moving; the maths is in
+  `spectrum/centreMove.ts`.
 - **VFO tabs**: selected = accent, paused = dimmed with a pause icon; each tab has a listen toggle
   and a close button; "+" adds a VFO at the display centre (max 8).
 - **Inspector**: `]` or the top bar button toggles it on wide screens (`superhet.inspector.open.v1`,
@@ -192,5 +199,9 @@ Details in `docs/bandplan.md`. Inspector: the **Bookmarks** tab (switch "Show on
 search and tag filter, list with edit/delete, import/export buttons) and, in the **Display** tab, **Band plan** (master
 switch plus one switch per category with its colour swatch). The tuning strip has a star
 ("Bookmark this frequency") next to the active VFO's tuning step; it opens the add dialog prefilled
-from the VFO and the band plan. Dialogs use the kit's `Dialog`/`ConfirmDialog`; the import dialog
+from the VFO and the band plan (frequency, mode, bandwidth, squelch, step, sub-tone and the digital
+mode running on the VFO). Saving the same frequency, mode and digital mode again asks whether to
+update the existing bookmark (receiver state only) or add a second one; a double submit posts once.
+Loading a bookmark with a digital mode (POCSAG, APRS, ISM, M17, DMR, dPMR, NXDN, TETRA) starts that
+mode like the Digital picker. Dialogs use the kit's `Dialog`/`ConfirmDialog`; the import dialog
 previews counts before anything is sent and offers Merge or Replace all.

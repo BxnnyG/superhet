@@ -396,7 +396,12 @@ enum Protocol {
     Tetra,
     Dmr,
     Dpmr,
+    Nxdn,
     P25,
+    Pocsag,
+    Aprs,
+    Ism,
+    M17,
 }
 
 impl Protocol {
@@ -405,7 +410,12 @@ impl Protocol {
             Self::Tetra => "tetra",
             Self::Dmr => "dmr",
             Self::Dpmr => "dpmr",
+            Self::Nxdn => "nxdn",
             Self::P25 => "p25",
+            Self::Pocsag => "pocsag",
+            Self::Aprs => "aprs",
+            Self::Ism => "ism",
+            Self::M17 => "m17",
         }
     }
 }
@@ -483,7 +493,7 @@ impl DigitalBody {
         let max_slot = match self.protocol {
             Protocol::Tetra => 4,
             Protocol::Dmr => 2,
-            Protocol::Dpmr | Protocol::P25 => 0,
+            _ => 0,
         };
         if self.timeslot.is_some() && max_slot == 0 {
             return Err("digital.timeslot is only valid for tetra and dmr");
@@ -1051,6 +1061,32 @@ mod tests {
             r#""tone_mode":"pl""#,
         ] {
             assert!(parse(&format!("{{{base},{bad}}}")).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn every_digital_picker_mode_is_a_protocol() {
+        let base = r#""name":"a","freq_hz":1"#;
+        for id in [
+            "tetra", "dmr", "dpmr", "nxdn", "p25", "pocsag", "aprs", "ism", "m17",
+        ] {
+            let ok = parse(&format!(
+                r#"{{{base},"digital":{{"protocol":"{id}","decoder_plugin_id":"org.x.y"}}}}"#
+            ))
+            .expect(id);
+            assert_eq!(ok.digital.map(|d| d.protocol).as_deref(), Some(id));
+        }
+        // Only TETRA and DMR have timeslots, only DMR a colour code.
+        for bad in [
+            r#"{"protocol":"pocsag","timeslot":1}"#,
+            r#"{"protocol":"nxdn","timeslot":1}"#,
+            r#"{"protocol":"aprs","colour_code":1}"#,
+            r#"{"protocol":"dab"}"#,
+        ] {
+            assert!(
+                parse(&format!(r#"{{{base},"digital":{bad}}}"#)).is_err(),
+                "{bad}"
+            );
         }
     }
 

@@ -43,6 +43,8 @@ export interface AnnotationTarget {
   stepHz?: number;
   /** CTCSS tone squelch in Hz; null switches it off. Only set for NFM / AM capable targets. */
   toneSquelchHz?: number | null;
+  /** Protocol id of a bookmark's digital channel; a Digital picker mode of that id is started. */
+  digital?: string;
 }
 
 export interface BarItem {

@@ -21,6 +21,7 @@ import type { LevelController } from "./levels";
 import { SpectrumInteraction } from "./interaction";
 import { CANVAS_BG } from "./palette";
 import { AXIS_HEIGHT, PLOT_LEFT_PAD, SpectrumPlot } from "./plot";
+import { CentreBar } from "./CentreBar";
 import { snapClick } from "./preview";
 import { getWheelMode } from "./wheelMode";
 import { SpectrumSocket, clampBins, type SocketStatus } from "./socket";
@@ -99,6 +100,7 @@ export function SpectrumView({
   const waterfallRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const waterfallNoticeRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<ViewController | null>(null);
   const [plotHeight, setPlotHeight] = useState(loadPlotHeight);
   // Callbacks and values read by long-running listeners come from here, not from effect deps.
   const live = useRef({ step, registerView, onStatus, onInfo, onError, onAnnotationTune });
@@ -173,6 +175,7 @@ export function SpectrumView({
     const view = new ViewController({
       apply: (span) => socket.setView(span ? { startHz: span.startHz, endHz: span.endHz } : {}),
     });
+    viewRef.current = view;
     interaction = new SpectrumInteraction({
       canvas: overlay,
       leftPad: PLOT_LEFT_PAD,
@@ -285,6 +288,7 @@ export function SpectrumView({
       waterfall?.redraw();
     });
     return () => {
+      viewRef.current = null;
       live.current.registerView({ reset: () => undefined, zoom: () => undefined });
       offTuning();
       offVfos();
@@ -365,8 +369,16 @@ export function SpectrumView({
       >
         <span className="h-px w-full bg-zinc-800 transition-colors duration-150 group-hover/split:bg-indigo-400 group-focus-visible/split:bg-indigo-400" />
       </div>
-      <div className="relative min-h-24 flex-1" style={{ marginLeft: PLOT_LEFT_PAD }}>
-        <canvas ref={waterfallRef} className="block size-full" />
+      <div
+        className="relative min-h-24 flex-1 overflow-hidden"
+        style={{ marginLeft: PLOT_LEFT_PAD }}
+      >
+        <canvas ref={waterfallRef} className="block size-full will-change-transform" />
+        <CentreBar
+          tuning={tuning}
+          getSpan={() => viewRef.current?.shown() ?? null}
+          getPreview={() => waterfallRef.current}
+        />
         <div
           ref={waterfallNoticeRef}
           hidden
