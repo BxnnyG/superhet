@@ -14,7 +14,21 @@ export type DcsPolarity = "N" | "R";
  * decoder yet). Loading a bookmark with one of the picker ids starts that mode.
  */
 export type DigitalProtocol =
-  "tetra" | "dmr" | "dpmr" | "nxdn" | "p25" | "pocsag" | "aprs" | "ism" | "m17";
+  | "tetra"
+  | "dmr"
+  | "dpmr"
+  | "nxdn"
+  | "p25"
+  | "pocsag"
+  | "aprs"
+  | "ism"
+  | "m17"
+  | "ft8"
+  | "ft4"
+  | "wspr"
+  | "ais"
+  | "acars"
+  | "vdl2";
 
 export const DIGITAL_PROTOCOLS: readonly DigitalProtocol[] = [
   "pocsag",
@@ -25,6 +39,12 @@ export const DIGITAL_PROTOCOLS: readonly DigitalProtocol[] = [
   "dpmr",
   "nxdn",
   "tetra",
+  "ais",
+  "acars",
+  "vdl2",
+  "ft8",
+  "ft4",
+  "wspr",
   "p25",
 ];
 export const PROTOCOL_LABEL: Record<DigitalProtocol, string> = {
@@ -37,6 +57,12 @@ export const PROTOCOL_LABEL: Record<DigitalProtocol, string> = {
   aprs: "APRS",
   ism: "ISM",
   m17: "M17",
+  ft8: "FT8",
+  ft4: "FT4",
+  wspr: "WSPR",
+  ais: "AIS",
+  acars: "ACARS",
+  vdl2: "VDL2",
 };
 /** Highest timeslot number per protocol (0 = the protocol has no timeslots in the model). */
 export const MAX_TIMESLOT: Record<DigitalProtocol, number> = {
@@ -49,6 +75,12 @@ export const MAX_TIMESLOT: Record<DigitalProtocol, number> = {
   aprs: 0,
   ism: 0,
   m17: 0,
+  ft8: 0,
+  ft4: 0,
+  wspr: 0,
+  ais: 0,
+  acars: 0,
+  vdl2: 0,
 };
 /** Protocols whose channels have talkgroups / group ids; the others are plain frequencies. */
 export const HAS_TALKGROUP: ReadonlySet<DigitalProtocol> = new Set<DigitalProtocol>([

@@ -715,6 +715,12 @@ describe("saving a bookmark", () => {
       "dPMR",
       "NXDN",
       "TETRA",
+      "AIS",
+      "ACARS",
+      "VDL2",
+      "FT8",
+      "FT4",
+      "WSPR",
       "P25",
     ]);
     // Plain frequency modes have no talkgroup.

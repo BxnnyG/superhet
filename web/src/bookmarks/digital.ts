@@ -16,21 +16,18 @@ import {
   type DigitalProtocol,
 } from "./model";
 
-/**
- * Whether a picker mode can be stored in a bookmark. AIS, ACARS and VDL2 cannot yet: the stored
- * protocol list is a database constraint (migration 0020) that a migration would have to extend
- * (ADR-0031); a bookmark saved while one of them runs is a plain analogue bookmark.
- */
-const storable = (id: string): id is DigitalProtocol =>
-  (DIGITAL_PROTOCOLS as readonly string[]).includes(id);
-
 /** The picker mode a stored protocol id stands for (P25 and unknown ids have none). */
 export const modeOfProtocol = (protocol: string): DigitalMode | null =>
   DIGITAL_MODES.find((m) => m.id === protocol) ?? null;
 
-/** The digital channel that records "this mode on this frequency". */
+const isProtocol = (id: string): id is DigitalProtocol => DIGITAL_PROTOCOLS.some((p) => p === id);
+
+/**
+ * The digital channel that records "this mode on this frequency"; null for a mode whose id is not
+ * a stored protocol (none of the picker's modes today: migration 0021 added the last six).
+ */
 export function channelOf(mode: DigitalMode): DigitalChannel | null {
-  if (!storable(mode.id)) return null;
+  if (!isProtocol(mode.id)) return null;
   return {
     protocol: mode.id,
     timeslot: null,

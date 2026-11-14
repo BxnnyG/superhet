@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { FT8_PLUGIN_ID as FT8_ID } from "../ft8/model";
 import { instance } from "../plugins/testing";
 import {
   DIGITAL_MODES,
+  digitalModeOfInstance,
   digitalModeOfPlugin,
   digitalOnVfo,
   expectText,
@@ -22,9 +24,13 @@ describe("digital modes", () => {
       "ais",
       "acars",
       "vdl2",
+      "ft8",
+      "ft4",
+      "wspr",
     ]);
     for (const m of DIGITAL_MODES) {
-      expect(m.vfo.mode).toBe("nfm");
+      // The weak-signal modes decode the audio of an upper-sideband receiver.
+      expect(m.vfo.mode).toBe(["ft8", "ft4", "wspr"].includes(m.id) ? "usb" : "nfm");
       expect(m.vfo.squelchDbfs).toBeNull();
       // DMR, dPMR and NXDN share one plugin; the first of them stands for it.
       expect(digitalModeOfPlugin(m.pluginId)?.pluginId).toBe(m.pluginId);
@@ -44,6 +50,23 @@ describe("digital modes", () => {
     // M17 has no calling frequency to suggest.
     expect(DIGITAL_MODES.find((m) => m.id === "m17")?.hints).toEqual([]);
     expect(suggestDigital(145_500_000)).toBeNull();
+  });
+
+  it("suggests FT8, FT4 and WSPR on their dial frequencies", () => {
+    expect(suggestDigital(14_074_000)?.mode.id).toBe("ft8");
+    expect(suggestDigital(14_080_000)?.mode.id).toBe("ft4");
+    expect(suggestDigital(14_095_600)?.mode.id).toBe("wspr");
+    expect(suggestDigital(144_174_000)?.mode.id).toBe("ft8");
+    expect(suggestDigital(14_150_000)).toBeNull();
+  });
+
+  it("tells FT8, FT4 and WSPR instances of one plugin apart by their config", () => {
+    const of = (mode: string) =>
+      digitalModeOfInstance(instance({ plugin_id: FT8_ID, config: { mode } }))?.id;
+    expect(of("ft8")).toBe("ft8");
+    expect(of("ft4")).toBe("ft4");
+    expect(of("wspr")).toBe("wspr");
+    expect(digitalModeOfInstance(instance({ plugin_id: FT8_ID, config: {} }))?.id).toBe("ft8");
   });
 
   it("finds the digital instances of one VFO", () => {

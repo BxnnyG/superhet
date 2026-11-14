@@ -402,6 +402,12 @@ enum Protocol {
     Aprs,
     Ism,
     M17,
+    Ft8,
+    Ft4,
+    Wspr,
+    Ais,
+    Acars,
+    Vdl2,
 }
 
 impl Protocol {
@@ -416,6 +422,12 @@ impl Protocol {
             Self::Aprs => "aprs",
             Self::Ism => "ism",
             Self::M17 => "m17",
+            Self::Ft8 => "ft8",
+            Self::Ft4 => "ft4",
+            Self::Wspr => "wspr",
+            Self::Ais => "ais",
+            Self::Acars => "acars",
+            Self::Vdl2 => "vdl2",
         }
     }
 }
@@ -1068,7 +1080,8 @@ mod tests {
     fn every_digital_picker_mode_is_a_protocol() {
         let base = r#""name":"a","freq_hz":1"#;
         for id in [
-            "tetra", "dmr", "dpmr", "nxdn", "p25", "pocsag", "aprs", "ism", "m17",
+            "tetra", "dmr", "dpmr", "nxdn", "p25", "pocsag", "aprs", "ism", "m17", "ft8", "ft4",
+            "wspr", "ais", "acars", "vdl2",
         ] {
             let ok = parse(&format!(
                 r#"{{{base},"digital":{{"protocol":"{id}","decoder_plugin_id":"org.x.y"}}}}"#

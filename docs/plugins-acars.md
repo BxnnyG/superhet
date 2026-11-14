@@ -73,14 +73,15 @@ common signalling channel and always active near airports; Europe also 136.725, 
 - **The events are what the tools print.** Fields can differ between acarsdec and dumpvdl2 versions;
   the adapter reads the keys of acarsdec 4.7 and dumpvdl2 2.7 and ignores what it does not know.
   The decoded ARINC 622 / X.25 tree is passed on as it is, not interpreted.
-- **Not saved with bookmarks** (see ADR-0031), like AIS.
+- **Bookmarks** save and restore both modes (migration 0021).
 - **Aircraft messages are third-party data** (see below). Do not feed them anywhere public.
 
 ## Privacy and law
 
 ACARS and VDL2 are not meant for the public. Receiving them is allowed for hobby use in many
-countries and restricted in others; in Germany reading messages that are not meant for you is
-restricted by section 201 StGB and the TKG, so check the rules where you live. ACARS text can
+countries and restricted in others; in Germany the eavesdropping ban of section 5 TDDDG (formerly
+TTDSG) forbids listening to or passing on the content of radio traffic that is not meant for
+you or the public, so check the rules where you live. ACARS text can
 contain passenger or crew names, positions, maintenance data and company information. The decoder
 history keeps the messages until the retention period ends (`SUPERHET_EVENT_RETENTION_DAYS`), and
 they are visible to everybody who may see decoders (guests if the guest policy allows). The install

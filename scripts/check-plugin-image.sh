@@ -107,4 +107,29 @@ for entry in "acars 480000 131725000" "vdl2 840000 136975000"; do
         fail=1
     fi
 done
+# FT8 / WSPR: jt9 and wsprd (WSJT-X, copied from the Debian package) must have all their libraries
+# and decode a synthetic slot through the adapter. The stream clock is the sample count from
+# 2026-11-14T12:00:00Z, so the slot is aligned without waiting. Needs python3 on the host.
+for tool in jt9 wsprd; do
+    if docker run --rm --entrypoint sh "$image" -c "! ldd /usr/bin/$tool | grep -q 'not found'"; then
+        echo "ok   $tool links"
+    else
+        echo "FAIL $tool is missing or lacks a library"
+        docker run --rm --entrypoint sh "$image" -c "ldd /usr/bin/$tool | grep 'not found'" || true
+        fail=1
+    fi
+done
+for case in "ft8 CQ DL1ABC JO62" "wspr K1ABC FN42 37"; do
+    mode="${case%% *}"
+    expected="${case#* }"
+    got="$(python3 -I scripts/gen-ft8-audio.py "$mode" | docker run --rm -i --entrypoint superhet-plugin-adapter \
+        -e "SUPERHET_CONFIG={\"mode\":\"$mode\"}" -e SUPERHET_FT8_STREAM_START_MS=1794657600000 \
+        "$image" ft8 | jq -r '.data.message' 2>/dev/null || true)"
+    if [ "$got" = "$expected" ]; then
+        echo "ok   $mode: jt9 / wsprd decode a synthetic slot ($got)"
+    else
+        echo "FAIL $mode: expected '$expected', got '${got:-nothing}'"
+        fail=1
+    fi
+done
 exit "$fail"

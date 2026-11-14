@@ -61,10 +61,11 @@ in the output dock (ADR-0022 era "digital modes").
    button when the ADS-B decoder currently sees the aircraft: by ICAO address (VDL2) or by
    registration through the imported aircraft database (ACARS, ADR-0026). The ADS-B overlay
    takes the aircraft to select from its store (`focus`), no new endpoint.
-7. **No database migration.** Digital modes of bookmarks are a database check constraint
-   (migration 0020). AIS, ACARS and VDL2 do not extend it: a bookmark saved while one of them
-   runs is a plain analogue bookmark, and loading it does not start the decoder. Extending the
-   constraint, the API enum and the export formats is a small follow-up when it is wanted.
+7. **Bookmarks store the new modes.** The digital modes of bookmarks are a database check
+   constraint (migration 0020). Migration 0021 extends it with `ais`, `acars`, `vdl2` and the
+   weak-signal modes `ft8`, `ft4`, `wspr` (ADR-0032); the API enum, the web model and the
+   picker bridge (`bookmarks/digital.ts`) follow, so a bookmark saved while one of them runs
+   starts it again when loaded.
 8. **Receiver frequency from the start request.** ACARS and VDL2 need the IQ's centre to
    place their channels. The adapter takes it from `SUPERHET_FREQ_HZ`, the frequency of the
    receiver when the instance was started; there is no channel change on retune, the user restarts
@@ -76,8 +77,8 @@ in the output dock (ADR-0022 era "digital modes").
 
 - The image grows by AIS-catcher (about 1.5 MB), acarsdec (0.1 MB), dumpvdl2 (about 1.5 MB) and
   libacars with libcjson/glib shared libraries; the build stages need network access to GitHub.
-- Receiving ACARS/VDL2 is legally sensitive in some countries (Germany: section 201 StGB / TKG
-  for messages not meant for the receiver). The install dialogs say so, installing is an admin
+- Receiving ACARS/VDL2 is legally sensitive in some countries (Germany: the eavesdropping ban of
+  section 5 TDDDG, formerly TTDSG, for radio traffic not meant for the receiver). The install dialogs say so, installing is an admin
   decision, and the history is visible to everybody who may see decoders; operators who share a
   public receiver (share links, ADR-0029) should not enable them. AIS is a public broadcast.
 - No recordings of the three signals are committed. The adapter tests run on stand-in tools and

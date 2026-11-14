@@ -122,3 +122,20 @@ fn tetra() {
     assert_eq!(field(json!({"codec_dir": "/tmp"})), "codec_dir");
     assert_eq!(field(json!({"x": 1})), "x");
 }
+
+#[test]
+fn ft8() {
+    assert_eq!(check("ft8", &json!({})), Ok(()));
+    assert_eq!(
+        check(
+            "ft8",
+            &json!({"mode": "wspr", "depth": 3, "dial_hz": 14_095_600})
+        ),
+        Ok(())
+    );
+    let field = |config: Value| check("ft8", &config).expect_err("refused").0;
+    assert_eq!(field(json!({"mode": "jt65"})), "mode");
+    assert_eq!(field(json!({"depth": 4})), "depth");
+    assert_eq!(field(json!({"dial_hz": 0})), "dial_hz");
+    assert_eq!(field(json!({"x": 1})), "x");
+}

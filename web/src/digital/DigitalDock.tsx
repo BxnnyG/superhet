@@ -359,6 +359,9 @@ const COLUMNS: Record<DigitalMode["id"], readonly [string, string, string]> = {
   ais: ["Vessel", "MMSI · type", "Speed · course · destination"],
   acars: ["Aircraft", "Flight · label", "Text"],
   vdl2: ["Aircraft", "Flight · label", "Text"],
+  ft8: ["Station", "SNR · offset · frequency", "Message"],
+  ft4: ["Station", "SNR · offset · frequency", "Message"],
+  wspr: ["Beacon", "SNR · offset · frequency", "Locator · power · drift"],
 };
 
 function Output({

@@ -1,0 +1,12 @@
+#!/bin/sh
+# Stand-in for jt9 (FT8 / FT4) in tests/ft8_plugin.rs: prints canned decodes named after the WAV file
+# it was given (YYMMDD_HHMMSS.wav). FAKE_FT8_LOG=<file> appends the command line and the WAV size;
+# FAKE_FT8_FAIL=1 exits with status 3 and prints nothing.
+for a; do wav=$a; done
+if [ -n "$FAKE_FT8_LOG" ]; then echo "$* size=$(wc -c < "$wav")" >> "$FAKE_FT8_LOG"; fi
+[ -n "$FAKE_FT8_FAIL" ] && exit 3
+name=$(basename "$wav" .wav)
+t=${name#*_}
+echo "$t  -12 -0.3 1234 ~  CQ DL1ABC JO62                          "
+echo "$t   -7  0.1  800 ~  DL1ABC K1ABC R-05                         "
+echo "<DecodeFinished>   0   1        0"

@@ -66,8 +66,7 @@ receiver is set to 150 kHz bandwidth, squelch off, the plugin starts on it. Tune
   and the regional extensions. Messages with a bad checksum are dropped.
 - **Do not use it for navigation.** AIS-catcher's own disclaimer applies, and the position of a
   vessel can be minutes old when it is shown.
-- **Not saved with bookmarks:** the stored digital protocol is a database constraint that has no
-  AIS yet (ADR-0031); a bookmark made while AIS runs is a plain analogue bookmark.
+- **Bookmarks** save and restore the AIS mode like the other digital modes (migration 0021).
 
 ## Privacy and law
 

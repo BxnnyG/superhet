@@ -59,6 +59,32 @@ export async function enterDigital(
   return "started";
 }
 
+/**
+ * Move a VFO that runs a digital mode to a dial frequency (a band preset) and restart the
+ * decoder there: the plugin takes the dial frequency from its start, and the absolute frequencies
+ * of its spots follow it.
+ */
+export async function retuneDigital(
+  ctx: EnterContext,
+  mode: DigitalMode,
+  freqHz: number,
+): Promise<void> {
+  const { store, device, vfo } = ctx;
+  await store.refreshInstances();
+  const here = digitalOnVfo(store.getSnapshot().instances, device, vfo.id).filter(
+    (h) => h.mode.id === mode.id,
+  );
+  ctx.updateVfo(vfo.id, { ...mode.vfo, freqHz });
+  for (const h of here) await store.stopInstance(h.instance.id);
+  await store.startInstance({
+    pluginId: mode.pluginId,
+    device,
+    vfo: vfo.id,
+    freqHz,
+    ...(mode.config === undefined ? {} : { config: mode.config }),
+  });
+}
+
 /** Stop every digital decoder on a VFO (back to an analog receiver). */
 export async function leaveDigital(
   store: PluginStore,
@@ -72,7 +98,7 @@ export async function leaveDigital(
 
 /**
  * Stop the digital decoder of a VFO when the user moves the receiver to another demodulator. A
- * decoder is only watched after the VFO has been seen in NFM with it, so starting a plugin by
+ * decoder is only watched after the VFO has been seen in its mode (NFM, USB) with it, so starting a plugin by
  * hand on a WFM receiver (and not applying the suggested settings) is left alone.
  */
 export function useLeaveDigitalOnAnalog(
@@ -85,7 +111,7 @@ export function useLeaveDigitalOnAnalog(
   useEffect(() => {
     for (const vfo of vfos) {
       for (const { mode, instance } of digitalOnVfo(instances, device, vfo.id)) {
-        if (vfo.mode === "nfm") {
+        if (vfo.mode === mode.vfo.mode) {
           armed.current.add(instance.id);
         } else if (armed.current.has(instance.id)) {
           armed.current.delete(instance.id);

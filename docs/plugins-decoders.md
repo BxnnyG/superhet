@@ -16,6 +16,7 @@ the host feeds, `docs/plugin-contract.md`) and turns what the tool prints into c
 | `org.superhet.decoder.ais` | AIS-catcher | `iq`, `cu8` 192 kHz (VFO at 162.000 MHz, bandwidth about 150 kHz), vessels on a map | `ais.vessel` (own page: `docs/plugins-ais.md`) |
 | `org.superhet.decoder.acars` | acarsdec | `iq`, `cu8` 240 kHz (VFO on an ACARS channel, bandwidth about 200 kHz) | `acars.message` (own page: `docs/plugins-acars.md`) |
 | `org.superhet.decoder.vdl2` | dumpvdl2 | `iq`, `cu8` 420 kHz (VFO on a VDL2 channel, bandwidth about 300 kHz) | `vdl2.message` (own page: `docs/plugins-acars.md`) |
+| `org.superhet.decoder.ft8` | jt9, wsprd (WSJT-X) | `audio`, `s16le` 12 kHz (USB VFO on the dial frequency), UTC time slots cut by the adapter | `ft8.message`, `wspr.spot` (own page: `docs/plugins-ft8.md`) |
 
 All events land in the decoder history (`source` = plugin id, `kind` = event type, `value` = the
 `summary` field; `docs/api-decoder-events.md`). Event schemas: `plugins/<name>/schema/events.json`.

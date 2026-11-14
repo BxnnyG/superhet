@@ -52,7 +52,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libopus-dev
       # External decoders of the first-party plugins (golden tests, crates/superhet-plugin-adapters).
       - name: Install plugin decoders
-        run: sudo apt-get install -y --no-install-recommends multimon-ng direwolf rtl-433
+        run: sudo apt-get install -y --no-install-recommends multimon-ng direwolf rtl-433 wsjtx
       # m17-demod (M17 plugin) is not packaged: build it with the Dockerfile stage `m17` and put a
       # wrapper that runs it in that container on PATH.
       - name: Build m17-demod
