@@ -1,0 +1,8 @@
+#!/bin/sh
+# Stand-in for acarsdec in tests/datalink_plugins.rs: records its command line and the number of
+# bytes it got on stdin (FAKE_ARGS_OUT, FAKE_STDIN_OUT) and prints the JSON lines of sample.jsonl.
+[ -n "$FAKE_ARGS_OUT" ] && printf "%s\n" "$*" > "$FAKE_ARGS_OUT"
+cat "$(dirname "$0")/sample.jsonl"
+bytes=$(cat | wc -c)
+[ -n "$FAKE_STDIN_OUT" ] && echo "$bytes" > "$FAKE_STDIN_OUT"
+exit 0

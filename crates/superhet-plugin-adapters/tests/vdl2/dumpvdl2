@@ -1,0 +1,10 @@
+#!/bin/sh
+# Stand-in for dumpvdl2 in tests/datalink_plugins.rs: records its command line and the number of
+# bytes it got on stdin (FAKE_ARGS_OUT, FAKE_STDIN_OUT), prints its startup notes on stderr and the
+# JSON lines of sample.jsonl on stdout.
+[ -n "$FAKE_ARGS_OUT" ] && printf "%s\n" "$*" > "$FAKE_ARGS_OUT"
+echo "Sampling rate set to 420000 sps" >&2
+cat "$(dirname "$0")/sample.jsonl"
+bytes=$(cat | wc -c)
+[ -n "$FAKE_STDIN_OUT" ] && echo "$bytes" > "$FAKE_STDIN_OUT"
+exit 0

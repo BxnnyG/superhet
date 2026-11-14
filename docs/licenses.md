@@ -18,9 +18,10 @@ External components run as **separate processes** (plugins) or are **dynamically
 | readsb (wiedehopf) | ADS-B plugin | GPL-3.0 (+ BSD parts) | runtime image (built from a pinned upstream commit in the Dockerfile, separate process, `docs/third-party.md`) | – |
 | Leaflet | ADS-B map (web UI) | BSD-2-Clause | npm, bundled into the web build | – |
 | OpenStreetMap tiles | ADS-B map | ODbL (data), tile usage policy | loaded by the viewer's browser, attribution on the map | – |
-| AIS-catcher | AIS plugin | GPL-3.0 | plugin image | – |
-| acarsdec (f00b4r0 fork) | ACARS plugin | GPL-2.0 | plugin image | original TLeconte repo archived |
-| dumpvdl2 | VDL2 plugin | GPL-3.0 | plugin image | – |
+| AIS-catcher | AIS plugin (`docs/plugins-ais.md`) | GPL-3.0 | runtime image (built from a pinned upstream commit in the Dockerfile, separate process, `docs/third-party.md`) | ADR-0031 |
+| acarsdec (f00b4r0 fork) | ACARS plugin (`docs/plugins-acars.md`) | GPL-2.0 | runtime image (built from a pinned upstream commit in the Dockerfile, separate process, `docs/third-party.md`) | original TLeconte repo archived; ADR-0031 |
+| dumpvdl2 | VDL2 plugin (`docs/plugins-acars.md`) | GPL-3.0 | runtime image (built from a pinned upstream commit in the Dockerfile, separate process, `docs/third-party.md`) | ADR-0031 |
+| libacars | ACARS and VDL2 plugins (ARINC 622 decoding) | MIT | runtime image (built from a pinned upstream commit in the Dockerfile, dynamic library) | ADR-0031 |
 | redsea | RDS plugin | MIT | plugin image | – |
 | dsd-fme | DMR / dPMR / NXDN plugin (`docs/plugins-dsd.md`) | ISC/GPL mix – verify | **user-installed, not in the repository, image or releases** (links mbelib); the plugin only runs it as a separate process | ADR-0005, ADR-0018 |
 | digiham | digital voice plugin (candidate) | GPL-3.0 | plugin image | little maintenance since 2024 |

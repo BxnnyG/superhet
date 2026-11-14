@@ -24,7 +24,7 @@ Status: protocol version `1`. Plugin `plugin.protocol` must equal it; incompatib
 | Events durable and in the decoder history | done (JetStream `EVENTS`, stored by the worker) |
 | Process-group kill on stop / crash | done |
 | Admin API in `superhet-api` (`docs/api-plugins.md`) | done |
-| First plugins: POCSAG/FLEX, APRS, rtl_433 (`docs/plugins-decoders.md`), DAB/DAB+ (`docs/plugins-dab.md`), ADS-B (`docs/plugins-adsb.md`), M17 digital voice (`docs/plugins-m17.md`, the first non-exclusive plugin with audio output), bundled in the image and installed on first start | done |
+| First plugins: POCSAG/FLEX, APRS, rtl_433 (`docs/plugins-decoders.md`), DAB/DAB+ (`docs/plugins-dab.md`), ADS-B (`docs/plugins-adsb.md`), M17 digital voice (`docs/plugins-m17.md`, the first non-exclusive plugin with audio output), AIS ships (`docs/plugins-ais.md`), ACARS and VDL Mode 2 (`docs/plugins-acars.md`; ADR-0031), bundled in the image and installed on first start | done |
 | Web UI (admin console, VFO picker, events) | done, `docs/plugins-ui.md` |
 | Container plugins, install from Git URL, resource limits | not yet (P3) |
 

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { DIGITAL_MODES } from "../digital/modes";
+import { AIS_PLUGIN_ID } from "../ais/format";
+import { ACARS_PLUGIN_ID } from "../datalink/model";
+import { DIGITAL_MODES, digitalMode } from "../digital/modes";
 import { DSD_PLUGIN_ID } from "../dsd/model";
 import { instance } from "../plugins/testing";
 import type { Vfo } from "../vfo/api";
@@ -34,15 +36,29 @@ const saved = (id: string, over: Partial<Bookmark> = {}): Bookmark => ({
   ...over,
 });
 
+/** Picker modes the stored protocol list (a database constraint, ADR-0031) does not know yet. */
+const NOT_STORED: readonly string[] = ["ais", "acars", "vdl2"];
+
 describe("digital modes in bookmarks", () => {
   it("offers every mode of the Digital picker as a protocol", () => {
-    for (const m of DIGITAL_MODES) {
+    for (const m of DIGITAL_MODES.filter((m) => !NOT_STORED.includes(m.id))) {
       expect(DIGITAL_PROTOCOLS).toContain(m.id);
       expect(PROTOCOL_LABEL[m.id as keyof typeof PROTOCOL_LABEL]).toBe(m.label);
       expect(modeOfProtocol(m.id)?.pluginId).toBe(m.pluginId);
     }
     // P25 is stored but has no decoder to start.
     expect(modeOfProtocol("p25")).toBeNull();
+  });
+
+  it("saves a bookmark made while AIS or ACARS runs as an analogue one", () => {
+    expect(channelOf(digitalMode("ais"))).toBeNull();
+    expect(channelOf(digitalMode("vdl2"))).toBeNull();
+    const ais = instance({ plugin_id: AIS_PLUGIN_ID, vfo: 1 });
+    const acars = instance({ id: "i-2", plugin_id: ACARS_PLUGIN_ID, vfo: 1 });
+    expect(activeChannel([ais, acars], "dev0", 1)).toBeNull();
+    // A storable mode on the same receiver still wins.
+    const pocsag = instance({ id: "i-3", vfo: 1 });
+    expect(activeChannel([ais, pocsag], "dev0", 1)?.protocol).toBe("pocsag");
   });
 
   it("saves the digital mode running on the VFO and restores it from the bookmark", () => {

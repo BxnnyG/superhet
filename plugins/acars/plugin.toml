@@ -1,0 +1,38 @@
+# ACARS aircraft datalink (VHF, 129 to 132 MHz, 2400 baud AM-MSK), decoded by acarsdec (a separate
+# GPL-2.0 process). Non-exclusive: bind it to a VFO on an ACARS channel (131.525, 131.725, 131.825
+# and 131.850 MHz in Europe, 131.550 MHz in North America) with a bandwidth of about 200 kHz. The
+# VFO's frequency is the channel decoded and the centre of the IQ; more channels within +-100 kHz
+# of it can be added. Messages are events (`acars.message`). Config (all optional):
+#   frequencies_mhz = [131.725, 131.825]   # channels to decode (default: the VFO's frequency)
+#   include_empty = false                  # also report messages without text (acknowledgements)
+# The centre is read when the decoder starts: after retuning the VFO, restart the decoder.
+
+[plugin]
+id = "org.superhet.decoder.acars"
+name = "ACARS messages"
+version = "0.1.0"
+protocol = 1
+license = "AGPL-3.0-only"
+type = "decoder"
+description = "ACARS aircraft datalink: flight, registration, label and text of the messages"
+homepage = "https://github.com/BxnnyG/superhet"
+
+[runtime]
+kind = "process"
+transport = "simple"
+command = ["superhet-plugin-adapter", "acars"]
+
+[input]
+kind = "iq"
+sample_rate = 240000
+format = "cu8"
+bandwidth_hz = 200000
+
+[output]
+events_schema = "schema/events.json"
+
+[config]
+schema = "schema/config.json"
+
+[install]
+acknowledge = { text = "Runs acarsdec (GPL-2.0) as a separate process. ACARS messages are plain text sent by aircraft and airline ground stations; they can contain flight numbers, registrations, positions, crew information and maintenance data. Whether receiving and storing them is allowed depends on the country (in Germany reading messages that are not meant for you is restricted by section 201 StGB and the TKG; many countries allow it for hobby use, check the rules where you live). Decoded messages are kept in the decoder history until the retention period ends and are visible to everybody who may see decoders.", url = "https://github.com/f00b4r0/acarsdec" }

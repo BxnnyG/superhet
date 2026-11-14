@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VDL Mode 2 instance configuration",
+  "type": "object",
+  "properties": {
+    "frequencies_mhz": {
+      "description": "Channels to decode in MHz, all within 135 kHz of the receiver's frequency. Default: the receiver's own frequency.",
+      "type": "array",
+      "items": { "type": "number", "minimum": 100, "maximum": 160 },
+      "minItems": 1,
+      "maxItems": 8
+    },
+    "all_frames": {
+      "description": "Also report link management frames (XID, supervisory frames) that carry no message.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACARS events",
+  "description": "Validated against the complete event object (envelope included).",
+  "oneOf": [
+    {
+      "properties": {
+        "type": { "const": "acars.message" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "freq_mhz": { "type": "number" },
+            "level": { "type": "number" },
+            "noise": { "type": "number" },
+            "errors_corrected": { "type": "integer", "minimum": 0 },
+            "mode": { "type": "string" },
+            "label": { "type": "string", "minLength": 1 },
+            "block_id": { "type": "string" },
+            "direction": { "enum": ["uplink", "downlink"] },
+            "ack": { "type": "string" },
+            "tail": { "type": "string", "minLength": 1 },
+            "flight": { "type": "string", "minLength": 1 },
+            "msgno": { "type": "string" },
+            "text": { "type": "string" },
+            "end": { "type": "boolean" },
+            "decoded": {},
+            "summary": { "type": "string" }
+          },
+          "required": ["label", "summary"]
+        }
+      },
+      "required": ["type", "data"]
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+# VDL Mode 2 aircraft datalink (VHF, 136.6 to 137 MHz, 10.5 kbaud D8PSK), decoded by dumpvdl2 (a
+# separate GPL-3.0 process, with libacars). Non-exclusive: bind it to a VFO on a VDL2 channel (the
+# common signalling channel is 136.975 MHz; 136.725, 136.775, 136.825 and 136.875 MHz are the
+# others in Europe) with a bandwidth of about 300 kHz. The VFO's frequency is the channel decoded
+# and the centre of the IQ; more channels within +-135 kHz of it can be added. Messages are events
+# (`vdl2.message`). Config (all optional):
+#   frequencies_mhz = [136.725, 136.975]   # channels to decode (default: the VFO's frequency)
+#   all_frames = false                     # also report link management frames (XID, ...)
+# The centre is read when the decoder starts: after retuning the VFO, restart the decoder.
+
+[plugin]
+id = "org.superhet.decoder.vdl2"
+name = "VDL Mode 2"
+version = "0.1.0"
+protocol = 1
+license = "AGPL-3.0-only"
+type = "decoder"
+description = "VDL Mode 2 aircraft datalink: ACARS over VDL2, ADS-C and CPDLC, with the aircraft's ICAO address"
+homepage = "https://github.com/BxnnyG/superhet"
+
+[runtime]
+kind = "process"
+transport = "simple"
+command = ["superhet-plugin-adapter", "vdl2"]
+
+[input]
+kind = "iq"
+sample_rate = 420000
+format = "cu8"
+bandwidth_hz = 300000
+
+[output]
+events_schema = "schema/events.json"
+
+[config]
+schema = "schema/config.json"
+
+[install]
+acknowledge = { text = "Runs dumpvdl2 (GPL-3.0) with libacars (MIT) as separate processes. VDL2 messages are sent by aircraft and airline ground stations; they can contain flight numbers, registrations, positions, controller-pilot messages and maintenance data. Whether receiving and storing them is allowed depends on the country (in Germany reading messages that are not meant for you is restricted by section 201 StGB and the TKG; many countries allow it for hobby use, check the rules where you live). Decoded messages are kept in the decoder history until the retention period ends and are visible to everybody who may see decoders.", url = "https://github.com/szpajder/dumpvdl2" }

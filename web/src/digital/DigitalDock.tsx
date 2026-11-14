@@ -1,5 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import type { AdsbStore } from "../adsb/store";
 import { usePermissions } from "../auth/context";
+import { findAircraft, type AircraftRef } from "../datalink/model";
 import { describeEvent } from "../decoders/render";
 import { formatMhz, formatTime, type DecoderEvent } from "../decoders/events";
 import { DecoderEventStore } from "../decoders/store";
@@ -44,6 +46,7 @@ import { useLeaveDigitalOnAnalog } from "./actions";
 import { digitalModeOfInstance, digitalOnVfo, expectText, type DigitalMode } from "./modes";
 
 const AprsMapView = lazy(() => import("./AprsMapView").then((m) => ({ default: m.AprsMapView })));
+const AisMapView = lazy(() => import("../ais/AisMapView").then((m) => ({ default: m.AisMapView })));
 
 /** How often the dock asks the host for fresh counters. */
 export const DOCK_POLL_MS = 1500;
@@ -66,6 +69,8 @@ interface Props {
   selectedId: number | null;
   /** Event store of the output table (tests inject one without a network). */
   createEvents?: (device: string) => DecoderEventStore;
+  /** The ADS-B picture, so a datalink message can show the aircraft it is about on the map. */
+  adsb?: AdsbStore;
 }
 
 /**
@@ -79,7 +84,7 @@ interface Props {
  * device, whichever receiver they have selected, with no start / stop / settings. The voice
  * itself plays through the normal audio mix.
  */
-export function DigitalDock({ plugins, device, vfos, selectedId, createEvents }: Props) {
+export function DigitalDock({ plugins, device, vfos, selectedId, createEvents, adsb }: Props) {
   const perms = usePermissions();
   const snap = useSyncExternalStore(plugins.subscribe, plugins.getSnapshot);
   useLeaveDigitalOnAnalog(plugins, device, vfos, perms.canUsePlugins ? snap.instances : []);
@@ -107,6 +112,7 @@ export function DigitalDock({ plugins, device, vfos, selectedId, createEvents }:
       plugins={plugins}
       device={device}
       createEvents={createEvents}
+      adsb={adsb}
     />
   );
 }
@@ -144,6 +150,7 @@ interface PanelProps {
   plugins: PluginStore;
   device: string;
   createEvents: Props["createEvents"];
+  adsb: Props["adsb"];
 }
 
 function DockPanel({
@@ -156,6 +163,7 @@ function DockPanel({
   plugins,
   device,
   createEvents,
+  adsb,
 }: PanelProps) {
   const [open, setOpenState] = useState(readOpen);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -331,6 +339,7 @@ function DockPanel({
             m17={mode.id === "m17" ? m17 : null}
             dsd={mode.pluginId === DSD_PLUGIN_ID ? dsd : null}
             tetra={mode.pluginId === TETRA_PLUGIN_ID ? tetra : null}
+            adsb={adsb}
           />
         </div>
       )}
@@ -347,6 +356,9 @@ const COLUMNS: Record<DigitalMode["id"], readonly [string, string, string]> = {
   dpmr: ["Call", "Colour code", "Duration · encryption"],
   nxdn: ["Call", "RAN", "Duration · encryption"],
   tetra: ["Call · message", "Channel · encryption", "Duration · text"],
+  ais: ["Vessel", "MMSI · type", "Speed · course · destination"],
+  acars: ["Aircraft", "Flight · label", "Text"],
+  vdl2: ["Aircraft", "Flight · label", "Text"],
 };
 
 function Output({
@@ -361,6 +373,7 @@ function Output({
   m17,
   dsd,
   tetra,
+  adsb,
 }: {
   mode: DigitalMode;
   instance: PluginInstance;
@@ -376,6 +389,8 @@ function Output({
   dsd: { status: DsdStatus; stale: boolean } | null;
   /** TETRA only: the plugin's status poll. */
   tetra: { status: TetraStatus; stale: boolean } | null;
+  /** ACARS / VDL2: the ADS-B picture the messages are linked to. */
+  adsb: AdsbStore | undefined;
 }) {
   // A private event store for the panel: history of this plugin plus the live feed.
   const store = useMemo(
@@ -406,7 +421,11 @@ function Output({
     .slice(0, MAX_ROWS);
   const [h1, h2, h3] = COLUMNS[mode.id];
   const [view, setView] = useState<"list" | "map">("list");
-  const hasMap = mode.id === "aprs";
+  const hasMap = mode.id === "aprs" || mode.id === "ais";
+  const MapView = mode.id === "ais" ? AisMapView : AprsMapView;
+  // Datalink messages that name an aircraft the ADS-B decoder currently sees get a button.
+  const linkable = mode.id === "acars" || mode.id === "vdl2";
+  const aircraftFor = useAircraftLinks(linkable ? adsb : undefined);
   const mapEvents = useMemo(
     () => (hasMap ? snap.events.filter((e) => e.meta.instance === instance.id) : []),
     [hasMap, snap.events, instance.id],
@@ -456,7 +475,7 @@ function Output({
         <div className="flex items-center gap-2 px-3 py-1.5">
           <SegmentedControl
             size="sm"
-            aria-label="APRS view"
+            aria-label={`${mode.label} view`}
             value={view}
             onChange={setView}
             options={[
@@ -474,7 +493,7 @@ function Output({
             </p>
           }
         >
-          <AprsMapView events={mapEvents} />
+          <MapView events={mapEvents} />
         </Suspense>
       ) : rows.length === 0 ? (
         <div className="px-4 py-5 text-sm text-fg-muted" data-testid="dock-empty">
@@ -510,7 +529,7 @@ function Output({
             </span>
           </div>
           {rows.map((e) => (
-            <Row key={e.id} event={e} />
+            <Row key={e.id} event={e} aircraftFor={aircraftFor} />
           ))}
         </div>
       )}
@@ -518,8 +537,45 @@ function Output({
   );
 }
 
-function Row({ event }: { event: DecoderEvent }) {
+/**
+ * `ref -> the ICAO address of that aircraft on the ADS-B map, or null`, for ACARS and VDL2 rows.
+ * Re-evaluated when the ADS-B picture or the aircraft database lookups change.
+ */
+function useAircraftLinks(
+  adsb: AdsbStore | undefined,
+): ((ref: AircraftRef | null | undefined) => { icao: string; open: () => void } | null) | null {
+  const snap = useSyncExternalStore(
+    adsb?.subscribe ?? noSubscribe,
+    adsb?.getSnapshot ?? noSnapshot,
+  );
+  useSyncExternalStore(adsb?.info.subscribe ?? noSubscribe, adsb?.info.getSnapshot ?? noVersion);
+  const aircraft = snap?.reply?.status?.aircraft ?? [];
+  // Registrations (for ACARS, which names no address) come from the imported aircraft database.
+  const icaos = aircraft.map((a) => a.icao).join(",");
+  useEffect(() => {
+    if (adsb !== undefined && icaos !== "") adsb.info.request(icaos.split(","), []);
+  }, [adsb, icaos]);
+  if (adsb === undefined || aircraft.length === 0) return null;
+  return (ref) => {
+    if (ref === null || ref === undefined) return null;
+    const hit = findAircraft(aircraft, (icao) => adsb.info.aircraftInfo(icao), ref);
+    return hit === null ? null : { icao: hit.icao, open: () => adsb.openViewOn(hit.icao) };
+  };
+}
+
+const noSubscribe = (): (() => void) => () => {};
+const noSnapshot = (): undefined => undefined;
+const noVersion = (): number => 0;
+
+function Row({
+  event,
+  aircraftFor,
+}: {
+  event: DecoderEvent;
+  aircraftFor: ReturnType<typeof useAircraftLinks>;
+}) {
   const v = describeEvent(event);
+  const onMap = aircraftFor === null ? null : aircraftFor(v.aircraft);
   return (
     <div
       role="row"
@@ -562,6 +618,18 @@ function Row({ event }: { event: DecoderEvent }) {
             >
               {v.link.label}
             </a>
+          </>
+        )}
+        {onMap !== null && (
+          <>
+            {" "}
+            <PlainButton
+              onClick={onMap.open}
+              title={`Show ${onMap.icao.toUpperCase()} on the ADS-B map`}
+              className="focus-ring text-accent underline-offset-2 hover:underline"
+            >
+              On the ADS-B map
+            </PlainButton>
           </>
         )}
       </span>

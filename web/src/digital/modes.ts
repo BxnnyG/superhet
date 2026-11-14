@@ -3,6 +3,8 @@
 // squelch on the VFO and starts the plugin on it; going back to an analog mode stops it. The
 // presets live here so the mode bar, the output dock and the tests share one table.
 
+import { AIS_PLUGIN_ID, AIS_VESSEL } from "../ais/format";
+import { ACARS_MESSAGE, ACARS_PLUGIN_ID, VDL2_MESSAGE, VDL2_PLUGIN_ID } from "../datalink/model";
 import { formatMhz } from "../decoders/events";
 import type { VfoPatch } from "../vfo/api";
 import { DSD_CALL_END, DSD_CALL_START, DSD_PLUGIN_ID } from "../dsd/model";
@@ -17,7 +19,8 @@ import {
 } from "../tetra/model";
 import type { PluginInstance } from "../plugins/api";
 
-export type DigitalModeId = "pocsag" | "aprs" | "ism" | "m17" | "dmr" | "dpmr" | "nxdn" | "tetra";
+export type DigitalModeId =
+  "pocsag" | "aprs" | "ism" | "m17" | "dmr" | "dpmr" | "nxdn" | "tetra" | "ais" | "acars" | "vdl2";
 
 export interface FrequencyHint {
   loHz: number;
@@ -151,6 +154,62 @@ export const DIGITAL_MODES: readonly DigitalMode[] = [
     noun: "calls and messages",
     expect:
       "Tune onto the downlink carrier of a TETRA cell you may listen to (25 kHz raster; an RTL-SDR with an uncorrected clock can be a few kHz off at 400 MHz, which is the limit of the decoder). The cell shows as soon as it is in sync; voice needs the ETSI speech codec that you install yourself (the panel says when it is missing). Encrypted calls are flagged and never decrypted. Direct mode (DMO) is not decoded.",
+  },
+  {
+    id: "ais",
+    label: "AIS",
+    title: "AIS ships (161.975 / 162.025 MHz): position, speed, course, name, type on a map",
+    pluginId: AIS_PLUGIN_ID,
+    eventKinds: [AIS_VESSEL],
+    // Both channels (25 kHz apart) fit into 150 kHz around 162.000 MHz; the plugin takes the VFO's
+    // complex baseband, the receiver's own NFM audio is noise.
+    vfo: { mode: "nfm", bandwidthHz: 150_000, squelchDbfs: null },
+    hints: [{ loHz: 161_900_000, hiHz: 162_100_000, note: "AIS (marine, 161.975 / 162.025 MHz)" }],
+    noun: "vessels",
+    expect:
+      "Tune to 162.000 MHz: both AIS channels are inside the 150 kHz receiver. AIS is line of sight, so an antenna with a view of the water matters more than gain; a few ships a minute is normal near a busy lane. Positions appear on the map as soon as a vessel has sent one.",
+  },
+  {
+    id: "acars",
+    label: "ACARS",
+    title: "ACARS aircraft datalink (VHF, 2400 baud): flight, registration, label and text",
+    pluginId: ACARS_PLUGIN_ID,
+    eventKinds: [ACARS_MESSAGE],
+    // The plugin takes the VFO's complex baseband; the VFO frequency is the channel decoded.
+    vfo: { mode: "nfm", bandwidthHz: 200_000, squelchDbfs: null },
+    hints: [
+      {
+        loHz: 131_450_000,
+        hiHz: 131_900_000,
+        note: "ACARS (131.525 / .725 / .825 MHz Europe, 131.550 MHz North America)",
+      },
+      {
+        loHz: 129_000_000,
+        hiHz: 130_500_000,
+        note: "ACARS (further channels, mostly North America)",
+      },
+    ],
+    noun: "messages",
+    expect:
+      "Put the receiver exactly on an ACARS channel (131.725 MHz is busy in Europe); the decoder reads the frequency when it starts, so restart it after retuning. Aircraft send a message every few minutes, so a quiet channel can take a while. Add more channels within 100 kHz in the decoder settings.",
+  },
+  {
+    id: "vdl2",
+    label: "VDL2",
+    title: "VDL Mode 2 aircraft datalink (136.6 to 137 MHz): ACARS over VDL2, ADS-C, CPDLC",
+    pluginId: VDL2_PLUGIN_ID,
+    eventKinds: [VDL2_MESSAGE],
+    vfo: { mode: "nfm", bandwidthHz: 300_000, squelchDbfs: null },
+    hints: [
+      {
+        loHz: 136_600_000,
+        hiHz: 137_000_000,
+        note: "VDL Mode 2 (136.975 MHz common signalling channel)",
+      },
+    ],
+    noun: "messages",
+    expect:
+      "Put the receiver on a VDL2 channel (136.975 MHz is the common signalling channel and always busy near airports; 136.725 to 136.875 MHz carry the traffic in Europe). The decoder reads the frequency when it starts, so restart it after retuning. Link management frames are left out unless you ask for them in the decoder settings.",
   },
 ];
 

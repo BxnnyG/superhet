@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AIS instance configuration",
+  "type": "object",
+  "properties": {
+    "event_interval_s": {
+      "description": "Shortest time between two history events of one vessel, in seconds (5 to 3600, default 60). Static data (name, type, destination) is reported when it arrives or changes.",
+      "type": "integer",
+      "minimum": 5,
+      "maximum": 3600
+    }
+  },
+  "additionalProperties": false
+}

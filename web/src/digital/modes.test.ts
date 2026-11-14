@@ -19,6 +19,9 @@ describe("digital modes", () => {
       "dpmr",
       "nxdn",
       "tetra",
+      "ais",
+      "acars",
+      "vdl2",
     ]);
     for (const m of DIGITAL_MODES) {
       expect(m.vfo.mode).toBe("nfm");

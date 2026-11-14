@@ -34,3 +34,4 @@ Format: one file per decision, `NNNN-short-title.md`, sections *Status*, *Contex
 | [0028](0028-recordings-and-instant-replay.md) | Recordings and instant replay in the API service, no re-encoding | accepted |
 | [0029](0029-share-links.md) | Public receiver page: share links and the embeddable player | accepted |
 | [0030](0030-backup-and-restore.md) | Backup and restore: logical archive (optionally encrypted), ops scripts, scheduled backups | accepted |
+| [0031](0031-ais-acars-vdl2-plugins.md) | AIS, ACARS and VDL Mode 2 plugins (AIS-catcher, acarsdec, dumpvdl2) | accepted |

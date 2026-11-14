@@ -13,6 +13,9 @@ the host feeds, `docs/plugin-contract.md`) and turns what the tool prints into c
 | `org.superhet.decoder.rtl433` | rtl_433 | `iq`, `cu8` 250 kHz (VFO bandwidth about 250 kHz) | `rtl433.reading` |
 | `org.superhet.decoder.adsb` | readsb | exclusive, `iq` `cu8` 2.4 MS/s at 1090 MHz, framed transport, live map | `adsb.aircraft`, `adsb.error` (own page: `docs/plugins-adsb.md`) |
 | `org.superhet.decoder.dab` | welle-cli | exclusive, `iq` `cu8` 2.048 MS/s, framed transport, audio out | `dab.ensemble`, `dab.dls`, `dab.play`, `dab.scan`, `dab.error` (own page: `docs/plugins-dab.md`) |
+| `org.superhet.decoder.ais` | AIS-catcher | `iq`, `cu8` 192 kHz (VFO at 162.000 MHz, bandwidth about 150 kHz), vessels on a map | `ais.vessel` (own page: `docs/plugins-ais.md`) |
+| `org.superhet.decoder.acars` | acarsdec | `iq`, `cu8` 240 kHz (VFO on an ACARS channel, bandwidth about 200 kHz) | `acars.message` (own page: `docs/plugins-acars.md`) |
+| `org.superhet.decoder.vdl2` | dumpvdl2 | `iq`, `cu8` 420 kHz (VFO on a VDL2 channel, bandwidth about 300 kHz) | `vdl2.message` (own page: `docs/plugins-acars.md`) |
 
 All events land in the decoder history (`source` = plugin id, `kind` = event type, `value` = the
 `summary` field; `docs/api-decoder-events.md`). Event schemas: `plugins/<name>/schema/events.json`.

@@ -1,0 +1,4 @@
+{"channel":0,"freq":131.725,"level":-22.1,"noise":-50.0,"error":0,"mode":"2","label":"H1","block_id":"3","ack":false,"tail":".D-AIPA","flight":"LH1234","msgno":"M23A","text":"#CFBFLT01/PSN 4811.2N01131.5E\r\n","end":true,"depa":"EDDM","dsta":"EDDF","app":{"name":"acarsdec","ver":"4.7"}}
+{"channel":1,"freq":131.825,"level":-30.0,"noise":-51.5,"error":1,"mode":"2","label":"Q0","block_id":"A","ack":"A","tail":"-------","app":{"name":"acarsdec","ver":"4.7"}}
+{"flight":"LH1234","depa":"EDDM","dsta":"EDDF"}
+not json at all

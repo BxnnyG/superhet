@@ -1,0 +1,35 @@
+# AIS ship tracking on the two marine channels (161.975 and 162.025 MHz), decoded by AIS-catcher (a
+# separate GPL-3.0 process). Non-exclusive: bind it to a VFO at 162.000 MHz with a bandwidth of
+# about 150 kHz (both channels fit); the VFO's complex baseband is what AIS-catcher reads. Decoded
+# vessels are events (`ais.vessel`), the map is drawn from the decoder history. Config (optional):
+#   event_interval_s = 60   # shortest time between two history events of one vessel (5..3600)
+
+[plugin]
+id = "org.superhet.decoder.ais"
+name = "AIS ships"
+version = "0.1.0"
+protocol = 1
+license = "AGPL-3.0-only"
+type = "decoder"
+description = "AIS vessels on 162 MHz: position, speed, course, name, type, destination on a map"
+homepage = "https://github.com/BxnnyG/superhet"
+
+[runtime]
+kind = "process"
+transport = "simple"
+command = ["superhet-plugin-adapter", "ais"]
+
+[input]
+kind = "iq"
+sample_rate = 192000
+format = "cu8"
+bandwidth_hz = 150000
+
+[output]
+events_schema = "schema/events.json"
+
+[config]
+schema = "schema/config.json"
+
+[install]
+acknowledge = { text = "Runs AIS-catcher (GPL-3.0) as a separate process. AIS is broadcast by ships for everybody; receiving it is legal in most countries, but check the rules where you live. Vessel identities (MMSI, name, callsign, IMO number), positions and destinations are data of third parties: they are kept in the decoder history until the retention period ends, and the map is visible to everybody who may see decoders. The map loads its background through the server's tile proxy. Do not use this for navigation.", url = "https://github.com/jvde-github/AIS-catcher" }

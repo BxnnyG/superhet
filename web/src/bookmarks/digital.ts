@@ -7,19 +7,30 @@ import { formatFrequency } from "../spectrum/freq";
 import type { Vfo } from "../vfo/api";
 import type { StepChoice } from "../vfo/model";
 import {
+  DIGITAL_PROTOCOLS,
   PROTOCOL_LABEL,
   newInput,
   receiverState,
   type BookmarkInput,
   type DigitalChannel,
+  type DigitalProtocol,
 } from "./model";
+
+/**
+ * Whether a picker mode can be stored in a bookmark. AIS, ACARS and VDL2 cannot yet: the stored
+ * protocol list is a database constraint (migration 0020) that a migration would have to extend
+ * (ADR-0031); a bookmark saved while one of them runs is a plain analogue bookmark.
+ */
+const storable = (id: string): id is DigitalProtocol =>
+  (DIGITAL_PROTOCOLS as readonly string[]).includes(id);
 
 /** The picker mode a stored protocol id stands for (P25 and unknown ids have none). */
 export const modeOfProtocol = (protocol: string): DigitalMode | null =>
   DIGITAL_MODES.find((m) => m.id === protocol) ?? null;
 
 /** The digital channel that records "this mode on this frequency". */
-export function channelOf(mode: DigitalMode): DigitalChannel {
+export function channelOf(mode: DigitalMode): DigitalChannel | null {
+  if (!storable(mode.id)) return null;
   return {
     protocol: mode.id,
     timeslot: null,
@@ -38,8 +49,11 @@ export function activeChannel(
   vfoId: number | null,
 ): DigitalChannel | null {
   if (vfoId === null) return null;
-  const first = digitalOnVfo(instances, device, vfoId)[0];
-  return first === undefined ? null : channelOf(first.mode);
+  for (const { mode } of digitalOnVfo(instances, device, vfoId)) {
+    const channel = channelOf(mode);
+    if (channel !== null) return channel;
+  }
+  return null;
 }
 
 /**

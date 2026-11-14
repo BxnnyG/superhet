@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AIS events",
+  "description": "Validated against the complete event object (envelope included). One ais.vessel event carries everything known about a vessel at that moment (position reports and static data are merged by the adapter).",
+  "oneOf": [
+    {
+      "properties": {
+        "type": { "const": "ais.vessel" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "mmsi": { "type": "integer", "minimum": 1, "maximum": 999999999 },
+            "class": { "enum": ["A", "B", "base", "aton", "sar"] },
+            "name": { "type": "string", "minLength": 1 },
+            "callsign": { "type": "string", "minLength": 1 },
+            "imo": { "type": "integer", "minimum": 1 },
+            "ship_type": { "type": "integer", "minimum": 1, "maximum": 99 },
+            "ship_type_text": { "type": "string" },
+            "aton_type": { "type": "integer", "minimum": 0, "maximum": 31 },
+            "aton_type_text": { "type": "string" },
+            "status": { "type": "integer", "minimum": 0, "maximum": 15 },
+            "status_text": { "type": "string" },
+            "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+            "lon": { "type": "number", "minimum": -180, "maximum": 180 },
+            "sog_kn": { "type": "number", "minimum": 0 },
+            "sog_kmh": { "type": "number", "minimum": 0 },
+            "cog_deg": { "type": "number", "minimum": 0, "maximum": 360 },
+            "heading_deg": { "type": "integer", "minimum": 0, "maximum": 359 },
+            "altitude_m": { "type": "integer", "minimum": 0 },
+            "destination": { "type": "string" },
+            "eta": { "type": "string" },
+            "draught_m": { "type": "number", "minimum": 0 },
+            "length_m": { "type": "integer", "minimum": 1 },
+            "beam_m": { "type": "integer", "minimum": 1 },
+            "summary": { "type": "string" }
+          },
+          "required": ["mmsi", "class", "summary"]
+        }
+      },
+      "required": ["type", "data"]
+    }
+  ]
+}

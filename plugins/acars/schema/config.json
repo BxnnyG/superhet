@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACARS instance configuration",
+  "type": "object",
+  "properties": {
+    "frequencies_mhz": {
+      "description": "Channels to decode in MHz, all within 100 kHz of the receiver's frequency. Default: the receiver's own frequency.",
+      "type": "array",
+      "items": { "type": "number", "minimum": 100, "maximum": 160 },
+      "minItems": 1,
+      "maxItems": 8
+    },
+    "include_empty": {
+      "description": "Also report messages without text (acknowledgements, polls).",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}
