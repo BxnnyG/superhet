@@ -129,7 +129,7 @@ RUN apt-get update \
         libcodec2-1.0 libboost-program-options1.74.0 libosmocore19 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home --home-dir /home/superhet superhet \
-    && mkdir -p /data/plugins /data/tiles /data/recordings \
+    && mkdir -p /data/plugins /data/tiles /data/recordings /data/backups \
     && chown -R superhet:superhet /data
 
 # welle-cli as built by Debian, with its licence text (GPL-2.0-or-later; source: apt-get source welle.io).

@@ -45,3 +45,10 @@ opt-level = 2
 
 [profile.dev.package.rustfft]
 opt-level = 2
+
+# Argon2 with 64 MiB (backup encryption) is painfully slow unoptimised.
+[profile.dev.package.argon2]
+opt-level = 2
+
+[profile.dev.package.blake2]
+opt-level = 2

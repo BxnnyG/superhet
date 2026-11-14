@@ -1,0 +1,30 @@
+[package]
+name = "superhet-backup"
+description = "Logical backup and restore of a Superhet install: versioned archive, optional passphrase encryption, transactional import."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+argon2 = "0.6.0"
+futures-util.workspace = true
+getrandom = "0.4"
+ring = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11.1"
+sqlx.workspace = true
+superhet-db.workspace = true
+superhet-recording = { path = "../superhet-recording" }
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+zip = { version = "9.5.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true

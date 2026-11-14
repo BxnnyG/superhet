@@ -5,6 +5,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/BxnnyG/superhet/main/scripts/install.sh | sh
 #   ... | sh -s -- --no-start        # only prepare the directory, do not start
 #   ... | sh -s -- --update          # update an existing install (run in the install dir)
+#   sh install.sh --backup [opts]    # ops backup of the install (database + volumes), docs/backup.md
+#   sh install.sh --restore FILE [opts]   # restore such a backup (destructive; asks first)
 #
 # The raw URL always works: it fetches compose.yaml from the newest GitHub release (pre-releases
 # included). The copy attached to a release has that release baked in instead (@TAG@ = the tag).
@@ -29,12 +31,21 @@ repo_url='https://github.com/BxnnyG/superhet'
 start=1
 update=0
 
+ops=''
+case "${1:-}" in
+--backup | --restore)
+    ops="${1#--}"
+    shift
+    ;;
+esac
+
 for arg in "$@"; do
+    [ -z "$ops" ] || break
     case "$arg" in
     --no-start) start=0 ;;
     --update) update=1 ;;
     -h | --help)
-        sed -n '2,24p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//' || true
+        sed -n '2,26p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//' || true
         exit 0
         ;;
     *)
@@ -61,6 +72,41 @@ fetch_stdout() { # fetch_stdout URL
     fi
 }
 
+# --backup / --restore: hand over to scripts/backup.sh / restore.sh (next to this file when run
+# from a checkout, otherwise the checksum-verified copy attached to the release).
+if [ -n "$ops" ]; then
+    dir="${SUPERHET_DIR:-}"
+    if [ -z "$dir" ]; then
+        if [ -f compose.yaml ]; then dir=.; else dir=superhet; fi
+    fi
+    script=''
+    tmp=''
+    case "$0" in
+    */install.sh | install.sh) [ ! -f "$(dirname "$0")/$ops.sh" ] || script="$(dirname "$0")/$ops.sh" ;;
+    esac
+    if [ -z "$script" ]; then
+        version="${SUPERHET_VERSION:-$default_version}"
+        case "$version" in
+        *@* | '') die "set SUPERHET_VERSION (e.g. v0.1.0) to fetch $ops.sh, or run scripts/$ops.sh from a checkout" ;;
+        esac
+        case "$version" in v*) ;; *) version="v$version" ;; esac
+        base="${SUPERHET_BASE_URL:-$repo_url/releases/download/$version}"
+        tmp="$(mktemp)"
+        fetch_stdout "$base/$ops.sh" >"$tmp" || die "could not download $base/$ops.sh"
+        want="$(fetch_stdout "$base/$ops.sh.sha256" | cut -d' ' -f1)"
+        got="$(sha256sum "$tmp" | cut -d' ' -f1)"
+        [ -n "$want" ] && [ "$want" = "$got" ] || {
+            rm -f "$tmp"
+            die "checksum of $ops.sh does not match"
+        }
+        script="$tmp"
+    fi
+    rc=0
+    SUPERHET_DIR="$dir" sh "$script" "$@" || rc=$?
+    [ -z "$tmp" ] || rm -f "$tmp"
+    exit "$rc"
+fi
+
 dir="${SUPERHET_DIR:-}"
 env_tag=''
 if [ "$update" = 1 ]; then
@@ -71,9 +117,6 @@ if [ "$update" = 1 ]; then
     [ -f "$dir/.env" ] || die "no installation found in $dir (no .env); run this in the install directory or set SUPERHET_DIR, or omit --update for a fresh install"
     env_tag="$(sed -n 's/^SUPERHET_TAG=//p' "$dir/.env" | tail -n 1 | tr -d "\"' \r")"
     default_version=''
-fi
-if [ "$update" != 1 ] && [ -z "$dir" ] && [ -f .env ] && [ -f compose.yaml ]; then
-    die "this directory already holds a Superhet install (.env + compose.yaml); to update it run: curl -fsSL https://raw.githubusercontent.com/BxnnyG/superhet/main/scripts/install.sh | sh -s -- --update"
 fi
 dir="${dir:-superhet}"
 
