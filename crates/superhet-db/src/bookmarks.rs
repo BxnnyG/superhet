@@ -11,7 +11,7 @@ pub const MAX_BOOKMARKS: i64 = 10_000;
 /// Parameters of a digital channel (TETRA, DMR, dPMR, P25).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Digital {
-    /// `tetra|dmr|dpmr|nxdn|p25|pocsag|aprs|ism|m17`.
+    /// `tetra|dmr|dpmr|nxdn|p25|pocsag|aprs|ism|m17|ft8|ft4|wspr|ais|acars|vdl2`.
     pub protocol: String,
     /// TETRA 1..=4, DMR 1..=2.
     pub timeslot: Option<i16>,

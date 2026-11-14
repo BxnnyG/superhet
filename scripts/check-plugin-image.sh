@@ -83,6 +83,30 @@ else
     echo "FAIL m17-demod is missing or lacks a library"
     fail=1
 fi
+# AIS: the plugin wraps AIS-catcher (compiled in the Dockerfile). A synthetic GMSK frame (gpsd's
+# documented position report of MMSI 477553000) must come out of the whole chain, adapter included,
+# as a vessel event. Needs python3 on the host.
+ais="$(python3 -I scripts/gen-ais-iq.py 3 | docker run --rm -i --entrypoint superhet-plugin-adapter \
+    -w /usr/share/superhet/plugins/ais "$image" ais | jq -r 'select(.data.mmsi == 477553000) | .data.status_text' 2>/dev/null | head -n 1 || true)"
+if [ "$ais" = "Moored" ]; then
+    echo "ok   AIS-catcher decodes a synthetic AIS frame through the plugin"
+else
+    echo "FAIL AIS-catcher did not decode the synthetic AIS frame (got: ${ais:-nothing})"
+    fail=1
+fi
+# ACARS and VDL2: the tools start with the exact command line of the adapters, link their
+# libraries and read a second of silence from stdin without complaint (no recording is committed).
+for entry in "acars 480000 131725000" "vdl2 840000 136975000"; do
+    read -r mode bytes freq <<<"$entry"
+    if head -c "$bytes" /dev/zero | docker run --rm -i -e "SUPERHET_FREQ_HZ=$freq" --entrypoint superhet-plugin-adapter \
+        -w "/usr/share/superhet/plugins/$mode" "$image" "$mode" >/dev/null 2>/tmp/check-$mode.err; then
+        echo "ok   $mode decoder starts and reads IQ from stdin"
+    else
+        echo "FAIL $mode decoder did not run cleanly"
+        tail -n 5 "/tmp/check-$mode.err" || true
+        fail=1
+    fi
+done
 # FT8 / WSPR: jt9 and wsprd (WSJT-X, copied from the Debian package) must have all their libraries
 # and decode a synthetic slot through the adapter. The stream clock is the sample count from
 # 2026-11-14T12:00:00Z, so the slot is aligned without waiting. Needs python3 on the host.

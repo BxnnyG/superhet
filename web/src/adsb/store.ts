@@ -21,6 +21,8 @@ export interface AdsbSnapshot {
   error: string | null;
   /** The map and table overlay is open. */
   viewOpen: boolean;
+  /** An aircraft (ICAO address) the overlay should select when it opens, e.g. from an ACARS message. */
+  focus: string | null;
 }
 
 export const POLL_MS = 1000;
@@ -31,6 +33,7 @@ const EMPTY: AdsbSnapshot = {
   receivedAt: 0,
   error: null,
   viewOpen: false,
+  focus: null,
 };
 
 export class AdsbStore {
@@ -92,6 +95,16 @@ export class AdsbStore {
 
   openView(): void {
     if (!this.snap.viewOpen) this.set({ viewOpen: true });
+  }
+
+  /** Open the overlay with `icao` selected. */
+  openViewOn(icao: string): void {
+    this.set({ viewOpen: true, focus: icao });
+  }
+
+  /** The overlay took the aircraft to select. */
+  clearFocus(): void {
+    if (this.snap.focus !== null) this.set({ focus: null });
   }
 
   closeView(): void {

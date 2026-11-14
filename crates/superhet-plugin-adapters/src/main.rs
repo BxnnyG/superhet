@@ -1,4 +1,4 @@
-//! `superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17|dsd|tetra|ft8>`: runs the external decoder for one of the
+//! `superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17|dsd|tetra|ft8|ais|acars|vdl2>`: runs the external decoder for one of the
 //! first-party plugins (see the library docs). Samples arrive on stdin, events leave on stdout,
 //! the instance configuration is read from `SUPERHET_CONFIG`.
 
@@ -6,9 +6,9 @@ use std::process::ExitCode;
 
 use serde_json::Value;
 use superhet_plugin_adapters::{
-    adsb, aprs, dab, dsd, ft8, m17, pager, rtl433,
+    acars, adsb, ais, aprs, dab, dsd, ft8, m17, pager, rtl433,
     run::{run, run_many},
-    tetra,
+    tetra, vdl2,
 };
 
 fn config() -> Result<Value, String> {
@@ -18,6 +18,13 @@ fn config() -> Result<Value, String> {
         }
         _ => Ok(Value::Null),
     }
+}
+
+/// The frequency the instance was started on (its receiver's), from the host's environment.
+fn centre_hz() -> Option<u64> {
+    std::env::var("SUPERHET_FREQ_HZ")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
 }
 
 fn start(mode: &str) -> Result<ExitCode, String> {
@@ -90,15 +97,20 @@ fn start(mode: &str) -> Result<ExitCode, String> {
                 env_u64("SUPERHET_FT8_STREAM_START_MS"),
             ))
         }
+        "ais" => ais::start("AIS-catcher", &config),
+        "acars" => acars::start("acarsdec", &config, centre_hz()),
+        "vdl2" => vdl2::start("dumpvdl2", &config, centre_hz()),
         other => Err(format!(
-            "unknown mode {other:?} (pocsag, aprs, rtl433, dab, adsb, m17, dsd, tetra, ft8)"
+            "unknown mode {other:?} (pocsag, aprs, rtl433, dab, adsb, m17, dsd, tetra, ft8, ais, acars, vdl2)"
         )),
     }
 }
 
 fn main() -> ExitCode {
     let Some(mode) = std::env::args().nth(1) else {
-        eprintln!("usage: superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17|dsd|tetra|ft8>");
+        eprintln!(
+            "usage: superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17|dsd|tetra|ft8|ais|acars|vdl2>"
+        );
         return ExitCode::from(2);
     };
     match start(&mode) {

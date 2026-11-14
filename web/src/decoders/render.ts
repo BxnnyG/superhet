@@ -35,6 +35,15 @@ import {
   sourceLabel as tetraSource,
   targetLabel as tetraTarget,
 } from "../tetra/model";
+import { AIS_VESSEL, formatSpeed } from "../ais/format";
+import {
+  ACARS_MESSAGE,
+  VDL2_MESSAGE,
+  aircraftRef,
+  decodedJson,
+  labelText,
+  type AircraftRef,
+} from "../datalink/model";
 import type { BadgeTone } from "../ui";
 import {
   M17_CALL_END,
@@ -74,6 +83,8 @@ export interface EventView {
   mono: boolean;
   /** Pretty printed event data for the detail dialog; null if there is none. */
   raw: string | null;
+  /** The aircraft a datalink message is about (to link it to the ADS-B map). */
+  aircraft?: AircraftRef | null;
 }
 
 /** The plugin's own event data (`meta.data` of a stored event). */
@@ -710,6 +721,175 @@ function tetra(e: DecoderEvent, d: Rec): EventView | null {
   }
 }
 
+// ---------- AIS ----------
+
+function ais(e: DecoderEvent, d: Rec): EventView {
+  const mmsi = num(d.mmsi);
+  const name = str(d.name);
+  const cls = str(d.class);
+  const typeText = str(d.ship_type_text) ?? str(d.aton_type_text);
+  const speed = formatSpeed(num(d.sog_kn));
+  const cog = num(d.cog_deg);
+  const destination = str(d.destination);
+  const lat = num(d.lat);
+  const lon = num(d.lon);
+  const fields: EventField[] = [];
+  put(fields, "MMSI", mmsi, true);
+  put(fields, "Name", name);
+  put(fields, "Callsign", str(d.callsign), true);
+  put(fields, "IMO", num(d.imo), true);
+  put(fields, "Type", typeText);
+  put(fields, "Status", str(d.status_text));
+  put(fields, "Speed", speed);
+  put(fields, "Course", cog === null ? null : `${Math.round(cog)}°`);
+  put(fields, "Heading", num(d.heading_deg) === null ? null : `${num(d.heading_deg)}°`);
+  put(fields, "Destination", destination);
+  put(fields, "ETA (UTC)", str(d.eta), true);
+  put(fields, "Draught", num(d.draught_m) === null ? null : `${num(d.draught_m)} m`);
+  const length = num(d.length_m);
+  const beam = num(d.beam_m);
+  put(fields, "Size", length === null ? null : `${length} m${beam === null ? "" : ` × ${beam} m`}`);
+  put(fields, "Position", lat !== null && lon !== null ? formatCoords(lat, lon) : null, true);
+  return {
+    label: cls === "aton" ? "AtoN" : cls === "base" ? "AIS base" : "AIS",
+    tone: "accent",
+    title: "AIS station report",
+    headline: name ?? (mmsi === null ? e.value : String(mmsi)),
+    tags: [
+      ...(mmsi !== null && name !== null ? [String(mmsi)] : []),
+      ...(typeText ? [typeText] : []),
+    ],
+    detail:
+      [speed, cog === null ? null : `${Math.round(cog)}°`, destination && `→ ${destination}`]
+        .filter((x): x is string => typeof x === "string" && x !== "")
+        .join(" ") || null,
+    fields,
+    link: lat !== null && lon !== null ? mapLink(lat, lon) : null,
+    mono: false,
+    raw: rawJson(d),
+  };
+}
+
+// ---------- ACARS / VDL2 ----------
+
+const mhz = (v: unknown): string | null => {
+  const n = num(v);
+  return n === null ? null : `${n.toFixed(3)} MHz`;
+};
+
+/** ACARS text keeps its line breaks in the detail dialog; the row shows it on one line. */
+const oneLine = (text: string): string => text.split(/\s+/).filter(Boolean).join(" ");
+
+function acars(d: Rec): EventView {
+  const tail = str(d.tail);
+  const flight = str(d.flight);
+  const label = str(d.label);
+  const text = str(d.text);
+  const direction = str(d.direction);
+  const meaning = labelText(label);
+  const fields: EventField[] = [];
+  put(fields, "Registration", tail, true);
+  put(fields, "Flight", flight, true);
+  put(
+    fields,
+    "Direction",
+    direction === "downlink"
+      ? "aircraft to ground"
+      : direction === "uplink"
+        ? "ground to aircraft"
+        : null,
+  );
+  put(fields, "Label", label === null ? null : meaning === null ? label : `${label} (${meaning})`);
+  put(fields, "Frequency", mhz(d.freq_mhz));
+  put(fields, "Level", num(d.level) === null ? null : `${num(d.level)} dB`);
+  put(fields, "Message no.", str(d.msgno), true);
+  put(
+    fields,
+    "From / to",
+    str(d.depa) || str(d.dsta) ? `${str(d.depa) ?? "?"} → ${str(d.dsta) ?? "?"}` : null,
+    true,
+  );
+  put(fields, "Text", text);
+  const decoded = decodedJson(d);
+  put(fields, "Decoded content", decoded, true);
+  return {
+    label: "ACARS",
+    tone: "warn",
+    title: "ACARS aircraft datalink message",
+    headline: tail ?? flight ?? "unknown aircraft",
+    tags: [
+      ...(tail !== null && flight !== null ? [flight] : []),
+      ...(label ? [label] : []),
+      ...(direction === "uplink" ? ["uplink"] : []),
+    ],
+    detail: text === null ? (meaning ?? null) : oneLine(text),
+    fields,
+    link: null,
+    mono: true,
+    raw: rawJson(d),
+    aircraft: aircraftRef(d),
+  };
+}
+
+const VDL2_KIND: Record<string, string> = {
+  acars: "ACARS",
+  x25: "X.25 data",
+  xid: "link management",
+  frame: "frame",
+};
+
+function vdl2(d: Rec): EventView {
+  const kind = str(d.kind) ?? "frame";
+  const icao = str(d.icao);
+  const tail = str(d.tail);
+  const flight = str(d.flight);
+  const label = str(d.label);
+  const text = str(d.text);
+  const fields: EventField[] = [];
+  put(fields, "Registration", tail, true);
+  put(fields, "Flight", flight, true);
+  put(fields, "ICAO address", icao === null ? null : icao.toUpperCase(), true);
+  put(fields, "Content", VDL2_KIND[kind] ?? kind);
+  put(
+    fields,
+    "From",
+    str(d.src_addr) ? `${str(d.src_addr)?.toUpperCase()} (${str(d.src_type) ?? "?"})` : null,
+    true,
+  );
+  put(
+    fields,
+    "To",
+    str(d.dst_addr) ? `${str(d.dst_addr)?.toUpperCase()} (${str(d.dst_type) ?? "?"})` : null,
+    true,
+  );
+  put(
+    fields,
+    "Label",
+    label === null ? null : labelText(label) === null ? label : `${label} (${labelText(label)})`,
+  );
+  put(fields, "Frequency", mhz(d.freq_mhz));
+  put(fields, "Level", num(d.level) === null ? null : `${num(d.level)} dB`);
+  put(fields, "Message no.", str(d.msgno), true);
+  put(fields, "Text", text);
+  put(fields, "Decoded content", decodedJson(d), true);
+  return {
+    label: "VDL2",
+    tone: "warn",
+    title: "VDL Mode 2 aircraft datalink message",
+    headline: tail ?? (icao === null ? (flight ?? "unknown aircraft") : icao.toUpperCase()),
+    tags: [
+      ...(flight !== null && tail !== null ? [flight] : []),
+      ...(label ? [label] : [VDL2_KIND[kind] ?? kind]),
+    ],
+    detail: text === null ? (kind === "acars" ? null : (str(d.summary) ?? null)) : oneLine(text),
+    fields,
+    link: null,
+    mono: true,
+    raw: rawJson(d),
+    aircraft: aircraftRef(d),
+  };
+}
+
 // ---------- generic ----------
 
 /** "bytes=1920 seq=47": the scalar members of the data, for a one-line summary. */
@@ -771,6 +951,12 @@ export function describeEvent(e: DecoderEvent): EventView {
       return tetra(e, d) ?? generic(e, d);
     case "rtl433.reading":
       return rtl433(e, d);
+    case AIS_VESSEL:
+      return ais(e, d);
+    case ACARS_MESSAGE:
+      return acars(d);
+    case VDL2_MESSAGE:
+      return vdl2(d);
     case FT8_MESSAGE:
       return ft8(e, d);
     case WSPR_SPOT:

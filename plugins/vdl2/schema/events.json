@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VDL Mode 2 events",
+  "description": "Validated against the complete event object (envelope included). The aircraft side is identified by its 24-bit ICAO address (`icao`, six lower-case hex digits), the same address its ADS-B transponder sends.",
+  "oneOf": [
+    {
+      "properties": {
+        "type": { "const": "vdl2.message" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "kind": { "enum": ["acars", "x25", "xid", "frame"] },
+            "freq_mhz": { "type": "number" },
+            "level": { "type": "number" },
+            "noise": { "type": "number" },
+            "src_addr": { "type": "string", "pattern": "^[0-9a-f]{6}$" },
+            "src_type": { "type": "string" },
+            "dst_addr": { "type": "string", "pattern": "^[0-9a-f]{6}$" },
+            "dst_type": { "type": "string" },
+            "icao": { "type": "string", "pattern": "^[0-9a-f]{6}$" },
+            "frame": { "type": "string" },
+            "cmd": { "type": "string" },
+            "mode": { "type": "string" },
+            "label": { "type": "string" },
+            "block_id": { "type": "string" },
+            "ack": { "type": "string" },
+            "tail": { "type": "string", "minLength": 1 },
+            "flight": { "type": "string", "minLength": 1 },
+            "msgno": { "type": "string" },
+            "sublabel": { "type": "string" },
+            "mfi": { "type": "string" },
+            "text": { "type": "string" },
+            "decoded": {},
+            "summary": { "type": "string" }
+          },
+          "required": ["kind", "summary"]
+        }
+      },
+      "required": ["type", "data"]
+    }
+  ]
+}

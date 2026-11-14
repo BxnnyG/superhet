@@ -101,7 +101,9 @@ export function AdsbView({ r }: { r: Receiver }) {
     savePrefs(p);
   };
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "age", dir: "asc" });
-  const [selected, setSelected] = useState<string | null>(null);
+  // An aircraft named by another view (an ACARS message) opens the overlay selected.
+  const [selected, setSelected] = useState<string | null>(() => r.adsb.getSnapshot().focus);
+  useEffect(() => r.adsb.clearFocus(), [r.adsb]);
   const [fitSignal, setFitSignal] = useState(0);
   const [side, setSide] = useState<"aircraft" | "range">("aircraft");
   const [hours, setHours] = useState(24);

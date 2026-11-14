@@ -121,6 +121,7 @@ export function App({ device = "dev0" }: Props) {
             device={r.device}
             vfos={r.vfoSnap.vfos}
             selectedId={r.selected?.id ?? null}
+            adsb={r.adsb}
           />
         </main>
         <Inspector r={r} inspector={inspector} />

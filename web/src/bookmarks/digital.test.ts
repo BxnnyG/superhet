@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { DIGITAL_MODES } from "../digital/modes";
+import { AIS_PLUGIN_ID } from "../ais/format";
+import { ACARS_PLUGIN_ID } from "../datalink/model";
+import { DIGITAL_MODES, digitalMode } from "../digital/modes";
 import { DSD_PLUGIN_ID } from "../dsd/model";
+import { FT8_PLUGIN_ID } from "../ft8/model";
 import { instance } from "../plugins/testing";
 import type { Vfo } from "../vfo/api";
 import { activeChannel, channelOf, draftFor, modeOfProtocol } from "./digital";
@@ -36,14 +39,28 @@ const saved = (id: string, over: Partial<Bookmark> = {}): Bookmark => ({
 
 describe("digital modes in bookmarks", () => {
   it("offers every mode of the Digital picker as a protocol", () => {
-    // FT8, FT4 and WSPR are tuned by frequency and USB; a bookmark does not start them.
-    for (const m of DIGITAL_MODES.filter((m) => !["ft8", "ft4", "wspr"].includes(m.id))) {
+    for (const m of DIGITAL_MODES) {
       expect(DIGITAL_PROTOCOLS).toContain(m.id);
       expect(PROTOCOL_LABEL[m.id as keyof typeof PROTOCOL_LABEL]).toBe(m.label);
       expect(modeOfProtocol(m.id)?.pluginId).toBe(m.pluginId);
     }
     // P25 is stored but has no decoder to start.
     expect(modeOfProtocol("p25")).toBeNull();
+  });
+
+  it("saves and restores the weak-signal modes and the VHF datalinks", () => {
+    for (const id of ["ft8", "ft4", "wspr", "ais", "acars", "vdl2"] as const) {
+      const mode = digitalMode(id);
+      expect(channelOf(mode)).toMatchObject({ protocol: id, decoderPluginId: mode.pluginId });
+      expect(modeOfProtocol(id)).toBe(mode);
+    }
+    const ais = instance({ plugin_id: AIS_PLUGIN_ID, vfo: 1 });
+    const acars = instance({ id: "i-2", plugin_id: ACARS_PLUGIN_ID, vfo: 1 });
+    expect(activeChannel([ais], "dev0", 1)?.protocol).toBe("ais");
+    expect(activeChannel([acars], "dev0", 1)?.protocol).toBe("acars");
+    // FT8, FT4 and WSPR share one plugin; the instance's config tells them apart.
+    const wspr = instance({ plugin_id: FT8_PLUGIN_ID, config: { mode: "wspr" } });
+    expect(activeChannel([wspr], "dev0", 1)?.protocol).toBe("wspr");
   });
 
   it("saves the digital mode running on the VFO and restores it from the bookmark", () => {

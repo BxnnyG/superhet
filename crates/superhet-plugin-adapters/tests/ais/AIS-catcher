@@ -1,0 +1,10 @@
+#!/bin/sh
+# Stand-in for AIS-catcher in tests/datalink_plugins.rs: records its command line and the number
+# of bytes it got on stdin (FAKE_ARGS_OUT, FAKE_STDIN_OUT), prints a banner like the real tool and
+# the NMEA lines of sample.nmea.
+[ -n "$FAKE_ARGS_OUT" ] && printf "%s\n" "$*" > "$FAKE_ARGS_OUT"
+echo "AIS-catcher (stand-in)"
+cat "$(dirname "$0")/sample.nmea"
+bytes=$(cat | wc -c)
+[ -n "$FAKE_STDIN_OUT" ] && echo "$bytes" > "$FAKE_STDIN_OUT"
+exit 0

@@ -400,7 +400,30 @@
   border: 2px solid var(--accent);
   background: var(--accent-soft);
 }
-/* Tooltip label of the APRS map (digital/AprsMap.tsx). */
+/* Vessel symbols of the AIS map (ais/AisMap.tsx): the fill is the ship-type colour set inline. */
+.sh-map .ais-icon {
+  background: none;
+  border: none;
+}
+.sh-map .ais-svg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.55));
+}
+.sh-map .ais-svg path {
+  stroke: rgb(0 0 0 / 0.7);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+.sh-map .ais-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+}
+/* Tooltip label of the APRS and AIS maps (digital/AprsMap.tsx, ais/AisMap.tsx). */
 .sh-map .adsb-label {
   padding: 1px 5px;
   border: 1px solid var(--border);

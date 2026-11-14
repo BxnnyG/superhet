@@ -68,6 +68,8 @@ Acceptance criteria:
 5. Lookups: cache hit rate observable, per-source switch disables all network calls of that source (test with mock server), configured rate limits are never exceeded (test).
 6. No restricted codec code in the main repo, images or release artifacts (CI check script scanning for known file names/hashes).
 
+Also done from the SCOPE decoder list: the VHF datalinks, as plugins around separate GPL tools built in the image: AIS ships with a vessel map (AIS-catcher, `docs/plugins-ais.md`), ACARS (acarsdec) and VDL Mode 2 (dumpvdl2, libacars) with a message list linked to the ADS-B map (`docs/plugins-acars.md`); ADR-0031. Synthetic-data tests only, not yet received on air.
+
 ## P4 – Recording, Instant Replay, event log, scanner, bookmarks
 
 Scope: audio recording per VFO/call, SigMF IQ recording, Instant Replay (audio always on, IQ optional RAM/disk), event log with FTS5 search, filters, timeline, export; bookmarks, frequency lists (CSV, SDR# Frequency Manager), bandplan overlay; scanner.

@@ -23,8 +23,8 @@ export const modeOfProtocol = (protocol: string): DigitalMode | null =>
 const isProtocol = (id: string): id is DigitalProtocol => DIGITAL_PROTOCOLS.some((p) => p === id);
 
 /**
- * The digital channel that records "this mode on this frequency"; null for modes a bookmark cannot
- * store (the weak-signal modes FT8, FT4 and WSPR: the bookmark then keeps the frequency and USB).
+ * The digital channel that records "this mode on this frequency"; null for a mode whose id is not
+ * a stored protocol (none of the picker's modes today: migration 0021 added the last six).
  */
 export function channelOf(mode: DigitalMode): DigitalChannel | null {
   if (!isProtocol(mode.id)) return null;
