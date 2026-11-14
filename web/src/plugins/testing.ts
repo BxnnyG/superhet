@@ -142,8 +142,27 @@ export const TETRA_RAW = {
   },
 };
 
+export const FT8_ID = "org.superhet.decoder.ft8";
+
+export const FT8_RAW = {
+  plugin: {
+    id: FT8_ID,
+    name: "FT8 / FT4 / WSPR",
+    version: "0.1.0",
+    protocol: 1,
+    license: "AGPL-3.0-only",
+    type: "decoder",
+    description: "Decodes FT8, FT4 and WSPR with the WSJT-X decoders",
+  },
+  runtime: { kind: "process", transport: "simple", command: ["superhet-plugin-adapter", "ft8"] },
+  input: { kind: "audio", sample_rate: 12000, format: "s16le", bandwidth_hz: 3000 },
+  device: { exclusive: false },
+  install: { acknowledge: { text: "Runs jt9 and wsprd from WSJT-X as separate processes." } },
+};
+
 export const aprs: PluginManifest = parseManifest(APRS_RAW);
 export const dsd: PluginManifest = parseManifest(DSD_RAW);
+export const ft8: PluginManifest = parseManifest(FT8_RAW);
 export const m17: PluginManifest = parseManifest(M17_RAW);
 export const tetra: PluginManifest = parseManifest(TETRA_RAW);
 export const pocsag: PluginManifest = parseManifest(POCSAG_RAW);

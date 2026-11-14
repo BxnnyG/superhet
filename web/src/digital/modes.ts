@@ -4,6 +4,14 @@
 // presets live here so the mode bar, the output dock and the tests share one table.
 
 import { formatMhz } from "../decoders/events";
+import {
+  FT8_MESSAGE,
+  FT8_PLUGIN_ID,
+  WSPR_SPOT,
+  presetsOf,
+  type DialPreset,
+  type Ft8Mode,
+} from "../ft8/model";
 import type { VfoPatch } from "../vfo/api";
 import { DSD_CALL_END, DSD_CALL_START, DSD_PLUGIN_ID } from "../dsd/model";
 import { M17_CALL_END, M17_CALL_START, M17_PLUGIN_ID } from "../m17/model";
@@ -17,7 +25,8 @@ import {
 } from "../tetra/model";
 import type { PluginInstance } from "../plugins/api";
 
-export type DigitalModeId = "pocsag" | "aprs" | "ism" | "m17" | "dmr" | "dpmr" | "nxdn" | "tetra";
+export type DigitalModeId =
+  "pocsag" | "aprs" | "ism" | "m17" | "dmr" | "dpmr" | "nxdn" | "tetra" | "ft8" | "ft4" | "wspr";
 
 export interface FrequencyHint {
   loHz: number;
@@ -36,7 +45,7 @@ export interface DigitalMode {
   /** Event types the plugin emits (`pocsag.message`, ...). */
   eventKinds: readonly string[];
   /** The VFO settings that make the plugin work. */
-  vfo: VfoPatch & { mode: "nfm"; bandwidthHz: number; squelchDbfs: null };
+  vfo: VfoPatch & { mode: "nfm" | "usb"; bandwidthHz: number; squelchDbfs: null };
   /** Typical frequencies, for the "try this mode here" hint. */
   hints: readonly FrequencyHint[];
   /** Noun for counters: "pages", "packets", "readings", "calls". */
@@ -45,9 +54,12 @@ export interface DigitalMode {
   expect: string;
   /**
    * Start configuration, for modes that share one plugin (DMR, dPMR and NXDN are one dsd-fme
-   * plugin told which protocol to decode). Also tells the instances of the modes apart.
+   * plugin told which protocol to decode; FT8, FT4 and WSPR one plugin told the mode). Also
+   * tells the instances of the modes apart.
    */
   config?: Rec;
+  /** Dial frequencies of the bands the mode lives on (a band picker next to the mode select). */
+  presets?: readonly DialPreset[];
 }
 
 // DMR, dPMR and NXDN are one plugin (a user-installed dsd-fme, docs/plugins-dsd.md); the config's
@@ -67,6 +79,36 @@ const dsdMode = (id: "dmr" | "dpmr" | "nxdn", label: string, expect: string): Di
   noun: "calls",
   expect,
   config: { protocol: id },
+});
+
+// FT8, FT4 and WSPR are one plugin (docs/plugins-ft8.md); the config's mode tells them apart. They
+// decode the audio of a USB receiver on the dial frequency, in fixed time slots.
+const FT8_EXPECT =
+  "Stations transmit in fixed 15 second slots, so the first decodes appear up to 30 seconds after the start. The receiver must sit on the dial frequency in USB (pick a band next to the mode) and the clock of this machine must be right (NTP). HF needs an upconverter or direct sampling in front of an RTL-SDR; 2 m (144.174 MHz) works without.";
+const ft8Mode = (
+  id: Ft8Mode,
+  label: string,
+  title: string,
+  eventKinds: readonly string[],
+  noun: string,
+  expect: string,
+): DigitalMode => ({
+  id,
+  label,
+  title,
+  pluginId: FT8_PLUGIN_ID,
+  eventKinds,
+  vfo: { mode: "usb", bandwidthHz: 3_000, squelchDbfs: null },
+  // The dial frequencies of the bands; a VFO on one of them gets "Try ...?".
+  hints: presetsOf(id).map((p) => ({
+    loHz: p.dialHz - 600,
+    hiHz: p.dialHz + 600,
+    note: `${label} ${p.band}`,
+  })),
+  noun,
+  expect,
+  config: { mode: id },
+  presets: presetsOf(id),
 });
 
 export const DIGITAL_MODES: readonly DigitalMode[] = [
@@ -152,6 +194,30 @@ export const DIGITAL_MODES: readonly DigitalMode[] = [
     expect:
       "Tune onto the downlink carrier of a TETRA cell you may listen to (25 kHz raster; an RTL-SDR with an uncorrected clock can be a few kHz off at 400 MHz, which is the limit of the decoder). The cell shows as soon as it is in sync; voice needs the ETSI speech codec that you install yourself (the panel says when it is missing). Encrypted calls are flagged and never decrypted. Direct mode (DMO) is not decoded.",
   },
+  ft8Mode(
+    "ft8",
+    "FT8",
+    "FT8 weak-signal amateur mode (15 s slots): callsigns, locators, SNR",
+    [FT8_MESSAGE],
+    "messages",
+    FT8_EXPECT,
+  ),
+  ft8Mode(
+    "ft4",
+    "FT4",
+    "FT4 contest mode (7.5 s slots): callsigns, locators, SNR",
+    [FT8_MESSAGE],
+    "messages",
+    FT8_EXPECT.replace("15 second", "7.5 second"),
+  ),
+  ft8Mode(
+    "wspr",
+    "WSPR",
+    "WSPR propagation beacons (2 min slots): callsign, locator, power, SNR, drift",
+    [WSPR_SPOT],
+    "spots",
+    "Beacons transmit in 2 minute slots, so the first spots appear up to 4 minutes after the start. The receiver must sit on the dial frequency in USB (pick a band next to the mode) and the clock of this machine must be right (NTP). HF needs an upconverter or direct sampling in front of an RTL-SDR; 2 m (144.489 MHz) works without.",
+  ),
 ];
 
 export const digitalMode = (id: DigitalModeId): DigitalMode => {
@@ -165,13 +231,16 @@ export const digitalModeOfPlugin = (pluginId: string): DigitalMode | null =>
 
 /**
  * The mode a plugin instance runs: the one of its plugin, and where several modes share a plugin
- * (DMR, dPMR, NXDN) the one whose config the instance carries; the first of them otherwise.
+ * (DMR, dPMR, NXDN; FT8, FT4, WSPR) the one whose config the instance carries; the first of them
+ * otherwise.
  */
 export function digitalModeOfInstance(instance: PluginInstance): DigitalMode | null {
   const modes = DIGITAL_MODES.filter((m) => m.pluginId === instance.pluginId);
   if (modes.length <= 1) return modes[0] ?? null;
   const config = isRec(instance.config) ? instance.config : {};
-  return modes.find((m) => m.config?.protocol === config.protocol) ?? modes[0] ?? null;
+  const same = (m: DigitalMode): boolean =>
+    m.config !== undefined && Object.entries(m.config).every(([k, v]) => config[k] === v);
+  return modes.find(same) ?? modes[0] ?? null;
 }
 
 /** Digital modes with a running (or starting) instance on a VFO. */

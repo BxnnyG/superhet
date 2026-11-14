@@ -115,6 +115,15 @@ RUN grep -v '^#' /tmp/sync-burst.bits | tr -d '\n' | tr '01' '\000\001' > /tmp/o
     && for i in $(seq 40); do cat /tmp/one.raw; done > /tmp/burst.raw \
     && src/tetra-rx /tmp/burst.raw | grep -q 'MCC 0100000110(262) MNC 00000000101010(42)'
 
+# ---- Stage 6b: jt9 and wsprd from the Debian WSJT-X package ----
+# The FT8 / FT4 / WSPR plugin runs the command-line decoders of WSJT-X (GPL-3.0-or-later; ADR-0032).
+# Debian's `wsjtx` package also pulls in the Qt GUI (about 150 MiB), so it is installed here only
+# and the two decoders are copied; the runtime stage adds the few libraries they link against.
+FROM debian:bookworm-slim AS wsjtx
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wsjtx \
+    && rm -rf /var/lib/apt/lists/*
+
 # ---- Stage 7: runtime ----
 FROM debian:bookworm-slim
 # multimon-ng, direwolf and rtl-433 are the external decoders of the first-party plugins
@@ -122,11 +131,13 @@ FROM debian:bookworm-slim
 # superhet-plugin-adapter; about 27 MiB (docs/third-party.md). welle-cli (DAB plugin) needs the
 # libraries on the second line: about 7 MiB together with the binary copied below; readsb (ADS-B
 # plugin) needs zstd; m17-demod (M17 plugin) needs Codec2 and Boost.Program_options (about 3 MiB);
-# tetra-rx (TETRA plugin) needs libosmocore.
+# tetra-rx (TETRA plugin) needs libosmocore; jt9 / wsprd (FT8 plugin) need Qt5Core, libgfortran and
+# libgomp (libfftw3-single3 above).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends librtlsdr0 libopus0 multimon-ng direwolf rtl-433 \
         libfaad2 libfftw3-single3 libmp3lame0 libmpg123-0 libasound2 libairspy0 libsoapysdr0.8 libusb-1.0-0 libzstd1 ca-certificates \
         libcodec2-1.0 libboost-program-options1.74.0 libosmocore19 \
+        libqt5core5a libgfortran5 libgomp1 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home --home-dir /home/superhet superhet \
     && mkdir -p /data/plugins /data/tiles /data/recordings /data/backups \
@@ -150,6 +161,10 @@ COPY --from=m17 /src/m17/blaze/LICENSE /usr/share/doc/m17-cxx-demod/blaze-LICENS
 COPY --from=tetra /src/tetra/src/tetra-rx /usr/bin/tetra-rx
 COPY --from=tetra /src/tetra/COPYING /usr/share/doc/osmo-tetra-sq5bpf/copyright
 
+# jt9 and wsprd as built by Debian (WSJT-X 2.6.1, GPL-3.0-or-later), with the package's licence text.
+COPY --from=wsjtx /usr/bin/jt9 /usr/bin/wsprd /usr/bin/
+COPY --from=wsjtx /usr/share/doc/wsjtx/copyright /usr/share/doc/wsjtx/copyright
+
 COPY --from=rust /usr/local/lib/libsuperhet-loopback-bind.so /usr/local/lib/superhet/libsuperhet-loopback-bind.so
 
 # One image for every service; compose selects the binary via `command`.
@@ -169,6 +184,8 @@ COPY plugins/dsd /usr/share/superhet/plugins/dsd
 # TETRA: manifest, adapter and tetra-rx. The ETSI speech codec is NOT in this image; the user
 # installs it and points SUPERHET_TETRA_CODEC_DIR at it (docs/plugins-tetra.md).
 COPY plugins/tetra /usr/share/superhet/plugins/tetra
+# FT8 / FT4 / WSPR (jt9 and wsprd are in the image, docs/plugins-ft8.md).
+COPY plugins/ft8 /usr/share/superhet/plugins/ft8
 # The API does not serve the frontend yet; the build output is shipped for later use.
 COPY --from=web /src/web/dist /usr/share/superhet/web
 

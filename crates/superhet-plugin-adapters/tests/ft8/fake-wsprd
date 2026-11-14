@@ -1,0 +1,10 @@
+#!/bin/sh
+# Stand-in for wsprd in tests/ft8_plugin.rs (see fake-jt9).
+for a; do wav=$a; done
+if [ -n "$FAKE_FT8_LOG" ]; then echo "$* size=$(wc -c < "$wav")" >> "$FAKE_FT8_LOG"; fi
+[ -n "$FAKE_FT8_FAIL" ] && exit 3
+name=$(basename "$wav" .wav)
+t=${name#*_}
+echo "$t  -5 -0.0   0.001500  0  K1ABC FN42 37 "
+echo "$t -21  0.8   0.001452 -1  <PJ4/K1ABC> FK52UD 23"
+echo "<DecodeFinished>"

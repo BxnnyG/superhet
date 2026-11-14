@@ -1,12 +1,13 @@
 import { useState, useSyncExternalStore } from "react";
 import { usePermissions } from "../auth/context";
+import { presetAt } from "../ft8/model";
 import { describeHttpError } from "../http";
 import type { PluginManifest } from "../plugins/api";
 import { startable } from "../plugins/DecoderPicker";
 import type { PluginStore } from "../plugins/store";
 import { Alert, Button, Chip, Dialog, Select, Toggle, toasts } from "../ui";
 import type { Vfo, VfoPatch } from "../vfo/api";
-import { enterDigital, leaveDigital, type EnterContext } from "./actions";
+import { enterDigital, leaveDigital, retuneDigital, type EnterContext } from "./actions";
 import {
   DIGITAL_MODES,
   digitalOnVfo,
@@ -28,10 +29,11 @@ interface Props {
 const ANALOG = "";
 
 /**
- * "Digital" group of the mode bar: POCSAG, APRS and ISM sensors. Picking one sets the VFO up
- * (NFM, the bandwidth the decoder wants, squelch off), starts the plugin on it and the output
- * panel below the spectrum shows what it decodes. "Analog" stops it again. A small chip offers
- * the mode that usually lives on the VFO's frequency.
+ * "Digital" group of the mode bar: pagers, APRS, ISM sensors, digital voice, FT8 / FT4 / WSPR.
+ * Picking one sets the VFO up (NFM or USB, the bandwidth the decoder wants, squelch off), starts
+ * the plugin on it and the output panel below the spectrum shows what it decodes. "Analog" stops
+ * it again. A small chip offers the mode that usually lives on the VFO's frequency; the weak-signal
+ * modes get a band picker with their dial frequencies.
  */
 export function DigitalModeControl({ vfo, device, plugins, onUpdate, fill = false }: Props) {
   const perms = usePermissions();
@@ -84,6 +86,25 @@ export function DigitalModeControl({ vfo, device, plugins, onUpdate, fill = fals
     void run(digitalMode(value as DigitalModeId));
   };
 
+  const bands = active?.presets ?? null;
+  const band = bands === null ? null : presetAt(bands, vfo.freqHz);
+  const chooseBand = (value: string) => {
+    if (active === null || value === "") return;
+    const preset = active.presets?.find((p) => String(p.dialHz) === value);
+    if (preset === undefined) return;
+    setBusy(true);
+    void retuneDigital(ctx, active, preset.dialHz)
+      .catch((e: unknown) =>
+        toasts.push({
+          tone: "warn",
+          title: `Could not tune ${active.label} to ${preset.band}`,
+          body: describeHttpError(e),
+          key: "digital-band",
+        }),
+      )
+      .finally(() => setBusy(false));
+  };
+
   const hint = active === null ? suggestDigital(vfo.freqHz) : null;
   const hinted = hint !== null && installed(hint.mode) !== undefined ? hint : null;
 
@@ -106,6 +127,21 @@ export function DigitalModeControl({ vfo, device, plugins, onUpdate, fill = fals
           ...available.map((m) => ({ value: m.id, label: m.label })),
         ]}
       />
+      {active !== null && bands !== null && (
+        <Select
+          aria-label={`${active.label} band`}
+          size="sm"
+          className={fill ? "w-full" : "w-24 shrink-0"}
+          disabled={busy}
+          title={`Dial frequency of the band, USB. ${active.label} is decoded from the audio of the receiver, so it must sit exactly on it.`}
+          value={band === null ? "" : String(band.dialHz)}
+          onChange={chooseBand}
+          options={[
+            { value: "", label: band === null ? "Band…" : "Band" },
+            ...bands.map((p) => ({ value: String(p.dialHz), label: p.band })),
+          ]}
+        />
+      )}
       {hinted !== null && (
         <Chip
           selected={false}
@@ -150,7 +186,7 @@ function NoticeDialog({
     <Dialog title={`Start ${mode.label}`} onClose={busy ? () => undefined : onCancel}>
       <div className="flex flex-col gap-4">
         <p className="text-sm text-fg-muted">
-          {mode.title}. The receiver is switched to NFM at{" "}
+          {mode.title}. The receiver is switched to {mode.vfo.mode.toUpperCase()} at{" "}
           {mode.vfo.bandwidthHz >= 1000
             ? `${mode.vfo.bandwidthHz / 1000} kHz`
             : mode.vfo.bandwidthHz}{" "}

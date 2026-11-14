@@ -3,10 +3,12 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { PluginStore } from "../plugins/store";
 import {
   APRS_ID,
+  FT8_ID,
   POCSAG_ID,
   RTL433_ID,
   aprs,
   fakePluginApi,
+  ft8,
   instance,
   pocsag,
   rtl433,
@@ -152,5 +154,56 @@ it("reports a refused start", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Start APRS" }));
   await flush();
   expect(toasts.getSnapshot().some((t) => t.title === "Could not start APRS")).toBe(true);
+  store.stop();
+});
+
+it("sets a USB receiver up for FT8 and moves it to a band, restarting the decoder there", async () => {
+  const { api, onUpdate, store } = await setup({
+    plugins: [ft8],
+    vfoOver: { mode: "usb", bandwidthHz: 2_700, freqHz: 144_174_000 },
+  });
+  fireEvent.change(select(), { target: { value: "ft8" } });
+  await flush();
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Start FT8" })).getByRole("switch"));
+  fireEvent.click(screen.getByRole("button", { name: "Start FT8" }));
+  await flush();
+  expect(onUpdate).toHaveBeenCalledWith(1, { mode: "usb", bandwidthHz: 3_000, squelchDbfs: null });
+  expect(api.start).toHaveBeenCalledWith({
+    pluginId: FT8_ID,
+    device: "dev0",
+    vfo: 1,
+    freqHz: 144_174_000,
+    config: { mode: "ft8" },
+  });
+  // The band picker shows the band the receiver is on and offers the others.
+  const band = screen.getByRole("combobox", { name: "FT8 band" });
+  expect(band).toHaveValue("144174000");
+  expect(within(band).getAllByRole("option").length).toBeGreaterThan(10);
+
+  api.start.mockClear();
+  api.stop.mockClear();
+  onUpdate.mockClear();
+  fireEvent.change(band, { target: { value: "14074000" } });
+  await flush();
+  expect(onUpdate).toHaveBeenCalledWith(1, {
+    mode: "usb",
+    bandwidthHz: 3_000,
+    squelchDbfs: null,
+    freqHz: 14_074_000,
+  });
+  expect(api.stop).toHaveBeenCalledWith("i-1");
+  expect(api.start).toHaveBeenCalledWith(
+    expect.objectContaining({ pluginId: FT8_ID, freqHz: 14_074_000, config: { mode: "ft8" } }),
+  );
+  store.stop();
+});
+
+it("offers FT8 on its dial frequency and has no band picker for other modes", async () => {
+  const { store } = await setup({
+    plugins: [ft8, aprs],
+    vfoOver: { mode: "usb", freqHz: 14_074_000 },
+  });
+  expect(screen.getByRole("button", { name: "Try FT8 here" })).toBeInTheDocument();
+  expect(screen.queryByRole("combobox", { name: /band$/ })).toBeNull();
   store.stop();
 });

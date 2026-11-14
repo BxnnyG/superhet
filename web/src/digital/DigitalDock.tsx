@@ -347,6 +347,9 @@ const COLUMNS: Record<DigitalMode["id"], readonly [string, string, string]> = {
   dpmr: ["Call", "Colour code", "Duration · encryption"],
   nxdn: ["Call", "RAN", "Duration · encryption"],
   tetra: ["Call · message", "Channel · encryption", "Duration · text"],
+  ft8: ["Station", "SNR · offset · frequency", "Message"],
+  ft4: ["Station", "SNR · offset · frequency", "Message"],
+  wspr: ["Beacon", "SNR · offset · frequency", "Locator · power · drift"],
 };
 
 function Output({

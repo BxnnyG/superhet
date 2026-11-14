@@ -114,7 +114,7 @@ All decoders are plugins (separate processes). Without a codec plugin, voice dec
 | TETRA voice (TMO + DMO, unencrypted own traffic) – **primary goal** | v1 (P3), **TMO via the interim plugin with the user's ETSI codec** (`docs/plugins-tetra.md`) | ✅ | `tetra-acelp` frames → ETSI codec plugin | Codec only via separate plugin (ADR-0005); encrypted calls shown, never decrypted |
 | ACARS (VHF) | v1 (P3) | ✅ | acarsdec (f00b4r0 fork, GPL-2.0; original TLeconte repo is archived) | – |
 | VDL Mode 2 | v1 (P3) | ✅ | dumpvdl2 (GPL-3.0) | Cannot run together with ACARS (window) |
-| FT8 / FT4 / WSPR | later | 🟡 6 m / 2 m / 10 m only without upconverter | ft8_lib (MIT), wsprd (GPL-3.0) | Needs accurate frequency (PPM calibration) and time sync |
+| FT8 / FT4 / WSPR | v1, **bundled** (`docs/plugins-ft8.md`, ADR-0032) | 🟡 6 m / 2 m only without upconverter | `jt9` and `wsprd` of WSJT-X (GPL-3.0, Debian package; ft8_lib (MIT) considered) | Needs accurate frequency (PPM calibration) and time sync (NTP) |
 | Meteor-M LRPT (137.9 MHz) | later (optional) | 🟡 needs QFH/V-dipole, pass scheduling | SatDump (GPL-3.0) | Large dependency; satellite availability changes |
 | NOAA APT | ❌ dropped | – | – | NOAA-15/18/19 APT ended in 2025; only kept as file-replay demo if at all |
 

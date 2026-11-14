@@ -1,4 +1,4 @@
-//! `superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17|dsd|tetra>`: runs the external decoder for one of the
+//! `superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17|dsd|tetra|ft8>`: runs the external decoder for one of the
 //! first-party plugins (see the library docs). Samples arrive on stdin, events leave on stdout,
 //! the instance configuration is read from `SUPERHET_CONFIG`.
 
@@ -6,7 +6,7 @@ use std::process::ExitCode;
 
 use serde_json::Value;
 use superhet_plugin_adapters::{
-    adsb, aprs, dab, dsd, m17, pager, rtl433,
+    adsb, aprs, dab, dsd, ft8, m17, pager, rtl433,
     run::{run, run_many},
     tetra,
 };
@@ -80,15 +80,25 @@ fn start(mode: &str) -> Result<ExitCode, String> {
                 .map_err(|_| "SUPERHET_SOCKET is not set (framed plugin)".to_owned())?;
             Ok(tetra::run(&config, &socket))
         }
+        "ft8" => {
+            // FT8 / FT4 / WSPR: slots of USB audio decoded by jt9 / wsprd (docs/plugins-ft8.md).
+            let config = ft8::Config::from_json(&config)?;
+            let env_u64 = |key: &str| std::env::var(key).ok().and_then(|v| v.parse::<u64>().ok());
+            Ok(ft8::run(
+                &config,
+                env_u64("SUPERHET_FREQ_HZ"),
+                env_u64("SUPERHET_FT8_STREAM_START_MS"),
+            ))
+        }
         other => Err(format!(
-            "unknown mode {other:?} (pocsag, aprs, rtl433, dab, adsb, m17, dsd, tetra)"
+            "unknown mode {other:?} (pocsag, aprs, rtl433, dab, adsb, m17, dsd, tetra, ft8)"
         )),
     }
 }
 
 fn main() -> ExitCode {
     let Some(mode) = std::env::args().nth(1) else {
-        eprintln!("usage: superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17|dsd|tetra>");
+        eprintln!("usage: superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17|dsd|tetra|ft8>");
         return ExitCode::from(2);
     };
     match start(&mode) {

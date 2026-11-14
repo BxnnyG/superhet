@@ -5,6 +5,7 @@
 // new plugin shows up readable without a UI change.
 
 import { isRec, type Rec } from "../spectrum/api";
+import { FT8_MESSAGE, WSPR_SPOT, gridCentre } from "../ft8/model";
 import {
   DSD_CALL_END,
   DSD_CALL_START,
@@ -300,6 +301,101 @@ function aprs(e: DecoderEvent, d: Rec): EventView {
     detail,
     fields,
     link: lat !== null && lon !== null ? mapLink(lat, lon) : null,
+    mono: true,
+    raw: rawJson(d),
+  };
+}
+
+// ---------- FT8 / FT4 / WSPR ----------
+
+const signed = (v: number): string => (v > 0 ? `+${v}` : String(v));
+
+/** SNR, time offset and audio frequency, the facts every weak-signal decode carries. */
+function weakSignalTags(d: Rec): string[] {
+  const snr = num(d.snr);
+  const dt = num(d.dt);
+  const freq = num(d.freq_hz);
+  const rf = num(d.rf_hz);
+  const tags: string[] = [];
+  if (snr !== null) tags.push(`${signed(snr)} dB`);
+  if (dt !== null) tags.push(`dt ${signed(Math.round(dt * 10) / 10)} s`);
+  if (rf !== null) tags.push(`${formatMhz(rf)} MHz`);
+  else if (freq !== null) tags.push(`${freq} Hz`);
+  return tags;
+}
+
+function gridLink(grid: string | null): EventLink | null {
+  const centre = grid === null ? null : gridCentre(grid);
+  if (centre === null) return null;
+  const link = mapLink(centre[0], centre[1]);
+  return link === null
+    ? null
+    : { href: link.href.replace("#map=14/", "#map=8/"), label: "Open locator on map" };
+}
+
+function weakSignalFields(d: Rec): EventField[] {
+  const fields: EventField[] = [];
+  put(fields, "Slot (UTC)", str(d.time), true);
+  put(fields, "Callsign", str(d.callsign), true);
+  put(fields, "To", str(d.to), true);
+  put(fields, "Locator", str(d.grid), true);
+  const snr = num(d.snr);
+  put(fields, "SNR", snr === null ? null : `${signed(snr)} dB`);
+  const dt = num(d.dt);
+  put(fields, "Time offset", dt === null ? null : `${signed(dt)} s`);
+  const freq = num(d.freq_hz);
+  put(fields, "Audio frequency", freq === null ? null : `${freq} Hz`);
+  const rf = num(d.rf_hz);
+  put(fields, "Frequency", rf === null ? null : `${formatMhz(rf)} MHz`, true);
+  return fields;
+}
+
+function ft8(e: DecoderEvent, d: Rec): EventView {
+  const mode = str(d.mode) === "ft4" ? "FT4" : "FT8";
+  const message = str(d.message) ?? e.value;
+  const callsign = str(d.callsign);
+  const to = str(d.to);
+  const grid = str(d.grid);
+  const fields = weakSignalFields(d);
+  put(fields, "Message", message);
+  return {
+    label: mode,
+    tone: d.cq === true ? "success" : "accent",
+    title: `${mode} message`,
+    headline: callsign ?? (message === "" ? mode : message.split(" ")[0] || mode),
+    tags: weakSignalTags(d),
+    detail: to !== null && callsign !== null ? `${to} ← ${message}` : message,
+    fields,
+    link: gridLink(grid),
+    mono: true,
+    raw: rawJson(d),
+  };
+}
+
+function wspr(e: DecoderEvent, d: Rec): EventView {
+  const callsign = str(d.callsign);
+  const grid = str(d.grid);
+  const dbm = num(d.power_dbm);
+  const drift = num(d.drift);
+  const fields = weakSignalFields(d);
+  put(fields, "Power", dbm === null ? null : `${dbm} dBm`);
+  put(fields, "Drift", drift === null ? null : `${signed(drift)} Hz/min`);
+  const detail = [
+    grid,
+    dbm === null ? null : `${dbm} dBm`,
+    drift === null ? null : `drift ${signed(drift)} Hz/min`,
+  ]
+    .filter((x): x is string => x !== null)
+    .join(" · ");
+  return {
+    label: "WSPR",
+    tone: "neutral",
+    title: "WSPR spot",
+    headline: callsign ?? "unknown beacon",
+    tags: weakSignalTags(d),
+    detail: detail === "" ? e.value || null : detail,
+    fields,
+    link: gridLink(grid),
     mono: true,
     raw: rawJson(d),
   };
@@ -675,6 +771,10 @@ export function describeEvent(e: DecoderEvent): EventView {
       return tetra(e, d) ?? generic(e, d);
     case "rtl433.reading":
       return rtl433(e, d);
+    case FT8_MESSAGE:
+      return ft8(e, d);
+    case WSPR_SPOT:
+      return wspr(e, d);
     default:
       return generic(e, d);
   }

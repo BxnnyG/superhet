@@ -9,7 +9,7 @@ policy shows decoder events) and nothing of the plugin management.
 
 The decoders are presented like OpenWebRX's "digital modes" (`web/src/digital/`). Next to the
 analog mode buttons (WFM NFM AM USB LSB CW) the tuning strip has a **Digital** select with
-**POCSAG**, **APRS**, **ISM** (rtl_433), **M17** (digital voice, `docs/plugins-m17.md`) and **DMR**, **dPMR**, **NXDN** (one plugin around a user-installed dsd-fme, `docs/plugins-dsd.md`; the select starts it with that protocol) and **TETRA** (`docs/plugins-tetra.md`; sets the receiver to NFM, 25 kHz); a mode is listed when its plugin is installed.
+**POCSAG**, **APRS**, **ISM** (rtl_433), **M17** (digital voice, `docs/plugins-m17.md`) and **DMR**, **dPMR**, **NXDN** (one plugin around a user-installed dsd-fme, `docs/plugins-dsd.md`; the select starts it with that protocol) **TETRA** (`docs/plugins-tetra.md`; sets the receiver to NFM, 25 kHz) and **FT8**, **FT4**, **WSPR** (`docs/plugins-ft8.md`; sets the receiver to USB, 3 kHz, and adds a **Band** select with the dial frequencies); a mode is listed when its plugin is installed.
 
 - **Pick one**: the receiver is set up (NFM, the bandwidth the decoder wants: 12.5 kHz for POCSAG
   and APRS, 250 kHz for ISM; squelch off), other digital decoders on the receiver are stopped, the
@@ -36,6 +36,8 @@ analog mode buttons (WFM NFM AM USB LSB CW) the tuning strip has a **Digital** s
   slot: source ID, `TG` / `ID` target, slot, colour code or RAN, encryption, clock) above a call log,
   and a "needs dsd-fme" notice with the places searched while the user-installed tool is missing
   (`web/src/dsd/`).
+  **FT8 / FT4 / WSPR** list decodes (station, SNR, time offset, frequency, message or locator / power / drift) with an
+  "Open locator on map" link; the first rows appear after the first complete time slot (`web/src/ft8/`).
   **TETRA** shows whether a cell is in sync (MCC/MNC, LA, colour code, carrier, measured offset, neighbour
   count, an encryption badge), the calls on the air (talking party, group, traffic channel, encryption, clock),
   a log of finished calls, short messages and status values, and "voice needs the ETSI codec" while the
