@@ -59,7 +59,7 @@ default to `null` / `false`. Migration `0005` leaves existing bookmarks untouche
   digits are octal, e.g. `23` for code 023) and takes `dcs_polarity` `N` (default) or `R`. DCS
   is stored only; the receiver has no DCS detection yet.
 - `digital`: `null` or an object `{protocol, timeslot, talkgroup, colour_code, mcc, mnc,
-  decoder_plugin_id}`. `protocol` is `tetra`, `dmr`, `dpmr` or `p25` (required); `timeslot`
+  decoder_plugin_id}`. `protocol` is `tetra`, `dmr`, `dpmr`, `nxdn`, `p25`, `pocsag`, `aprs`, `ism` or `m17` (required; the ids of the receiver's Digital picker, so a bookmark can start that mode); `timeslot`
   1..4 for `tetra`, 1..2 for `dmr`, not allowed otherwise; `talkgroup` 0..16 777 215 (GSSI,
   talkgroup); `colour_code` 0..15 (`dmr` only); `mcc` 0..999; `mnc` 0..9999;
   `decoder_plugin_id` 1..64 of `A-Za-z0-9._-`. Other members default to `null`.

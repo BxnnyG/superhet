@@ -9,17 +9,55 @@ import type { StepChoice } from "../vfo/model";
 
 export type ToneMode = "none" | "ctcss" | "dcs";
 export type DcsPolarity = "N" | "R";
-export type DigitalProtocol = "tetra" | "dmr" | "dpmr" | "p25";
+/**
+ * The ids of the receiver's Digital picker (`digital/modes.ts`) plus P25 (stored and exported, no
+ * decoder yet). Loading a bookmark with one of the picker ids starts that mode.
+ */
+export type DigitalProtocol =
+  "tetra" | "dmr" | "dpmr" | "nxdn" | "p25" | "pocsag" | "aprs" | "ism" | "m17";
 
-export const DIGITAL_PROTOCOLS: readonly DigitalProtocol[] = ["tetra", "dmr", "dpmr", "p25"];
+export const DIGITAL_PROTOCOLS: readonly DigitalProtocol[] = [
+  "pocsag",
+  "aprs",
+  "ism",
+  "m17",
+  "dmr",
+  "dpmr",
+  "nxdn",
+  "tetra",
+  "p25",
+];
 export const PROTOCOL_LABEL: Record<DigitalProtocol, string> = {
   tetra: "TETRA",
   dmr: "DMR",
   dpmr: "dPMR",
+  nxdn: "NXDN",
   p25: "P25",
+  pocsag: "POCSAG",
+  aprs: "APRS",
+  ism: "ISM",
+  m17: "M17",
 };
 /** Highest timeslot number per protocol (0 = the protocol has no timeslots in the model). */
-export const MAX_TIMESLOT: Record<DigitalProtocol, number> = { tetra: 4, dmr: 2, dpmr: 0, p25: 0 };
+export const MAX_TIMESLOT: Record<DigitalProtocol, number> = {
+  tetra: 4,
+  dmr: 2,
+  dpmr: 0,
+  nxdn: 0,
+  p25: 0,
+  pocsag: 0,
+  aprs: 0,
+  ism: 0,
+  m17: 0,
+};
+/** Protocols whose channels have talkgroups / group ids; the others are plain frequencies. */
+export const HAS_TALKGROUP: ReadonlySet<DigitalProtocol> = new Set<DigitalProtocol>([
+  "tetra",
+  "dmr",
+  "dpmr",
+  "nxdn",
+  "p25",
+]);
 
 export interface DigitalChannel {
   protocol: DigitalProtocol;
@@ -312,6 +350,7 @@ export function bookmarkTarget(b: Bookmark): AnnotationTarget {
     ...(b.squelchDb !== null ? { squelchDbfs: b.squelchDb } : {}),
     ...(b.squelchAuto ? { squelchAuto: true } : {}),
     ...(b.stepHz ? { stepHz: b.stepHz } : {}),
+    ...(b.digital !== null ? { digital: b.digital.protocol } : {}),
     toneSquelchHz: standardTone ? b.ctcssHz : null,
   };
 }
@@ -334,6 +373,49 @@ export function receiverState(
 /** Identity for merge imports: same frequency and same name (case-insensitive). */
 export const bookmarkKey = (b: Pick<BookmarkInput, "name" | "freqHz">): string =>
   `${Math.round(b.freqHz)}|${b.name.trim().toLowerCase()}`;
+
+/**
+ * The saved bookmark that already stands for what `input` would save: the same frequency (to the
+ * Hz), the same mode and the same digital mode. A different name does not make it another channel.
+ * `ignoreId` leaves one bookmark out (the one being edited).
+ */
+export function findSameChannel(
+  existing: readonly Bookmark[],
+  input: Pick<BookmarkInput, "freqHz" | "mode" | "digital">,
+  ignoreId?: string,
+): Bookmark | null {
+  const hz = Math.round(input.freqHz);
+  return (
+    existing.find(
+      (b) =>
+        b.id !== ignoreId &&
+        Math.round(b.freqHz) === hz &&
+        b.mode === input.mode &&
+        (b.digital?.protocol ?? null) === (input.digital?.protocol ?? null),
+    ) ?? null
+  );
+}
+
+/**
+ * What "update the existing bookmark" takes from a new save: the receiver state (the same channel,
+ * so only mode, bandwidth, squelch, step, sub-tone and digital mode can differ). Name, tags, notes,
+ * colour, group, favourite and scan settings stay as the user set them.
+ */
+export function receiverPatch(input: BookmarkInput): Partial<BookmarkInput> {
+  return {
+    freqHz: input.freqHz,
+    mode: input.mode,
+    bandwidthHz: input.bandwidthHz,
+    squelchDb: input.squelchDb,
+    squelchAuto: input.squelchAuto,
+    stepHz: input.stepHz,
+    toneMode: input.toneMode,
+    ctcssHz: input.ctcssHz,
+    dcsCode: input.dcsCode,
+    dcsPolarity: input.dcsPolarity,
+    digital: input.digital,
+  };
+}
 
 /** Inputs of `incoming` that are not in `existing` yet (and not repeated within itself). */
 export function newBookmarks<T extends Pick<BookmarkInput, "name" | "freqHz">>(

@@ -81,8 +81,21 @@ export class BookmarkStore {
     return null;
   }
 
+  /** The save that is on its way; a second `create` while it runs is the same save. */
+  private creating: Promise<string | null> | null = null;
+
+  /**
+   * Save a new bookmark. While a save is still in flight (the request and the re-read after it) a
+   * repeated call, for instance a double click or a second Enter, joins it instead of posting the
+   * bookmark again: the server has no uniqueness rule, so every POST would be one more row.
+   */
   create(input: BookmarkInput): Promise<string | null> {
-    return this.change(() => this.api.create(input));
+    if (this.creating !== null) return this.creating;
+    const save = this.change(() => this.api.create(input)).finally(() => {
+      this.creating = null;
+    });
+    this.creating = save;
+    return save;
   }
 
   update(id: string, patch: Partial<BookmarkInput>): Promise<string | null> {

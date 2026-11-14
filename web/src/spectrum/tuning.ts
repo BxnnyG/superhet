@@ -108,16 +108,43 @@ export class TuningController {
     this.allowed = allowed;
   }
 
+  private denied(): void {
+    // Spectrum gestures (axis drag, wheel on the scale) land here for listeners and guests.
+    toasts.push({
+      key: "tune-denied",
+      tone: "warn",
+      title: "Operators and admins only",
+      body: "Only operators and admins can change the centre frequency, sample rate or gain.",
+    });
+  }
+
+  /**
+   * Whether a centre change is refused right now (viewer may not tune, or the tuning is locked by
+   * a user or a plugin claim). If so the reason is shown (toast / lock notice) and this returns
+   * true; gestures call it when they start so they never preview a move that cannot happen.
+   */
+  refuseCentreChange(): boolean {
+    if (!this.allowed) {
+      this.denied();
+      return true;
+    }
+    const held = this.snapshot.state?.locks ?? [];
+    if (held.length > 0) {
+      this.rejectLocked(held, "tuning is locked");
+      return true;
+    }
+    return false;
+  }
+
+  /** Move the device centre (never creates a VFO, unlike a click on the spectrum). */
+  requestCentre(centerHz: number): void {
+    this.request({ centerHz });
+  }
+
   /** Request a change; fields of earlier unsent requests are overwritten, others kept. */
   request(patch: TunePatch): void {
     if (!this.allowed) {
-      // Spectrum gestures (axis drag, wheel on the scale) land here for listeners and guests.
-      toasts.push({
-        key: "tune-denied",
-        tone: "warn",
-        title: "Operators and admins only",
-        body: "Only operators and admins can change the centre frequency, sample rate or gain.",
-      });
+      this.denied();
       return;
     }
     const held = this.snapshot.state?.locks ?? [];

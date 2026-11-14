@@ -512,9 +512,20 @@ describe("bookmarks v2 panel", () => {
     setup(fakeServer(V2, undefined, GROUPS), 118_500_000);
     const list = await screen.findByRole("list", { name: "Bookmark list" });
     expect(within(list).getByText("Near current frequency")).toBeInTheDocument();
+    // The full list below the near block is headed too, so a repeated row is not a duplicate.
+    expect(within(list).queryByText("All bookmarks")).toBeNull();
     // ATIS (200 kHz) and Tower (200 kHz) are near; each also appears in its folder.
     expect(within(list).getAllByRole("button", { name: "Tune to Tower" })).toHaveLength(2);
     expect(within(list).getAllByRole("button", { name: "Tune to Dispatch" })).toHaveLength(1);
+  });
+
+  it("heads the full list under the near block, so a bookmark saved here is not seen twice", async () => {
+    setup(fakeServer(SEED), 100_100_000);
+    const list = await screen.findByRole("list", { name: "Bookmark list" });
+    const text = list.textContent ?? "";
+    expect(text.indexOf("Near current frequency")).toBeLessThan(text.indexOf("All bookmarks"));
+    // Radio X is in both blocks; the headings tell which is which.
+    expect(within(list).getAllByRole("button", { name: "Tune to Radio X" })).toHaveLength(2);
   });
 
   it("renders only a window of a long list", async () => {
@@ -600,6 +611,119 @@ describe("bookmarks v2 panel", () => {
       group_id: "g2",
       digital: { protocol: "tetra", timeslot: 4, talkgroup: 1001 },
       scan: { include: true },
+    });
+  });
+});
+
+describe("saving a bookmark", () => {
+  const draft = () =>
+    newInput({ name: "Pagers", freqHz: 439_987_500, mode: "nfm", bandwidthHz: 12_500 });
+  const posts = (server: ReturnType<typeof fakeServer>) =>
+    server.calls.filter((c) => c.method === "POST");
+
+  it("posts once when the form is submitted twice before the first save returns", async () => {
+    const server = fakeServer([]);
+    const { store } = setup(server);
+    store.openEditor({ kind: "create", draft: draft() });
+    const dialog = await screen.findByRole("dialog", { name: "Add bookmark" });
+    const form = dialog.querySelector("form") as HTMLFormElement;
+    // A double click or a repeated Enter: the second submit arrives while the first is in flight.
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(posts(server)).toHaveLength(1);
+    expect(server.items()).toHaveLength(1);
+  });
+
+  it("joins a second create while the first is in flight", async () => {
+    const server = fakeServer([]);
+    const store = new BookmarkStore(createBookmarkApi(server.fetchFn as unknown as typeof fetch));
+    const [a, b] = await Promise.all([store.create(draft()), store.create(draft())]);
+    expect([a, b]).toEqual([null, null]);
+    expect(posts(server)).toHaveLength(1);
+    // A later save is a new one.
+    await store.create(draft());
+    expect(posts(server)).toHaveLength(2);
+  });
+
+  it("asks before saving a channel that is already bookmarked, then updates it", async () => {
+    const server = fakeServer([
+      raw("a", "Pager net", 439_987_500, { notes: "keep me", bandwidth_hz: 25_000 }),
+    ]);
+    const { store } = setup(server);
+    await screen.findByRole("list", { name: "Bookmark list" });
+    store.openEditor({ kind: "create", draft: { ...draft(), squelchDb: -70 } });
+    const dialog = await screen.findByRole("dialog", { name: "Add bookmark" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(await within(dialog).findByText(/already stores this channel/)).toBeInTheDocument();
+    expect(posts(server)).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Update “Pager net”" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(posts(server)).toHaveLength(0);
+    const patch = server.calls.find((c) => c.method === "PATCH");
+    expect(patch?.url).toBe("/api/v1/bookmarks/a");
+    expect(patch?.body).toMatchObject({ bandwidth_hz: 12_500, squelch_db: -70 });
+    // Name and notes are the user's, not the draft's.
+    expect(patch?.body).not.toHaveProperty("name");
+    expect(patch?.body).not.toHaveProperty("notes");
+    expect(server.items()).toHaveLength(1);
+  });
+
+  it("still adds a second bookmark on request", async () => {
+    const server = fakeServer([raw("a", "Pager net", 439_987_500)]);
+    const { store } = setup(server);
+    await screen.findByRole("list", { name: "Bookmark list" });
+    store.openEditor({ kind: "create", draft: draft() });
+    const dialog = await screen.findByRole("dialog", { name: "Add bookmark" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Save as new" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(posts(server)).toHaveLength(1);
+    expect(server.items()).toHaveLength(2);
+  });
+
+  it("carries the running digital mode, offers every mode and saves it without asking", async () => {
+    // Same frequency and FM mode as the analogue bookmark, but a digital mode: another channel.
+    const server = fakeServer([raw("a", "Pager net", 439_987_500)]);
+    const { store } = setup(server);
+    await screen.findByRole("list", { name: "Bookmark list" });
+    store.openEditor({
+      kind: "create",
+      draft: {
+        ...draft(),
+        digital: {
+          protocol: "pocsag",
+          timeslot: null,
+          talkgroup: null,
+          colourCode: null,
+          mcc: null,
+          mnc: null,
+          decoderPluginId: "org.superhet.decoder.pocsag",
+        },
+      },
+    });
+    const dialog = await screen.findByRole("dialog", { name: "Add bookmark" });
+    expect(within(dialog).getByLabelText("Protocol")).toHaveValue("pocsag");
+    const options = within(within(dialog).getByLabelText("Protocol")).getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "Analogue",
+      "POCSAG",
+      "APRS",
+      "ISM",
+      "M17",
+      "DMR",
+      "dPMR",
+      "NXDN",
+      "TETRA",
+      "P25",
+    ]);
+    // Plain frequency modes have no talkgroup.
+    expect(within(dialog).queryByLabelText("Talkgroup")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(posts(server)).toHaveLength(1);
+    expect(posts(server)[0]?.body).toMatchObject({
+      digital: { protocol: "pocsag", decoder_plugin_id: "org.superhet.decoder.pocsag" },
     });
   });
 });

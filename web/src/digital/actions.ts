@@ -40,6 +40,8 @@ export async function enterDigital(
     throw new Error(`The ${mode.label} decoder plugin is not installed.`);
   }
   if (!acknowledged && !noticeAccepted(manifest)) return "notice";
+  // A decoder stopped a moment ago may still be in the list; decide on what the host has now.
+  await store.refreshInstances();
   const here = digitalOnVfo(store.getSnapshot().instances, device, vfo.id);
   for (const other of here.filter((h) => h.mode.id !== mode.id)) {
     await store.stopInstance(other.instance.id);
