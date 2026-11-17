@@ -32,7 +32,7 @@ argon2 = "0.6.0"
 sha2 = "0.11.1"
 base64 = "0.23.1"
 getrandom = "0.4"
-maxminddb = "0.32.0"
+maxminddb = "0.33.0"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 openidconnect = { version = "4", default-features = false }
