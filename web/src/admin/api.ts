@@ -502,6 +502,21 @@ export interface OidcView {
   /** Password logins are accepted right now. */
   localLoginActive: boolean;
   keepLocalLogin: boolean;
+  /** The last time the provider could not be reached while somebody signed in (admins only). */
+  lastError: OidcLastError | null;
+  /** Discovery run right after a save of an enabled configuration (only in the save answer). */
+  discovery: OidcTestResult | null;
+}
+
+export interface OidcLastError {
+  /** Unix seconds. */
+  at: number;
+  issuer: string;
+  /** The discovery URL that was requested. */
+  url: string | null;
+  /** The provider's HTTP status, if it answered. */
+  status: number | null;
+  message: string;
 }
 
 export interface OidcTestResult {
@@ -510,6 +525,14 @@ export interface OidcTestResult {
   error: string | null;
   /** The provider advertises an end session endpoint (RP-initiated logout). */
   endSession: boolean;
+  /** The provider's HTTP status for the discovery request, if it answered. */
+  status: number | null;
+  /** The discovery URL that was requested. */
+  url: string | null;
+  /** Explanation when the issuer looks like an endpoint URL. */
+  hint: string | null;
+  /** An issuer the provider's own document confirmed; offered, never applied. */
+  suggestedIssuer: string | null;
 }
 
 export const DEFAULT_OIDC_SETTINGS: OidcSettings = {
@@ -569,6 +592,19 @@ export function parseOidcView(raw: unknown): OidcView {
     oidcAdminExists: raw.oidc_admin_exists === true,
     localLoginActive: raw.local_login_active !== false,
     keepLocalLogin: raw.keep_local_login === true,
+    lastError: parseOidcLastError(raw.last_error),
+    discovery: isJson(raw.discovery) ? parseOidcTest(raw.discovery) : null,
+  };
+}
+
+function parseOidcLastError(raw: unknown): OidcLastError | null {
+  if (!isJson(raw)) return null;
+  return {
+    at: num(raw.at),
+    issuer: str(raw.issuer),
+    url: strOrNull(raw.url),
+    status: typeof raw.status === "number" ? raw.status : null,
+    message: str(raw.message),
   };
 }
 
@@ -602,6 +638,10 @@ export function parseOidcTest(raw: unknown): OidcTestResult {
     issuer: strOrNull(raw.issuer),
     error: strOrNull(raw.error),
     endSession: raw.end_session === true,
+    status: typeof raw.status === "number" ? raw.status : null,
+    url: strOrNull(raw.url),
+    hint: strOrNull(raw.hint),
+    suggestedIssuer: strOrNull(raw.suggested_issuer),
   };
 }
 
@@ -836,7 +876,8 @@ export interface AdminApi {
   getClientReportPolicy(signal?: AbortSignal): Promise<ClientReportPolicy>;
   putClientReportPolicy(p: ClientReportPolicy): Promise<ClientReportPolicy>;
   getOidc(signal?: AbortSignal): Promise<OidcView>;
-  putOidc(s: OidcSettings): Promise<OidcView>;
+  /** `keepIssuer`: save an issuer that looks like an endpoint URL as entered. */
+  putOidc(s: OidcSettings, opts?: { keepIssuer?: boolean }): Promise<OidcView>;
   /** Run discovery against the saved settings. */
   testOidc(): Promise<OidcTestResult>;
 }
@@ -969,8 +1010,9 @@ export function createAdminApi(fetchImpl?: FetchLike): AdminApi {
     async getOidc(signal) {
       return parseOidcView((await call("GET", `${ADMIN}/oidc`, undefined, signal)).body);
     },
-    async putOidc(s) {
-      return parseOidcView((await call("PUT", `${ADMIN}/oidc`, oidcSettingsBody(s))).body);
+    async putOidc(s, opts) {
+      const query = opts?.keepIssuer ? "?keep_issuer=true" : "";
+      return parseOidcView((await call("PUT", `${ADMIN}/oidc${query}`, oidcSettingsBody(s))).body);
     },
     async testOidc() {
       return parseOidcTest((await call("POST", `${ADMIN}/oidc/test`)).body);

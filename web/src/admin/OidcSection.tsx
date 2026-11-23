@@ -1,9 +1,10 @@
 import { useCallback, useState } from "react";
 import { ROLE_LABEL } from "../auth/permissions";
-import { describeHttpError } from "../http";
+import { HttpError, describeHttpError } from "../http";
 import { Alert, Badge, Button, Select, TextField, Toggle, toasts } from "../ui";
 import { type AdminApi, type OidcSettings, type OidcTestResult } from "./api";
 import { Card, LoadState, SaveBar, SectionHeader, copyText } from "./common";
+import { issuerHint, publicUrlMismatch } from "./oidcHints";
 import { useDraft } from "./useDraft";
 import { useLoad } from "./useLoad";
 
@@ -89,6 +90,43 @@ function UrlLine({
   );
 }
 
+/** "This is probably what you meant" with a button that puts it into the form (not saved). */
+function IssuerSuggestion({
+  message,
+  suggested,
+  onUse,
+}: {
+  message: string;
+  suggested: string | null;
+  onUse: (issuer: string) => void;
+}) {
+  return (
+    <Alert tone="warn">
+      <p>{message}</p>
+      {suggested && (
+        <p className="mt-2 flex flex-wrap items-center gap-2">
+          <code className="rounded bg-surface-2 px-2 py-1 text-xs text-fg">{suggested}</code>
+          <Button size="sm" onClick={() => onUse(suggested)}>
+            Use this issuer
+          </Button>
+        </p>
+      )}
+    </Alert>
+  );
+}
+
+/** Which discovery request failed and how, for the admin who has to find out why. */
+function describeFailure(f: {
+  url: string | null;
+  status: number | null;
+  message: string | null;
+}): string {
+  const parts = [];
+  if (f.status !== null) parts.push(`HTTP ${f.status}`);
+  if (f.url) parts.push(f.url);
+  return `${parts.join(" from ")}${parts.length ? ": " : ""}${f.message ?? "unknown error"}`;
+}
+
 function ListField({
   label,
   value,
@@ -130,26 +168,39 @@ export function OidcSection({ api }: { api: AdminApi }) {
   const [error, setError] = useState<string | null>(null);
   const [test, setTest] = useState<OidcTestResult | null>(null);
   const [testing, setTesting] = useState(false);
+  /** The server refused an issuer that looks like an endpoint; saving it needs a second click. */
+  const [refusedIssuer, setRefusedIssuer] = useState(false);
+  /** Discovery result of the last save of an enabled configuration. */
+  const [afterSave, setAfterSave] = useState<OidcTestResult | null>(null);
   const s = draft.value;
   const readOnly = view?.source === "env";
   const problem = s ? oidcProblem(s) : null;
+  const endpointHint = s ? issuerHint(s.issuer) : null;
+  const originMismatch = s ? publicUrlMismatch(s.publicUrl, window.location.origin) : null;
 
   const update = (patch: Partial<OidcSettings>) => {
     if (s) {
       draft.set({ ...s, ...patch });
       setTest(null);
+      setAfterSave(null);
+      setRefusedIssuer(false);
+      setError(null);
     }
   };
 
-  const save = async () => {
+  const save = async (keepIssuer = false) => {
     if (!s || problem) return;
     setBusy(true);
     setError(null);
+    setRefusedIssuer(false);
     try {
-      setSaved(await api.putOidc(s));
+      const view = await api.putOidc(s, { keepIssuer });
+      setSaved(view);
+      setAfterSave(view.discovery);
       toasts.push({ tone: "success", title: "Single sign-on settings saved" });
     } catch (e) {
       setError(describeHttpError(e));
+      setRefusedIssuer(e instanceof HttpError && e.code === "issuer_is_endpoint");
     } finally {
       setBusy(false);
     }
@@ -161,7 +212,16 @@ export function OidcSection({ api }: { api: AdminApi }) {
     try {
       setTest(await api.testOidc());
     } catch (e) {
-      setTest({ ok: false, issuer: null, error: describeHttpError(e), endSession: false });
+      setTest({
+        ok: false,
+        issuer: null,
+        error: describeHttpError(e),
+        endSession: false,
+        status: null,
+        url: null,
+        hint: null,
+        suggestedIssuer: null,
+      });
     } finally {
       setTesting(false);
     }
@@ -216,6 +276,13 @@ export function OidcSection({ api }: { api: AdminApi }) {
                   value={s.issuer}
                   onChange={(e) => update({ issuer: e.target.value })}
                 />
+                {endpointHint && (
+                  <IssuerSuggestion
+                    message={endpointHint.message}
+                    suggested={endpointHint.suggested}
+                    onUse={(issuer) => update({ issuer })}
+                  />
+                )}
                 <TextField
                   label="Public URL of this instance"
                   placeholder="https://sdr.example.org"
@@ -224,10 +291,11 @@ export function OidcSection({ api }: { api: AdminApi }) {
                   value={s.publicUrl}
                   onChange={(e) => update({ publicUrl: e.target.value })}
                 />
+                {originMismatch && <Alert tone="warn">{originMismatch}</Alert>}
                 <UrlLine
-                  label="Redirect URI to register at the provider"
+                  label="Callback URL (redirect URI) to register at the provider"
                   url={view.redirectUrl}
-                  copyLabel="Redirect URI"
+                  copyLabel="Callback URL"
                 />
                 <p className="text-xs text-fg-subtle">
                   Client secret:{" "}
@@ -381,12 +449,54 @@ export function OidcSection({ api }: { api: AdminApi }) {
             </Card>
           </fieldset>
 
+          {view.lastError && (
+            <Alert tone="warn">
+              <p className="font-medium">
+                The last sign-in attempt could not reach the provider (
+                {new Date(view.lastError.at * 1000).toLocaleString()}).
+              </p>
+              <p className="mt-1">{describeFailure(view.lastError)}</p>
+              <p className="mt-1 text-xs">
+                People only see “Single sign-on is not available right now.” This note is kept until
+                the next successful attempt or a change of these settings.
+              </p>
+            </Alert>
+          )}
+          {afterSave && !afterSave.ok && (
+            <Alert tone="warn">
+              <p className="font-medium">
+                Saved, but the provider could not be used. Signing in with single sign-on will fail
+                until this is fixed.
+              </p>
+              <p className="mt-1">{describeFailure({ ...afterSave, message: afterSave.error })}</p>
+            </Alert>
+          )}
+          {refusedIssuer && (
+            <Alert tone="warn">
+              <p>
+                The issuer was not saved because it looks like an endpoint URL. If it really is the
+                issuer of your provider, save it as entered.
+              </p>
+              <p className="mt-2">
+                <Button size="sm" onClick={() => void save(true)} disabled={busy}>
+                  Save as entered
+                </Button>
+              </p>
+            </Alert>
+          )}
           {problem && <Alert tone="warn">{problem}</Alert>}
+          {(test?.suggestedIssuer || (afterSave && !afterSave.ok && afterSave.suggestedIssuer)) && (
+            <IssuerSuggestion
+              message="The provider publishes its discovery document under a different issuer on the same host."
+              suggested={test?.suggestedIssuer ?? afterSave?.suggestedIssuer ?? null}
+              onUse={(issuer) => update({ issuer })}
+            />
+          )}
           {test && (
             <Alert tone={test.ok ? "info" : "danger"}>
               {test.ok
                 ? `The provider answered. Issuer: ${test.issuer ?? ""}. ${test.endSession ? "It supports ending its session on sign-out." : "It does not advertise an end session endpoint, so signing out here leaves the provider session alone."}`
-                : `The provider could not be used: ${test.error ?? "unknown error"}`}
+                : `The provider could not be used: ${describeFailure({ ...test, message: test.error })}`}
             </Alert>
           )}
           <Card className="sticky bottom-4 z-10 shadow-pop">

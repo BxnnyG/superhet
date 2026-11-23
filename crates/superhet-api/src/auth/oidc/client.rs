@@ -12,9 +12,9 @@ use openidconnect::http::Response;
 use openidconnect::url::Url;
 use openidconnect::{
     AsyncHttpClient, AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
-    EndpointMaybeSet, EndpointNotSet, EndpointSet, HttpRequest, HttpResponse, IssuerUrl, Nonce,
-    PkceCodeChallenge, PkceCodeVerifier, ProviderMetadataWithLogout, RedirectUrl, Scope,
-    TokenResponse,
+    DiscoveryError, EndpointMaybeSet, EndpointNotSet, EndpointSet, HttpRequest, HttpResponse,
+    IssuerUrl, Nonce, PkceCodeChallenge, PkceCodeVerifier, ProviderMetadataWithLogout, RedirectUrl,
+    Scope, TokenResponse,
 };
 use serde_json::Value;
 
@@ -36,13 +36,69 @@ pub enum OidcError {
     Config(String),
     /// Discovery failed.
     #[error("discovery failed: {0}")]
-    Discovery(String),
+    Discovery(DiscoveryFailure),
     /// The token request failed.
     #[error("token request failed: {0}")]
     Exchange(String),
     /// The ID token is missing or did not verify.
     #[error("ID token rejected: {0}")]
     Token(String),
+}
+
+/// Why discovery failed, with the address and HTTP status where there were any.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryFailure {
+    /// The cause, for admins and logs.
+    pub message: String,
+    /// The discovery document URL that was requested.
+    pub url: Option<String>,
+    /// The HTTP status the provider answered with (none for transport errors and for problems
+    /// found in an answer that arrived).
+    pub status: Option<u16>,
+    /// The request never got an answer (connection, timeout, redirect refused).
+    pub unreachable: bool,
+}
+
+impl DiscoveryFailure {
+    fn plain(message: String) -> Self {
+        Self {
+            message,
+            url: None,
+            status: None,
+            unreachable: false,
+        }
+    }
+}
+
+impl std::fmt::Display for DiscoveryFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+/// The URL a provider's discovery document is requested from.
+#[must_use]
+pub fn discovery_url(issuer: &str) -> String {
+    format!(
+        "{}/.well-known/openid-configuration",
+        issuer.trim().trim_end_matches('/')
+    )
+}
+
+/// The most recent failure to reach the provider while somebody tried to sign in. Kept in
+/// memory for the admin page only; the login page never sees it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct LastError {
+    /// Unix time of the failure.
+    pub at: i64,
+    /// The issuer that was being discovered.
+    pub issuer: String,
+    /// The requested discovery URL.
+    pub url: Option<String>,
+    /// The provider's HTTP status, if it answered.
+    pub status: Option<u16>,
+    /// The cause.
+    pub message: String,
 }
 
 /// Transport error of the HTTP adapter.
@@ -174,7 +230,9 @@ fn require_https(label: &str, url: &str, allow_plain: bool) -> Result<(), OidcEr
     if is_https || allow_plain {
         Ok(())
     } else {
-        Err(OidcError::Discovery(format!("{label} is not https: {url}")))
+        Err(OidcError::Discovery(DiscoveryFailure::plain(format!(
+            "{label} is not https: {url}"
+        ))))
     }
 }
 
@@ -196,7 +254,17 @@ impl Provider {
             .map_err(|e| OidcError::Config(format!("public_url: {e}")))?;
         let metadata = ProviderMetadataWithLogout::discover_async(issuer_url, http)
             .await
-            .map_err(|e| OidcError::Discovery(chain(&e)))?;
+            .map_err(|e| {
+                OidcError::Discovery(DiscoveryFailure {
+                    message: chain(&e),
+                    url: Some(discovery_url(issuer_text)),
+                    status: match &e {
+                        DiscoveryError::Response(status, _, _) => Some(status.as_u16()),
+                        _ => None,
+                    },
+                    unreachable: matches!(&e, DiscoveryError::Request(_)),
+                })
+            })?;
         // The endpoints a login talks to must be as private as the issuer itself.
         let plain_ok = allow_http || issuer_text.starts_with("http://");
         require_https(
@@ -377,6 +445,7 @@ fn chain(err: &dyn std::error::Error) -> String {
 pub struct ProviderCache {
     http: Http,
     slot: tokio::sync::Mutex<Option<(String, Arc<Provider>)>>,
+    last_error: std::sync::Mutex<Option<LastError>>,
 }
 
 impl Default for ProviderCache {
@@ -384,6 +453,7 @@ impl Default for ProviderCache {
         Self {
             http: Http::new(),
             slot: tokio::sync::Mutex::new(None),
+            last_error: std::sync::Mutex::new(None),
         }
     }
 }
@@ -416,14 +486,54 @@ impl ProviderCache {
         {
             return Ok(Arc::clone(provider));
         }
-        let provider =
-            Arc::new(Provider::discover(&self.http, settings, secret, allow_http).await?);
+        let provider = match Provider::discover(&self.http, settings, secret, allow_http).await {
+            Ok(provider) => Arc::new(provider),
+            Err(err) => {
+                if let OidcError::Discovery(failure) = &err {
+                    self.note_error(settings, failure);
+                }
+                return Err(err);
+            }
+        };
+        self.set_last_error(None);
         *slot = Some((key, Arc::clone(&provider)));
         Ok(provider)
     }
 
-    /// Drop the cached provider (settings changed).
+    /// Drop the cached provider and the remembered error (settings changed).
     pub async fn clear(&self) {
         *self.slot.lock().await = None;
+        self.set_last_error(None);
+    }
+
+    /// The last discovery failure of a login attempt, until the next success or a settings change.
+    #[must_use]
+    pub fn last_error(&self) -> Option<LastError> {
+        self.last_error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    fn set_last_error(&self, value: Option<LastError>) {
+        *self
+            .last_error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = value;
+    }
+
+    fn note_error(&self, settings: &OidcSettings, failure: &DiscoveryFailure) {
+        let at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|d| i64::try_from(d.as_secs()).ok())
+            .unwrap_or(0);
+        self.set_last_error(Some(LastError {
+            at,
+            issuer: settings.issuer.trim().to_owned(),
+            url: failure.url.clone(),
+            status: failure.status,
+            message: failure.message.clone(),
+        }));
     }
 }

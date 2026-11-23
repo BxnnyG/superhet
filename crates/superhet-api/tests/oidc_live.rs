@@ -1044,3 +1044,78 @@ async fn a_broken_environment_configuration_stops_the_api() {
     assert!(!status.success());
     let _ = &db;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_wrong_issuer_is_explained_suggested_and_never_rewritten() {
+    let rig = rig!("issuerhelp");
+    let endpoint = format!("{}/oauth/v2/authorize", rig.idp.base);
+    let mut settings = base_settings(&rig.idp, rig.port);
+    settings["issuer"] = json!(endpoint);
+
+    // An endpoint URL where the issuer belongs is refused, with the likely issuer.
+    let refused = rig.admin("PUT", "/api/v1/admin/oidc", Some(&settings));
+    assert_eq!(refused.status, 400, "{refused:?}");
+    let body = refused.json();
+    assert_eq!(body["error"], "issuer_is_endpoint");
+    assert_eq!(body["suggested_issuer"], rig.idp.base);
+    assert!(
+        body["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("issuer"))
+    );
+    assert_eq!(
+        rig.admin("GET", "/api/v1/admin/oidc", None).json()["oidc"]["issuer"],
+        "",
+        "nothing was stored"
+    );
+
+    // Kept on purpose it is saved as typed (never rewritten), and saving an enabled
+    // configuration that cannot discover its provider answers with the problem and the fix.
+    let kept = rig.admin(
+        "PUT",
+        "/api/v1/admin/oidc?keep_issuer=true",
+        Some(&settings),
+    );
+    assert_eq!(kept.status, 200, "{kept:?}");
+    let kept = kept.json();
+    assert_eq!(kept["oidc"]["issuer"], endpoint);
+    assert_eq!(kept["discovery"]["ok"], false);
+    assert_eq!(kept["discovery"]["status"], 404);
+    assert_eq!(kept["discovery"]["suggested_issuer"], rig.idp.base);
+    assert!(
+        kept["discovery"]["url"]
+            .as_str()
+            .is_some_and(|u| u.ends_with("/oauth/v2/authorize/.well-known/openid-configuration"))
+    );
+
+    // The test endpoint says the same; the saved issuer is still the typed one.
+    let test = rig.admin("POST", "/api/v1/admin/oidc/test", None).json();
+    assert_eq!(test["ok"], false);
+    assert_eq!(test["suggested_issuer"], rig.idp.base);
+    assert!(test["hint"].is_string());
+    assert_eq!(
+        rig.admin("GET", "/api/v1/admin/oidc", None).json()["oidc"]["issuer"],
+        endpoint
+    );
+
+    // A person who tries to sign in gets the generic page; the admin sees what happened.
+    let reply = http(rig.port, "GET", "/api/v1/auth/oidc/login", &[], "");
+    assert_eq!(reply.header("location"), Some("/?oidc_error=unavailable"));
+    let view = rig.admin("GET", "/api/v1/admin/oidc", None).json();
+    assert_eq!(view["last_error"]["status"], 404);
+    assert!(view["last_error"]["at"].as_i64().is_some_and(|t| t > 0));
+    assert_eq!(view["last_error"]["issuer"], endpoint);
+    let public = http(rig.port, "GET", "/api/v1/auth/status", &[], "").body;
+    assert!(
+        !public.contains("404") && !public.contains("last_error"),
+        "{public}"
+    );
+
+    // Once the admin takes the suggestion, discovery works and the error is gone.
+    settings["issuer"] = json!(rig.idp.base);
+    let fixed = rig.admin("PUT", "/api/v1/admin/oidc", Some(&settings));
+    assert_eq!(fixed.status, 200, "{fixed:?}");
+    let fixed = fixed.json();
+    assert_eq!(fixed["discovery"]["ok"], true);
+    assert!(fixed["last_error"].is_null());
+}

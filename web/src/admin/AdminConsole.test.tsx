@@ -264,6 +264,8 @@ function fakeApi(over: Partial<AdminApi> = {}): AdminApi {
       oidcAdminExists: false,
       localLoginActive: true,
       keepLocalLogin: false,
+      lastError: null,
+      discovery: null,
     }),
     putOidc: vi.fn(),
     testOidc: vi.fn().mockResolvedValue({
@@ -271,6 +273,10 @@ function fakeApi(over: Partial<AdminApi> = {}): AdminApi {
       issuer: "https://idp.example",
       error: null,
       endSession: true,
+      status: null,
+      url: null,
+      hint: null,
+      suggestedIssuer: null,
     }),
     ...over,
   };
