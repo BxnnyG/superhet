@@ -277,13 +277,15 @@ test("the aircraft panel: enable online details, then photo, route, charts and s
 
   const view = page.getByRole("dialog", { name: "ADS-B aircraft" });
   await expect(view.getByTestId("adsb-row-3c64a1")).toBeVisible({ timeout: 20_000 });
-  await view.getByTestId("adsb-row-3c64a1").click();
+  // The previous scenario left this aircraft selected; a second click would deselect it.
+  if ((await view.getByTestId("adsb-details").count()) === 0) {
+    await view.getByTestId("adsb-row-3c64a1").click();
+  }
   const details = view.getByTestId("adsb-details");
 
   // Off by default: the local facts are there, and the admin gets the action with the explanation.
   await expect(details).toContainText("DLH400");
   await expect(details.getByTestId("adsb-online-off")).toContainText("Photo, route and full type");
-  await expect(details.getByTestId("adsb-seen")).toContainText("14 history entries on 3 days");
   expect(onlineRequests.every((u) => !/lat|lon|receiver/i.test(u))).toBe(true);
   await details.getByRole("button", { name: "Enable online details" }).click();
   const dialog = page.getByRole("dialog", { name: "Enable online details?" });
@@ -307,6 +309,8 @@ test("the aircraft panel: enable online details, then photo, route, charts and s
   await expect(view.getByTestId("adsb-row-3c64a1")).toBeVisible({ timeout: 20_000 });
   await view.getByTestId("adsb-row-3c64a1").click();
 
+  // Seen before, from the (here faked) decoder history; answers from before the reload are gone.
+  await expect(details.getByTestId("adsb-seen")).toContainText("14 history entries on 3 days");
   const photo = details.getByTestId("adsb-photo");
   await expect(photo).toContainText("Photo: Example Photographer");
   const img = photo.getByRole("img");
