@@ -231,7 +231,8 @@ RUN git init -q . \
     && (strip --strip-unneeded /usr/local/lib/*.so /usr/local/lib/satdump/plugins/*.so 2>/dev/null || true)
 # Self-test: a second of silence goes through the exact command line of the adapter; SatDump has to
 # finish, find no frames and still write its dataset (it exits 0 and decodes nothing).
-RUN head -c 768000 /dev/zero > /tmp/silence.cs16 \
+RUN ldconfig \
+    && head -c 768000 /dev/zero > /tmp/silence.cs16 \
     && HOME=/tmp satdump meteor_m2-x_lrpt baseband /tmp/silence.cs16 /tmp/silence-out \
         --samplerate 192000 --baseband_format cs16 > /dev/null \
     && test -f /tmp/silence-out/dataset.json \
