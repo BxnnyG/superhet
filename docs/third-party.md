@@ -75,3 +75,15 @@ is the ICAO Annex 10 allocation of 24-bit address blocks, compiled with the help
 list kept by the tar1090 project (GPL-3.0-or-later; data of regulatory facts, AGPL-compatible).
 Photo sites (Planespotters, JetPhotos) are only linked, never fetched. Crate added for reading the
 archive: `zip` (MIT) with `flate2` and `zlib-rs` (MIT/Apache-2.0 / Zlib).
+
+## ADS-B online details (opt-in, not shipped)
+
+Off by default (ADR-0033). When an admin switches them on, `superhet-api` asks two public services
+about the selected aircraft: [adsbdb.com](https://www.adsbdb.com) (full type name, owner, route and
+airline by ICAO address and callsign; aircraft data from PlaneBase, route data by David J Taylor and
+Jim Mason, who do not allow it to be copied into other databases, so answers are kept in memory only
+and credited in the panel) and the [Planespotters.net photo API](https://www.planespotters.net/photo/api)
+(one photo per aircraft; its terms are followed: photographer credit, link back, URLs used unchanged,
+images loaded by the viewer's browser from Planespotters' image hosts, not proxied or stored). Both
+requests carry `Superhet/<version> (+https://github.com/BxnnyG/superhet)`. hexdb.io was checked and not
+used because it publishes no terms. No new crates.

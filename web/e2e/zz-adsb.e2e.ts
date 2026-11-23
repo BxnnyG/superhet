@@ -182,6 +182,182 @@ test("a mixed fleet gets the right symbols, units, trails, filters and emergency
   await page.unroute(/\/api\/v1\/adsb\/lookup\?/);
 });
 
+// What the online services would have said, answered here: the server is never asked, and the
+// photo host is answered by the browser context, so nothing leaves the test machine.
+const ONLINE_OFF = {
+  v: 1,
+  enabled: false,
+  locked: false,
+  sources: { adsbdb: "off", planespotters: "off" },
+  aircraft: null,
+  route: null,
+  photo: null,
+};
+const ONLINE_ON = {
+  v: 1,
+  enabled: true,
+  locked: false,
+  sources: { adsbdb: "ok", planespotters: "ok" },
+  aircraft: {
+    registration: "D-AIXA",
+    type: "A350 941",
+    icao_type: "A359",
+    manufacturer: "Airbus",
+    owner: "Lufthansa",
+    owner_country: "Germany",
+    owner_country_iso: "DE",
+  },
+  route: {
+    callsign: "DLH400",
+    callsign_iata: "LH400",
+    airline: { name: "Lufthansa", icao: "DLH", iata: "LH", country: "Germany" },
+    origin: {
+      name: "Frankfurt am Main Airport",
+      icao: "EDDF",
+      iata: "FRA",
+      city: "Frankfurt am Main",
+      country: "Germany",
+      country_iso: "DE",
+      lat: 50.03333,
+      lon: 8.57056,
+    },
+    destination: {
+      name: "John F Kennedy International Airport",
+      icao: "KJFK",
+      iata: "JFK",
+      city: "New York",
+      country: "United States",
+      country_iso: "US",
+      lat: 40.6398,
+      lon: -73.7789,
+    },
+  },
+  photo: {
+    src: "https://t.plnspttrs.net/05121/e2e_280.jpg",
+    link: "https://www.planespotters.net/photo/1/d-aixa-lufthansa-airbus-a350-941",
+    photographer: "Example Photographer",
+    width: 395,
+    height: 280,
+  },
+};
+const HISTORY = {
+  v: 1,
+  seen: true,
+  events: 14,
+  days: 3,
+  first_ms: Date.now() - 3 * 86_400_000,
+  last_ms: Date.now() - 2 * 3_600_000,
+  callsigns: [
+    { callsign: "DLH400", events: 9, last_ms: Date.now() - 2 * 3_600_000 },
+    { callsign: "DLH401", events: 5, last_ms: Date.now() - 86_400_000 },
+  ],
+};
+// A sky with a plane, standing in for the photo.
+const PHOTO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="395" height="280" viewBox="0 0 395 280">
+<defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b6cb0"/><stop offset="1" stop-color="#bee3f8"/></linearGradient></defs>
+<rect width="395" height="280" fill="url(#s)"/>
+<path d="M60 150 L330 120 L350 128 L330 136 L250 142 L290 200 L270 204 L200 150 L120 158 L90 175 L80 170 L96 156 L60 158 Z" fill="#f7fafc"/></svg>`;
+
+test("the aircraft panel: enable online details, then photo, route, charts and seen-before", async () => {
+  let online: unknown = ONLINE_OFF;
+  let polls = 0;
+  const onlineRequests: string[] = [];
+  await context.route("https://t.plnspttrs.net/**", (route) =>
+    route.fulfill({ status: 200, contentType: "image/svg+xml", body: PHOTO_SVG }),
+  );
+  await page.route(/\/api\/v1\/plugin-instances\/[^/]+\/status$/, (route) =>
+    route.fulfill({ json: fleetReply(polls++) }),
+  );
+  await page.route(/\/api\/v1\/adsb\/lookup\?/, (route) => route.fulfill({ json: fleetLookup() }));
+  await page.route(/\/api\/v1\/adsb\/online\?/, (route) => {
+    onlineRequests.push(route.request().url());
+    return route.fulfill({ json: online });
+  });
+  await page.route(/\/api\/v1\/adsb\/history\?/, (route) => route.fulfill({ json: HISTORY }));
+
+  const view = page.getByRole("dialog", { name: "ADS-B aircraft" });
+  await expect(view.getByTestId("adsb-row-3c64a1")).toBeVisible({ timeout: 20_000 });
+  await view.getByTestId("adsb-row-3c64a1").click();
+  const details = view.getByTestId("adsb-details");
+
+  // Off by default: the local facts are there, and the admin gets the action with the explanation.
+  await expect(details).toContainText("DLH400");
+  await expect(details.getByTestId("adsb-online-off")).toContainText("Photo, route and full type");
+  await expect(details.getByTestId("adsb-seen")).toContainText("14 history entries on 3 days");
+  expect(onlineRequests.every((u) => !/lat|lon|receiver/i.test(u))).toBe(true);
+  await details.getByRole("button", { name: "Enable online details" }).click();
+  const dialog = page.getByRole("dialog", { name: "Enable online details?" });
+  await expect(dialog).toContainText("Planespotters.net");
+  await expect(dialog).toContainText("not the receiver position");
+  const saved = page.waitForResponse(
+    (r) => r.url().endsWith("/api/v1/admin/adsb/online") && r.request().method() === "PUT",
+  );
+  await dialog.getByRole("button", { name: "Enable" }).click();
+  expect((await saved).status()).toBe(200);
+
+  // The page's CSP only learns the photo host on the next load: reload, reopen the overlay.
+  online = ONLINE_ON;
+  await page.reload();
+  await expect(page.getByRole("region", { name: "Tuning" })).toBeVisible();
+  await page.getByRole("tab", { name: "ADS-B", exact: true }).click();
+  await page
+    .getByTestId("adsb-panel")
+    .getByRole("button", { name: "Open the aircraft map and table" })
+    .click();
+  await expect(view.getByTestId("adsb-row-3c64a1")).toBeVisible({ timeout: 20_000 });
+  await view.getByTestId("adsb-row-3c64a1").click();
+
+  const photo = details.getByTestId("adsb-photo");
+  await expect(photo).toContainText("Photo: Example Photographer");
+  const img = photo.getByRole("img");
+  await expect(img).toHaveAttribute("src", "https://t.plnspttrs.net/05121/e2e_280.jpg");
+  // The image really loaded (not blocked by the page's policy).
+  await expect
+    .poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0))
+    .toBe(true);
+  await expect(details.getByTestId("adsb-identity")).toContainText("Lufthansa");
+  await expect(details.getByTestId("adsb-identity")).toContainText("Airbus A350 941");
+  const route = details.getByTestId("adsb-route");
+  await expect(route).toContainText("FRA");
+  await expect(route).toContainText("JFK");
+  await expect(route).toContainText("It can be wrong");
+  await expect(details.getByTestId("adsb-route-progress")).toContainText("to go");
+  // Charts fill once a few five-second samples are in.
+  await expect(details.getByTestId("adsb-chart-altitude").getByRole("img")).toBeVisible({
+    timeout: 30_000,
+  });
+  expect(onlineRequests.length).toBeGreaterThan(0);
+  expect(onlineRequests[0]).toMatch(/icao=3c64a1&callsign=DLH400$/);
+
+  // Desktop and phone pictures.
+  await page.emulateMedia({ colorScheme: "light" });
+  await details.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: "e2e/artifacts/adsb-panel-desktop.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(details).toBeVisible();
+  await expect(details.getByTestId("adsb-route")).toBeVisible();
+  await page.screenshot({ path: "e2e/artifacts/adsb-panel-phone.png" });
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  await page.unroute(/\/api\/v1\/plugin-instances\/[^/]+\/status$/);
+  await page.unroute(/\/api\/v1\/adsb\/lookup\?/);
+  await page.unroute(/\/api\/v1\/adsb\/online\?/);
+  await page.unroute(/\/api\/v1\/adsb\/history\?/);
+  await context.unroute("https://t.plnspttrs.net/**");
+
+  // Back to the default: nothing may ask a real service from this stack.
+  const off = await page.evaluate(async () => {
+    const res = await fetch("/api/v1/admin/adsb/online", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false, adsbdb: false, planespotters: false }),
+    });
+    return res.status;
+  });
+  expect(off).toBe(200);
+});
+
 test("the view closes, the tab keeps the numbers, and ADS-B stops cleanly", async () => {
   await page.getByRole("button", { name: "Close the ADS-B view" }).click();
   await expect(page.getByRole("dialog", { name: "ADS-B aircraft" })).toBeHidden();

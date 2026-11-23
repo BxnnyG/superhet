@@ -4,6 +4,7 @@ import type { DatabaseStatus } from "../adsb/info";
 import { describeHttpError } from "../http";
 import { Alert, Badge, Button, ConfirmDialog, toasts } from "../ui";
 import { Card, LoadState, SectionHeader } from "./common";
+import { OnlineDetailsCard } from "./OnlineDetailsCard";
 import { useLoad } from "./useLoad";
 
 const BUSY = new Set(["downloading", "importing"]);
@@ -190,6 +191,7 @@ export function AircraftDbSection({ api }: { api: AdsbApi }) {
               </p>
             </div>
           </Card>
+          <OnlineDetailsCard api={api} />
         </div>
       )}
       {removing && (

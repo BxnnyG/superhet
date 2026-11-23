@@ -19,6 +19,7 @@ mod hub;
 mod maintenance;
 mod map;
 mod metrics;
+mod online;
 mod origin;
 mod plugin_ui;
 mod plugins;
@@ -94,6 +95,7 @@ fn app(
         )))
         .merge(plugins::router(devices.clone()))
         .merge(map::router())
+        .merge(online::router(online::OnlineState::new(devices.clone())))
         .merge(adsb::router(adsb::AdsbState::new(
             devices.clone(),
             deps.db.clone(),
@@ -174,6 +176,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Reading the policy once lets the page's CSP allow the public-address lookup service when
     // the admin asks clients for it (docs/client-addresses.md).
     let _ = auth.settings().client_report().await;
+    // Likewise for the photo service's image hosts (online aircraft details, ADR-0033).
+    let _ = auth.settings().adsb_online().await;
     let ws = ws::WsState::new(
         Arc::new(hub::Hub::new(nats.clone())),
         origins.clone(),

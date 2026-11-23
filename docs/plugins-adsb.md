@@ -22,7 +22,10 @@ as a live map and table in the web UI and as events in the decoder history.
 - **Aircraft database and range statistics** (ADR-0026): registration, type, airline and country
   from an openly licensed database the admin imports, and the receiver's range per direction and
   altitude (sections below).
-- **Not done:** no route or flight-plan data, no MLAT, no UAT (978 MHz), no recording of tracks.
+- **Online details** (ADR-0033, off by default): photo, route, airline and full type name from
+  adsbdb.com and Planespotters.net once an admin switches them on (section below).
+- **Not done:** no flight-plan data of your own (a route comes only from the opt-in online source),
+  no MLAT, no UAT (978 MHz), no recording of tracks.
 
 ## Using it
 
@@ -86,12 +89,14 @@ to start):
   position. Click a row to select the aircraft: the map pans to it and the details appear above the
   table. Aircraft that are in the table but not on the map have not sent a position yet (a dot next
   to the name).
-- **Details:** callsign, registration, type, operator, country flag, squawk, barometric and GNSS
-  altitude, vertical rate with an arrow, ground speed, indicated and true airspeed, Mach (when the
-  aircraft sends them), track and heading, distance and bearing from the receiver, position and its
-  age, signal, message count, **Follow** (keeps the aircraft centred; dragging the map ends it) and
-  link-outs (Planespotters, JetPhotos, ADS-B Exchange, FlightAware, Flightradar24: plain links that
-  open the site on click, nothing is loaded from them).
+- **Details panel** (select an aircraft; see "The aircraft panel" below): callsign, registration,
+  type, operator, country flag, squawk and what it means, barometric and GNSS altitude, vertical rate
+  with an arrow, ground speed, indicated and true airspeed, Mach (when the aircraft sends them), track
+  and heading, distance and bearing from the receiver, position and its age, signal, message count,
+  charts of the last minutes, "seen by this receiver", photo and route when online details are on,
+  **Follow** (keeps the aircraft centred; dragging the map ends it) and link-outs (Planespotters,
+  JetPhotos, ADS-B Exchange, FlightAware, Flightradar24: plain links that open the site on click,
+  nothing is loaded from them).
 - **Fading:** an aircraft keeps full strength for 15 s after the last message, then fades; at
   60 s it is gone from map and table.
 - **Dark theme:** the tiles are darkened with a CSS filter in the dark theme.
@@ -202,6 +207,66 @@ anything is fetched.
   note under it says an admin can import one. About 5 % of aircraft are missing from any
   crowd-sourced database.
 
+## The aircraft panel
+
+Select an aircraft (map or table) and the panel above the table shows, from top to bottom:
+
+- **Header:** callsign, military and emergency badges, **Copy details** (a text summary on the
+  clipboard), **Share** (the browser's share sheet, where there is one; on phones), Follow, close.
+  The summary holds identity, route (if known), altitude, speed, squawk, the aircraft's position and
+  an ADS-B Exchange link. It never holds distance or bearing from the receiver or anything about
+  this server, because with the aircraft's position those would reveal where the receiver is.
+- **Photo, airline, type, registration, country** (photo and full type name only with online
+  details; the airline comes from the callsign via the local database, else from the online source).
+- **Route** (online details): origin and destination with airport names, city and country, a
+  progress bar along the great circle from the aircraft's position, distance flown and to go and an
+  estimated time at the current ground speed. It is **from a public database, looked up by callsign,
+  and can be wrong** (diversions, changed routes, reused flight numbers); the panel says so, and when
+  the aircraft is far from that route it says the entry is probably for another flight and shows no
+  progress.
+- **Squawk:** the standing meaning where there is one (7500 hijack, 7600 radio failure and
+  7700 general emergency in red; 7000, 1200, 2000, 1000, 7004, 7400, 7777 as ordinary notes).
+- **Charts:** altitude, ground speed and vertical rate from what this browser has received since
+  the aircraft appeared (a sample every 5 s, up to 30 minutes). A chart needs a few updates first.
+- **Seen by this receiver:** now, first and last time in the decoder history, entries, days and the
+  callsigns it flew under (`GET /api/v1/adsb/history`; only as far back as
+  `SUPERHET_EVENT_RETENTION_DAYS`, and only devices you may view).
+- **States.** Every part has words for loading, nothing found, unreachable or paused sources and
+  errors (with a retry). Without online details, a database or history, the panel shows what the
+  receiver itself hears. On a phone the panel is full width and scrolls above the table.
+
+### Online details
+
+Photo, route, airline, full type name and owner come from two public services and are **off by
+default**, because each lookup tells that service which aircraft somebody looked at.
+
+| Source | Provides | Sent | Terms we follow |
+|---|---|---|---|
+| [adsbdb.com](https://www.adsbdb.com) | full type name, owner, route, airline | ICAO address, callsign | No published terms. Its README forbids copying route data into other databases, so answers are kept in memory only (a few hours), never stored; credit shown: route data by David J Taylor and Jim Mason, aircraft data from PlaneBase. Its photo links are not used. |
+| [Planespotters.net](https://www.planespotters.net/photo/api) | a photo | ICAO address | [Photo API terms](https://www.planespotters.net/photo/api): photographer credited next to the image, the image links to the photo page, URLs used unchanged, the image fetched by each viewer's browser from the service's image hosts (no proxy, no copy), descriptive agent with a contact URL, API answers kept at most 24 h. |
+
+hexdb.io was checked and left out: it publishes no terms, licence or attribution rules and does not
+name where its data and photos come from.
+
+- **Switch on:** Admin, ADS-B data, card **Online details** (master switch and one switch per
+  source), or the **Enable online details** button in the panel (admins only; it first lists what
+  is sent). Everybody else sees a note that an admin can enable it. Changes are audited.
+- **Environment override:** `SUPERHET_ADSB_ONLINE` on `superhet-api`: `off` keeps everything off
+  (the console shows it locked), `adsbdb`, `planespotters` or a comma list (`all`) switches exactly
+  those on. Unset: the admin's switches decide.
+- **What leaves the server:** the ICAO address and callsign of the selected aircraft, the server's
+  own address and `Superhet/<version> (+https://github.com/BxnnyG/superhet)` as agent. Never the
+  receiver position, accounts or viewers. The browser requests only the photo from Planespotters'
+  image hosts (`t.plnspttrs.net`, `cdn.planespotters.net`), without a referrer.
+- **CSP:** the page's `img-src` names those two hosts only while the photo source is on; nothing
+  else changes. A page that was open when the photo source was enabled must be reloaded once (the
+  panel says so when the browser refuses the image).
+- **Limits:** fixed hosts, validated address and callsign, no redirects, 8 s timeout, 256 KiB
+  cap, two connections and 60 requests a minute per service, a pause of one minute after an error
+  and five after a refusal (403/429). Answers are kept in memory (aircraft 24 h, route and photo
+  6 h, misses 1 h); a restart forgets them. Nothing works around a block.
+- **Offline:** switch it off (the default) and nothing is ever requested.
+
 ## Range statistics
 
 Needs the receiver position (`lat`/`lon` in the start dialog). The plugin sees every snapshot and
@@ -256,7 +321,7 @@ countries. The history keeps aircraft identities and positions of third parties 
   lookups, `icao.ts` / `icaoRanges.ts` country, airline code, symbols, photo links, `range.ts` /
   `RangePanel.tsx` / `useRange.ts` statistics; admin section `web/src/admin/AircraftDbSection.tsx`).
   Backend: `crates/superhet-api/src/{adsb,aircraft_db}.rs`, `crates/superhet-db/src/adsb.rs`,
-  `crates/superhet-worker/src/adsb_range.rs`, adapter `src/adsb/range.rs`. Browser scenario:
+  `crates/superhet-worker/src/adsb_range.rs`, adapter `src/adsb/range.rs`; online details `crates/superhet-api/src/online.rs`, web `online.ts`, `useExtras.ts`, `OnlineCards.tsx`, `AircraftDetails.tsx`, `MiniChart.tsx`, `series.ts`, `flightRoute.ts`. Browser scenario:
   `web/e2e/zz-adsb.e2e.ts` (tiles answered locally).
 - Manual check on hardware: with a dongle and a 1090 MHz antenna, start ADS-B from the tab and
   expect messages/s within seconds and aircraft within a minute; compare with a flight tracker for

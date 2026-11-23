@@ -336,3 +336,79 @@ async fn moving_the_receiver_starts_over_and_reset_forgets_everything() {
     );
     db.drop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn aircraft_history_summarises_the_decoder_events_of_one_aircraft() {
+    use serde_json::json;
+    use superhet_db::decoder_events::{self, NewEvent};
+
+    let Some(db) = TestDb::create("adsbhist", true).await else {
+        eprintln!("DATABASE_URL not set; skipping");
+        return;
+    };
+    let event = |ts_ms: i64, device: &str, source: &str, data: serde_json::Value| NewEvent {
+        ts_ms,
+        device: device.into(),
+        vfo: None,
+        freq_hz: None,
+        mode: None,
+        kind: "adsb.aircraft".into(),
+        source: source.into(),
+        value: "x".into(),
+        meta: json!({"instance": "i1", "ts": null, "data": data}),
+    };
+    let plugin = "org.superhet.decoder.adsb";
+    let day = 86_400_000;
+    let t0 = 1_790_000_000_000;
+    for e in [
+        event(t0, "dev0", plugin, json!({"icao": "3c6444"})),
+        event(
+            t0 + 1000,
+            "dev0",
+            plugin,
+            json!({"icao": "3c6444", "callsign": "DLH123"}),
+        ),
+        event(
+            t0 + 2 * day,
+            "dev0",
+            plugin,
+            json!({"icao": "3c6444", "callsign": "DLH456"}),
+        ),
+        event(
+            t0 + 3 * day,
+            "dev1",
+            plugin,
+            json!({"icao": "3c6444", "callsign": "OTHER1"}),
+        ),
+        event(t0, "dev0", plugin, json!({"icao": "406a3d"})),
+        // Another plugin's event with an icao field is not ours.
+        event(t0, "dev0", "org.example.other", json!({"icao": "3c6444"})),
+    ] {
+        decoder_events::insert(&db.pool, &e).await.expect("insert");
+    }
+
+    let h = adsb::aircraft_history(&db.pool, "3c6444", &[])
+        .await
+        .expect("history")
+        .expect("seen");
+    assert_eq!((h.events, h.days), (4, 3));
+    assert_eq!((h.first_ms, h.last_ms), (t0, t0 + 3 * day));
+    let names: Vec<&str> = h.callsigns.iter().map(|c| c.callsign.as_str()).collect();
+    assert_eq!(names, ["OTHER1", "DLH456", "DLH123"]);
+
+    // A device the caller may not see does not leak through the history.
+    let h = adsb::aircraft_history(&db.pool, "3c6444", &["dev1".to_owned()])
+        .await
+        .expect("history")
+        .expect("seen");
+    assert_eq!((h.events, h.last_ms), (3, t0 + 2 * day));
+    assert!(h.callsigns.iter().all(|c| c.callsign != "OTHER1"));
+
+    assert!(
+        adsb::aircraft_history(&db.pool, "123456", &[])
+            .await
+            .expect("history")
+            .is_none()
+    );
+    db.drop().await;
+}

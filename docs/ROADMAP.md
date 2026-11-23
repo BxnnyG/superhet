@@ -68,7 +68,7 @@ Acceptance criteria:
 5. Lookups: cache hit rate observable, per-source switch disables all network calls of that source (test with mock server), configured rate limits are never exceeded (test).
 6. No restricted codec code in the main repo, images or release artifacts (CI check script scanning for known file names/hashes).
 
-Also done from the SCOPE decoder list: the VHF datalinks, as plugins around separate GPL tools built in the image: AIS ships with a vessel map (AIS-catcher, `docs/plugins-ais.md`), ACARS (acarsdec) and VDL Mode 2 (dumpvdl2, libacars) with a message list linked to the ADS-B map (`docs/plugins-acars.md`); ADR-0031. Synthetic-data tests only, not yet received on air.
+Also done from the SCOPE decoder list: the VHF datalinks, as plugins around separate GPL tools built in the image: AIS ships with a vessel map (AIS-catcher, `docs/plugins-ais.md`), ACARS (acarsdec) and VDL Mode 2 (dumpvdl2, libacars) with a message list linked to the ADS-B map (`docs/plugins-acars.md`); ADR-0031. Synthetic-data tests only, not yet received on air. The ADS-B aircraft panel is complete in the app: photo, route, airline and full type name from opt-in online sources (adsbdb.com, Planespotters.net; off by default, ADR-0033), charts, squawk meaning and seen-before from the local history.
 
 ## P4 – Recording, Instant Replay, event log, scanner, bookmarks
 

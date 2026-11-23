@@ -341,7 +341,10 @@ export function AdsbView({ r }: { r: Receiver }) {
           </div>
           <section
             aria-label="Aircraft table"
-            className="flex max-h-[45%] min-h-0 shrink-0 flex-col border-t border-border bg-surface-1 md:max-h-none md:w-[44rem] md:border-t-0 md:border-l"
+            className={cn(
+              "flex min-h-0 shrink-0 flex-col border-t border-border bg-surface-1 md:max-h-none md:w-[44rem] md:border-t-0 md:border-l",
+              chosen !== null && side === "aircraft" ? "max-h-[78%]" : "max-h-[45%]",
+            )}
           >
             <div className="shrink-0 border-b border-border px-3 py-2">
               <SegmentedControl
@@ -380,7 +383,9 @@ export function AdsbView({ r }: { r: Receiver }) {
                     follow={follow}
                     onFollow={setFollow}
                     info={r.adsb.info}
-                    version={infoVersion}
+                    api={r.adsb.client}
+                    series={r.adsb.series}
+                    now={now}
                   />
                 )}
                 <div className="min-h-0 flex-1 overflow-auto">

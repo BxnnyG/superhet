@@ -10,6 +10,7 @@ use superhet_db::PgPool;
 
 use crate::auth::oidc::OidcSettings;
 use crate::auth::oidc::config::KEY_OIDC;
+use crate::online::{KEY_ONLINE, OnlineSettings};
 
 /// Settings key of the guest policy.
 pub const KEY_GUEST: &str = "guest_policy";
@@ -333,6 +334,7 @@ struct Cache {
     limits: Option<Cached<Limits>>,
     client_report: Option<Cached<ClientReportPolicy>>,
     oidc: Option<Cached<OidcSettings>>,
+    online: Option<Cached<OnlineSettings>>,
 }
 
 /// The three settings documents with a read cache.
@@ -347,6 +349,11 @@ fn lookup_origin(policy: &ClientReportPolicy) -> Option<String> {
         return None;
     }
     policy.service_origin().ok()
+}
+
+/// Let the page load photos from the services that are on (the environment override applies).
+fn sync_image_origins(stored: &OnlineSettings) {
+    crate::web::set_image_origins(crate::online::effective(*stored).0.image_origins());
 }
 
 fn fresh<T: Clone>(slot: &Option<Cached<T>>) -> Option<T> {
@@ -454,6 +461,45 @@ impl SettingsStore {
             value: value.clone(),
             at: Instant::now(),
         });
+        Ok(())
+    }
+
+    /// The stored switches of the online aircraft details (all off when nothing is stored).
+    /// Reading them also keeps the page's `img-src` in step: the photo service's image hosts
+    /// are allowed only while that source is on (`SUPERHET_ADSB_ONLINE` can override).
+    pub async fn adsb_online(&self) -> OnlineSettings {
+        if let Some(v) = fresh(&self.cache().online) {
+            return v;
+        }
+        let value: OnlineSettings = self.load(KEY_ONLINE).await;
+        self.cache().online = Some(Cached {
+            value,
+            at: Instant::now(),
+        });
+        sync_image_origins(&value);
+        value
+    }
+
+    /// Replace the online details switches.
+    ///
+    /// # Errors
+    /// Fails if the database is unavailable.
+    pub async fn put_adsb_online(
+        &self,
+        value: &OnlineSettings,
+        by: &str,
+    ) -> Result<(), SettingsError> {
+        self.store(
+            KEY_ONLINE,
+            serde_json::to_value(value).unwrap_or_default(),
+            by,
+        )
+        .await?;
+        self.cache().online = Some(Cached {
+            value: *value,
+            at: Instant::now(),
+        });
+        sync_image_origins(value);
         Ok(())
     }
 
