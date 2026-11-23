@@ -37,6 +37,18 @@ base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
 /// static file layer has no access to the settings.
 static LOOKUP_ORIGIN: RwLock<Option<String>> = RwLock::new(None);
 
+/// Extra `img-src` origins: the photo service's image hosts while the admin has that source on
+/// (`online`). The viewer's browser loads photos from there, unchanged, as the service's terms
+/// require; everything else stays on our own origin.
+static IMAGE_ORIGINS: RwLock<Vec<String>> = RwLock::new(Vec::new());
+
+/// Replace the extra `img-src` origins (`https://host` each).
+pub fn set_image_origins(origins: Vec<String>) {
+    *IMAGE_ORIGINS
+        .write()
+        .unwrap_or_else(PoisonError::into_inner) = origins;
+}
+
 /// Allow (or stop allowing) the page to connect to `origin` (`https://host[:port]`).
 pub fn set_lookup_origin(origin: Option<String>) {
     *LOOKUP_ORIGIN
@@ -61,10 +73,33 @@ fn frameable(origin: &str) -> bool {
 
 /// [`csp_header`] with `frame-ancestors` limited to `framers` (none = `'none'`).
 fn csp_framed_by(framers: &[String]) -> HeaderValue {
+    let images = IMAGE_ORIGINS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    csp_with(&images, framers)
+}
+
+/// The CSP for the given extra `img-src` origins and `frame-ancestors` list.
+fn csp_with(images: &[String], framers: &[String]) -> HeaderValue {
     // Proxy mode (default): tiles come from our own origin, `img-src` needs nothing extra.
     let csp = match crate::map::tile_origin() {
         Some(tiles) => CSP.replace("blob:; connect-src", &format!("blob: {tiles}; connect-src")),
         None => CSP.to_owned(),
+    };
+    let images: Vec<&str> = images
+        .iter()
+        .map(String::as_str)
+        .filter(|o| frameable(o))
+        .collect();
+    let csp = if images.is_empty() {
+        csp
+    } else {
+        // Before the tile origin (direct mode), which sits right behind `blob:` as well.
+        csp.replace(
+            "img-src 'self' data: blob:",
+            &format!("img-src 'self' data: blob: {}", images.join(" ")),
+        )
     };
     let origin = LOOKUP_ORIGIN
         .read()
@@ -281,6 +316,31 @@ mod tests {
         assert_eq!(csp_header().to_str().unwrap_or_default(), CSP);
         set_lookup_origin(None);
         the_csp_img_src_follows_the_configured_tile_server();
+        the_csp_allows_photo_hosts_only_while_a_photo_source_is_on();
+    }
+
+    fn the_csp_allows_photo_hosts_only_while_a_photo_source_is_on() {
+        assert_eq!(csp_with(&[], &[]).to_str().unwrap_or_default(), CSP);
+        let csp = csp_with(
+            &[
+                "https://t.plnspttrs.net".into(),
+                "https://cdn.planespotters.net".into(),
+            ],
+            &[],
+        );
+        let csp = csp.to_str().unwrap_or_default();
+        assert!(
+            csp.contains(
+                "img-src 'self' data: blob: https://t.plnspttrs.net https://cdn.planespotters.net;"
+            ),
+            "{csp}"
+        );
+        // Nothing else changes: scripts and connections stay same-origin.
+        assert!(csp.contains("script-src 'self';"), "{csp}");
+        assert!(csp.contains("connect-src 'self';"), "{csp}");
+        // A value that could end the directive is refused rather than injected.
+        let refused = csp_with(&["https://x.example; script-src *".into()], &[]);
+        assert_eq!(refused.to_str().unwrap_or_default(), CSP);
     }
 
     fn html() -> Response {

@@ -235,6 +235,12 @@ pub const RULES: &[Rule] = &[
     rule("GET", "/api/v1/adsb/aircraft-db", GuestDecoder),
     rule("GET", "/api/v1/adsb/lookup", GuestDecoder),
     rule("GET", "/api/v1/adsb/range", GuestDecoder),
+    // Seen-before statistics of one aircraft (local) and the opt-in online details (ADR-0033);
+    // the switches behind the latter are an admin setting.
+    rule("GET", "/api/v1/adsb/history", GuestDecoder),
+    rule("GET", "/api/v1/adsb/online", GuestDecoder),
+    rule("GET", "/api/v1/admin/adsb/online", Admin),
+    rule("PUT", "/api/v1/admin/adsb/online", Admin),
     rule("DELETE", "/api/v1/adsb/range", Operator),
     rule(
         "POST",
@@ -564,6 +570,7 @@ mod tests {
             include_str!("plugins.rs"),
             include_str!("map.rs"),
             include_str!("adsb.rs"),
+            include_str!("online.rs"),
             include_str!("channel_plans.rs"),
             include_str!("admin/mod.rs"),
         ];

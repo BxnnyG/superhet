@@ -86,6 +86,8 @@ services:
       SUPERHET_MAP_TILE_MODE: ${SUPERHET_MAP_TILE_MODE:-proxy}
       SUPERHET_MAP_TILE_CACHE_DIR: /data/tiles
       SUPERHET_MAP_TILE_CACHE_MAX_MB: ${SUPERHET_MAP_TILE_CACHE_MAX_MB:-512}
+      # Opt-in online aircraft details (docs/plugins-adsb.md); empty = the admin switches decide.
+      SUPERHET_ADSB_ONLINE: ${SUPERHET_ADSB_ONLINE:-}
       # Recordings library and instant replay (docs/recordings.md).
       SUPERHET_RECORDINGS_DIR: /data/recordings
       SUPERHET_RECORDINGS_MAX_GB: ${SUPERHET_RECORDINGS_MAX_GB:-20}

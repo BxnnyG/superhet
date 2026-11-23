@@ -36,3 +36,4 @@ Format: one file per decision, `NNNN-short-title.md`, sections *Status*, *Contex
 | [0030](0030-backup-and-restore.md) | Backup and restore: logical archive (optionally encrypted), ops scripts, scheduled backups | accepted |
 | [0031](0031-ais-acars-vdl2-plugins.md) | AIS, ACARS and VDL Mode 2 plugins (AIS-catcher, acarsdec, dumpvdl2) | accepted |
 | [0032](0032-ft8-ft4-wspr-plugin.md) | FT8 / FT4 / WSPR through the WSJT-X decoders (`jt9`, `wsprd`), UTC slots cut by the adapter | accepted |
+| [0033](0033-adsb-online-details.md) | ADS-B aircraft panel with opt-in online details (adsbdb, Planespotters), charts and seen-before | accepted |

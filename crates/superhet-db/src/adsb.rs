@@ -588,6 +588,93 @@ pub async fn prune_activity(pool: &PgPool, before_ms: i64) -> Result<u64, Error>
     )
 }
 
+/// Plugin id the ADS-B history rows carry in `decoder_events.source`.
+const PLUGIN_ID: &str = "org.superhet.decoder.adsb";
+/// Callsigns listed in an aircraft's history at most.
+const HISTORY_CALLSIGNS: i64 = 8;
+
+/// One callsign an aircraft was heard under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeenCallsign {
+    pub callsign: String,
+    pub events: i64,
+    pub last_ms: i64,
+}
+
+/// What the decoder history knows about one aircraft ("seen before").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AircraftHistory {
+    /// History events (rationed: at most one per aircraft per `event_interval_s`).
+    pub events: i64,
+    /// Distinct UTC days with at least one event.
+    pub days: i64,
+    pub first_ms: i64,
+    pub last_ms: i64,
+    /// Newest callsign first.
+    pub callsigns: Vec<SeenCallsign>,
+}
+
+/// The history of one aircraft (24-bit ICAO address, lower-case hex), ignoring events of the
+/// devices in `exclude_devices`. `None` when it never appeared.
+///
+/// # Errors
+/// Fails if a query fails.
+pub async fn aircraft_history(
+    pool: &PgPool,
+    icao: &str,
+    exclude_devices: &[String],
+) -> Result<Option<AircraftHistory>, Error> {
+    let totals = sqlx::query(
+        "SELECT count(*) AS events, \
+                count(DISTINCT (ts AT TIME ZONE 'UTC')::date) AS days, \
+                floor(extract(epoch FROM min(ts)) * 1000)::bigint AS first_ms, \
+                floor(extract(epoch FROM max(ts)) * 1000)::bigint AS last_ms \
+         FROM superhet.decoder_events \
+         WHERE source = $1 AND kind = 'adsb.aircraft' AND meta->'data'->>'icao' = $2 \
+           AND NOT (device = ANY($3))",
+    )
+    .bind(PLUGIN_ID)
+    .bind(icao)
+    .bind(exclude_devices)
+    .fetch_one(pool)
+    .await?;
+    let events: i64 = totals.try_get("events")?;
+    if events == 0 {
+        return Ok(None);
+    }
+    let rows = sqlx::query(
+        "SELECT meta->'data'->>'callsign' AS callsign, count(*) AS events, \
+                floor(extract(epoch FROM max(ts)) * 1000)::bigint AS last_ms \
+         FROM superhet.decoder_events \
+         WHERE source = $1 AND kind = 'adsb.aircraft' AND meta->'data'->>'icao' = $2 \
+           AND NOT (device = ANY($3)) AND meta->'data'->>'callsign' IS NOT NULL \
+         GROUP BY 1 ORDER BY max(ts) DESC LIMIT $4",
+    )
+    .bind(PLUGIN_ID)
+    .bind(icao)
+    .bind(exclude_devices)
+    .bind(HISTORY_CALLSIGNS)
+    .fetch_all(pool)
+    .await?;
+    let callsigns = rows
+        .iter()
+        .map(|r| {
+            Ok(SeenCallsign {
+                callsign: r.try_get("callsign")?,
+                events: r.try_get("events")?,
+                last_ms: r.try_get("last_ms")?,
+            })
+        })
+        .collect::<Result<_, sqlx::Error>>()?;
+    Ok(Some(AircraftHistory {
+        events,
+        days: totals.try_get("days")?,
+        first_ms: totals.try_get("first_ms")?,
+        last_ms: totals.try_get("last_ms")?,
+        callsigns,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

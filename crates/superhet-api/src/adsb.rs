@@ -31,7 +31,7 @@ use superhet_db::{PgPool, adsb};
 
 use crate::access::Principal;
 use crate::aircraft_db::{self, LoadError};
-use crate::device_access::{self, Need};
+use crate::device_access::{self, Need, Subject};
 use crate::devices::{DevicesState, failure, guard_mutation, json};
 
 /// Longest accepted `icao` / `operator` query value.
@@ -110,6 +110,7 @@ pub fn router(state: AdsbState) -> Router {
     Router::new()
         .route("/api/v1/adsb/aircraft-db", get(db_status))
         .route("/api/v1/adsb/lookup", get(lookup))
+        .route("/api/v1/adsb/history", get(history))
         .route("/api/v1/adsb/range", get(range).delete(reset_range))
         .route(
             "/api/v1/admin/adsb/aircraft-db",
@@ -269,6 +270,62 @@ async fn lookup(State(state): State<AdsbState>, Query(q): Query<LookupQuery>) ->
             StatusCode::OK,
             json!({"v": 1, "aircraft": aircraft, "operators": operators}).to_string(),
         ))
+    }
+    .await;
+    result.unwrap_or_else(|r| *r)
+}
+
+#[derive(Deserialize)]
+struct HistoryQuery {
+    #[serde(default)]
+    icao: String,
+}
+
+/// `GET /api/v1/adsb/history?icao=` - when an aircraft was first and last heard, how often and
+/// under which callsigns, from the decoder history of the devices the caller may see (a local
+/// query; the history is kept for `SUPERHET_EVENT_RETENTION_DAYS`).
+async fn history(
+    State(state): State<AdsbState>,
+    Extension(principal): Extension<Principal>,
+    Query(q): Query<HistoryQuery>,
+) -> Response {
+    let result = async {
+        let icao = q.icao.trim().to_ascii_lowercase();
+        if icao.len() != 6 || !icao.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(invalid("icao must be six hex digits"));
+        }
+        let pool = pool(&state)?;
+        let denied = state
+            .devices
+            .auth
+            .device_policies()
+            .denied(&Subject::from(&principal), Need::View)
+            .await
+            .map_err(|_| {
+                Box::new(failure(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "unavailable",
+                    "device policy unavailable",
+                ))
+            })?;
+        let seen = adsb::aircraft_history(pool, &icao, &denied)
+            .await
+            .map_err(|e| internal(&e))?;
+        let body = match seen {
+            None => json!({"v": 1, "seen": false}),
+            Some(h) => json!({
+                "v": 1,
+                "seen": true,
+                "events": h.events,
+                "days": h.days,
+                "first_ms": h.first_ms,
+                "last_ms": h.last_ms,
+                "callsigns": h.callsigns.iter().map(|c| json!({
+                    "callsign": c.callsign, "events": c.events, "last_ms": c.last_ms,
+                })).collect::<Vec<_>>(),
+            }),
+        };
+        Ok::<_, Box<Response>>(json(StatusCode::OK, body.to_string()))
     }
     .await;
     result.unwrap_or_else(|r| *r)

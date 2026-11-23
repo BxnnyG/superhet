@@ -5,11 +5,23 @@
 //   DELETE /api/v1/adsb/range                   -> reset them (operator)
 //   GET    /api/v1/adsb/aircraft-db             -> source, licence and import progress
 //   POST / DELETE /api/v1/admin/adsb/aircraft-db -> import / remove the database (admin)
+//   GET    /api/v1/adsb/history                 -> "seen before" statistics of one aircraft (local)
+//   GET    /api/v1/adsb/online                  -> online details of one aircraft (opt-in, ADR-0033)
+//   GET / PUT /api/v1/admin/adsb/online         -> the admin's switches for the online sources
 
 import { apiFetch } from "../auth/session";
 import { ApiError, httpError, readJson } from "../spectrum/api";
 import { parseDatabaseStatus, parseLookup, type DatabaseStatus, type LookupReply } from "./info";
 import { parseReply, type AdsbReply } from "./model";
+import {
+  parseHistory,
+  parseOnline,
+  parseOnlineAdmin,
+  type OnlineAdmin,
+  type OnlineReply,
+  type OnlineSettings,
+  type SeenHistory,
+} from "./online";
 import { parseRange, type RangeData } from "./range";
 
 export interface AdsbApi {
@@ -20,6 +32,12 @@ export interface AdsbApi {
   database(signal?: AbortSignal): Promise<DatabaseStatus>;
   updateDatabase(source: "download" | "file"): Promise<void>;
   removeDatabase(): Promise<void>;
+  /** Details from the enabled online sources; nothing is fetched while they are off. */
+  online(icao: string, callsign: string | null, signal?: AbortSignal): Promise<OnlineReply>;
+  /** When the decoder history first and last heard the aircraft; null if never. */
+  history(icao: string, signal?: AbortSignal): Promise<SeenHistory | null>;
+  onlineSettings(signal?: AbortSignal): Promise<OnlineAdmin>;
+  setOnlineSettings(settings: OnlineSettings): Promise<void>;
 }
 
 const BASE = "/api/v1/plugin-instances";
@@ -72,6 +90,29 @@ export function createAdsbApi(fetchImpl: typeof fetch = apiFetch): AdsbApi {
     },
     async removeDatabase() {
       await call("/api/v1/admin/adsb/aircraft-db", { method: "DELETE" });
+    },
+    async online(icao, callsign, signal) {
+      const q = new URLSearchParams({ icao });
+      if (callsign !== null && callsign !== "") q.set("callsign", callsign);
+      const data = parseOnline(await call(`/api/v1/adsb/online?${q.toString()}`, { signal }));
+      if (data === null) throw new ApiError("invalid online details reply");
+      return data;
+    },
+    async history(icao, signal) {
+      const q = new URLSearchParams({ icao });
+      return parseHistory(await call(`/api/v1/adsb/history?${q.toString()}`, { signal }));
+    },
+    async onlineSettings(signal) {
+      const data = parseOnlineAdmin(await call("/api/v1/admin/adsb/online", { signal }));
+      if (data === null) throw new ApiError("invalid online settings reply");
+      return data;
+    },
+    async setOnlineSettings(settings) {
+      await call("/api/v1/admin/adsb/online", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      });
     },
   };
 }
