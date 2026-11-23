@@ -13,6 +13,9 @@ ignore = [
     # keys; it never holds or uses an RSA private key. Re-check when openidconnect moves on.
     { id = "RUSTSEC-2023-0071", reason = "Marvin attack; public-key verification only (ADR-0019)" },
     { id = "RUSTSEC-2026-0387", reason = "constant-time issues on secret integers; public-key verification only (ADR-0019)" },
+    # `chrono` arrives only with `openidconnect` / `oauth2`. Unmaintained notice, not a vulnerability,
+    # and there is no fixed version. Drop this when openidconnect moves to another time crate.
+    { id = "RUSTSEC-2026-0543", reason = "unmaintained, transitive via openidconnect only, no upgrade available" },
 ]
 
 [licenses]
