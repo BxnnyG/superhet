@@ -7,6 +7,7 @@ import {
   PlaneIcon,
   PlugIcon,
   RecordIcon,
+  SatelliteIcon,
   SettingsIcon,
   SearchIcon,
   SignalIcon,
@@ -33,6 +34,8 @@ export function tabIcon(tab: InspectorTab, size = 16): ReactNode {
       return <GlobeIcon size={size} />;
     case "adsb":
       return <PlaneIcon size={size} />;
+    case "weather":
+      return <SatelliteIcon size={size} />;
     case "panels":
       return <PlugIcon size={size} />;
     case "display":

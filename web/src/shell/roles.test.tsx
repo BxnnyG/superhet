@@ -186,6 +186,7 @@ describe("inspector tabs", () => {
       "decoders",
       "dab",
       "adsb",
+      "weather",
       "display",
       "source",
     ]);

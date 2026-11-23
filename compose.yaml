@@ -159,9 +159,11 @@ services:
       SUPERHET_PLUGIN_DIR: /data/plugins
       # Started instances are stored here and come back after a restart (never passed to plugins).
       SUPERHET_DATABASE_URL: postgres://superhet:${POSTGRES_PASSWORD}@postgres:5432/superhet
-    # Installed plugins survive container re-creation.
+    # Installed plugins survive container re-creation. The weather plugin stores the images of
+    # each pass in the recordings volume (below weather/), where the API serves them from.
     volumes:
       - plugin-data:/data/plugins
+      - recordings:/data/recordings
     depends_on:
       postgres: { condition: service_healthy }
       nats: { condition: service_healthy }

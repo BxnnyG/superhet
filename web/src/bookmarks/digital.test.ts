@@ -39,7 +39,9 @@ const saved = (id: string, over: Partial<Bookmark> = {}): Bookmark => ({
 
 describe("digital modes in bookmarks", () => {
   it("offers every mode of the Digital picker as a protocol", () => {
-    for (const m of DIGITAL_MODES) {
+    // LRPT (weather satellites, ADR-0034) is not stored with bookmarks: no migration, a bookmark
+    // of 137.9 MHz tunes the frequency only (`channelOf` answers null for it).
+    for (const m of DIGITAL_MODES.filter((mode) => mode.id !== "lrpt")) {
       expect(DIGITAL_PROTOCOLS).toContain(m.id);
       expect(PROTOCOL_LABEL[m.id as keyof typeof PROTOCOL_LABEL]).toBe(m.label);
       expect(modeOfProtocol(m.id)?.pluginId).toBe(m.pluginId);

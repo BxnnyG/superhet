@@ -1,0 +1,40 @@
+# Weather satellite images: Meteor-M N2-3 and N2-4 LRPT on 137.1 / 137.9 MHz, decoded by SatDump (a
+# separate GPL-3.0 process). Non-exclusive: bind it to a VFO on 137.900 MHz (or 137.100 MHz) with a
+# bandwidth of 144 kHz and leave it running. The plugin watches the level; when a satellite rises
+# above the noise it records the pass, decodes it after the signal is gone, and the images appear
+# in the Weather tab (ADR-0034). Config (optional, all keys):
+#   pipeline = "lrpt" | "apt"       # apt: only for recordings; no NOAA satellite transmits it now
+#   symbol_rate = "72k" | "80k"     # LRPT symbol rate, 72k is what Meteor-M N2-3/N2-4 use
+#   satellite = "METEOR-M2 4"       # name to use when SatDump does not recognise the satellite
+#   threshold_db = 3.0              # dB over the noise floor that count as a signal (0.5..30)
+#   min_seconds = 60, max_minutes = 20, arm_seconds = 5, hang_seconds = 30
+
+[plugin]
+id = "org.superhet.decoder.weather"
+name = "Weather satellites (LRPT)"
+version = "0.1.0"
+protocol = 1
+license = "AGPL-3.0-only"
+type = "decoder"
+description = "Meteor-M LRPT weather satellite images on 137 MHz: records each pass and decodes it with SatDump"
+homepage = "https://github.com/BxnnyG/superhet"
+
+[runtime]
+kind = "process"
+transport = "simple"
+command = ["superhet-plugin-adapter", "weather"]
+
+[input]
+kind = "iq"
+sample_rate = 192000
+format = "cs16"
+bandwidth_hz = 144000
+
+[output]
+events_schema = "schema/events.json"
+
+[config]
+schema = "schema/config.json"
+
+[install]
+acknowledge = { text = "Runs SatDump (GPL-3.0) as a separate process on the IQ of each recorded pass. Weather satellites broadcast their images for everybody; receiving them is legal in most countries, but check the rules where you live. The images and thumbnails are stored on the server (in the recordings volume, with a size limit) and are visible to every account that may view the device. Pass prediction uses the receiver position that ADS-B already has; it is never sent to anybody.", url = "https://github.com/SatDump/SatDump" }

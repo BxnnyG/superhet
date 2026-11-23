@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Weather satellite events",
+  "description": "Validated against the complete event object (envelope included).",
+  "oneOf": [
+    {
+      "properties": {
+        "type": { "const": "weather.recording" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "summary": { "type": "string" },
+            "started_ms": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["summary"]
+        }
+      },
+      "required": ["type", "data"]
+    },
+    {
+      "properties": {
+        "type": { "const": "weather.pass" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "summary": { "type": "string" },
+            "id": { "type": "string", "pattern": "^[0-9]{6,12}-[0-9a-f]{4}$" },
+            "satellite": { "type": ["string", "null"] },
+            "pipeline": { "enum": ["lrpt", "apt"] },
+            "started_ms": { "type": "integer", "minimum": 0 },
+            "duration_s": { "type": "integer", "minimum": 0 },
+            "images": { "type": "integer", "minimum": 1 },
+            "peak_db": { "type": ["number", "null"] },
+            "frequency_hz": { "type": ["integer", "null"], "minimum": 0 }
+          },
+          "required": ["summary", "id", "pipeline", "images"]
+        }
+      },
+      "required": ["type", "data"]
+    },
+    {
+      "properties": {
+        "type": { "const": "weather.failed" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "summary": { "type": "string" },
+            "reason": { "enum": ["no_image", "tool_missing", "tool_failed"] },
+            "detail": { "type": "string" },
+            "started_ms": { "type": "integer", "minimum": 0 },
+            "duration_s": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["summary", "reason"]
+        }
+      },
+      "required": ["type", "data"]
+    }
+  ]
+}

@@ -318,3 +318,8 @@ export const BellIcon = (p: IconProps) => (
     <path d="M6 9a6 6 0 0 1 12 0c0 6 2 7 2 7H4s2-1 2-7ZM10 20a2 2 0 0 0 4 0" />
   </Icon>
 );
+export const SatelliteIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M13 7 9 3 5 7l4 4M17 11l4 4-4 4-4-4M8 12l4 4M16 8l1-1M3 21l3-3M14 10a4 4 0 0 0-4 4" />
+  </Icon>
+);

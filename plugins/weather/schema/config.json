@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Weather satellite instance configuration",
+  "type": "object",
+  "properties": {
+    "pipeline": {
+      "description": "lrpt (Meteor-M LRPT, default) or apt (NOAA APT: for recordings only, no NOAA satellite transmits it any more).",
+      "enum": ["lrpt", "apt"]
+    },
+    "symbol_rate": {
+      "description": "LRPT symbol rate: 72k (Meteor-M N2-3 and N2-4, default) or 80k.",
+      "enum": ["72k", "80k"]
+    },
+    "satellite": {
+      "description": "Name to store with a pass when SatDump cannot tell the satellite.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "threshold_db": {
+      "description": "dB over the noise floor that count as a signal (0.5 to 30, default 3).",
+      "type": "number",
+      "minimum": 0.5,
+      "maximum": 30
+    },
+    "min_seconds": {
+      "description": "Shortest recording that is decoded (3 to 900, default 60).",
+      "type": "integer",
+      "minimum": 3,
+      "maximum": 900
+    },
+    "max_minutes": {
+      "description": "Longest recording; a pass is cut there (2 to 40, default 20).",
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 40
+    },
+    "arm_seconds": {
+      "description": "How long the signal must stay up before a pass starts (1 to 60, default 5).",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 60
+    },
+    "hang_seconds": {
+      "description": "How long it must stay down before the pass is over (1 to 300, default 30).",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 300
+    }
+  },
+  "additionalProperties": false
+}

@@ -132,4 +132,21 @@ for case in "ft8 CQ DL1ABC JO62" "wspr K1ABC FN42 37"; do
         fail=1
     fi
 done
+# Weather satellites: SatDump (compiled in the Dockerfile) must have all its libraries and run the
+# adapter's whole decode chain on a second of silence: no image comes out (exit status 1 is the
+# adapter's "decoded, nothing to show"), but SatDump has to start, read the file and finish.
+if docker run --rm --entrypoint sh "$image" -c '! ldd /usr/local/bin/satdump /usr/local/lib/libsatdump_core.so /usr/local/lib/satdump/plugins/*.so | grep -q "not found"'; then
+    echo "ok   satdump links"
+else
+    echo "FAIL satdump is missing or lacks a library"
+    docker run --rm --entrypoint sh "$image" -c 'ldd /usr/local/bin/satdump /usr/local/lib/satdump/plugins/*.so | grep "not found"' || true
+    fail=1
+fi
+if docker run --rm --entrypoint sh -e SUPERHET_WEATHER_DIR=/tmp/weather "$image" -c \
+    'head -c 768000 /dev/zero > /tmp/silence.cs16; superhet-plugin-adapter weather-decode --rate 192000 /tmp/silence.cs16 >/dev/null 2>&1; test $? -eq 1'; then
+    echo "ok   satdump decodes (silence) through the weather adapter"
+else
+    echo "FAIL the weather adapter could not run satdump on a recording"
+    fail=1
+fi
 exit "$fail"

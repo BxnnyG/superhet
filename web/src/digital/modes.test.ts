@@ -24,6 +24,7 @@ describe("digital modes", () => {
       "ais",
       "acars",
       "vdl2",
+      "lrpt",
       "ft8",
       "ft4",
       "wspr",
