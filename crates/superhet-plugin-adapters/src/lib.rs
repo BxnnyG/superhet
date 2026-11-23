@@ -22,3 +22,4 @@ pub mod rtl433;
 pub mod run;
 pub mod tetra;
 pub mod vdl2;
+pub mod weather;

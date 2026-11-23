@@ -1,4 +1,4 @@
-//! `superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17|dsd|tetra|ft8|ais|acars|vdl2>`: runs the external decoder for one of the
+//! `superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17|dsd|tetra|ft8|ais|acars|vdl2|weather|weather-decode>`: runs the external decoder for one of the
 //! first-party plugins (see the library docs). Samples arrive on stdin, events leave on stdout,
 //! the instance configuration is read from `SUPERHET_CONFIG`.
 
@@ -8,7 +8,7 @@ use serde_json::Value;
 use superhet_plugin_adapters::{
     acars, adsb, ais, aprs, dab, dsd, ft8, m17, pager, rtl433,
     run::{run, run_many},
-    tetra, vdl2,
+    tetra, vdl2, weather,
 };
 
 fn config() -> Result<Value, String> {
@@ -100,8 +100,10 @@ fn start(mode: &str) -> Result<ExitCode, String> {
         "ais" => ais::start("AIS-catcher", &config),
         "acars" => acars::start("acarsdec", &config, centre_hz()),
         "vdl2" => vdl2::start("dumpvdl2", &config, centre_hz()),
+        "weather" => weather::start(&config),
+        "weather-decode" => weather::decode_cli(&std::env::args().skip(2).collect::<Vec<_>>()),
         other => Err(format!(
-            "unknown mode {other:?} (pocsag, aprs, rtl433, dab, adsb, m17, dsd, tetra, ft8, ais, acars, vdl2)"
+            "unknown mode {other:?} (pocsag, aprs, rtl433, dab, adsb, m17, dsd, tetra, ft8, ais, acars, vdl2, weather, weather-decode)"
         )),
     }
 }
@@ -109,7 +111,7 @@ fn start(mode: &str) -> Result<ExitCode, String> {
 fn main() -> ExitCode {
     let Some(mode) = std::env::args().nth(1) else {
         eprintln!(
-            "usage: superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17|dsd|tetra|ft8|ais|acars|vdl2>"
+            "usage: superhet-plugin-adapter <pocsag|aprs|rtl433|dab|adsb|m17|dsd|tetra|ft8|ais|acars|vdl2|weather|weather-decode>"
         );
         return ExitCode::from(2);
     };
