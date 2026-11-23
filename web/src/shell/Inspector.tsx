@@ -6,6 +6,7 @@ import { BookmarksPanel } from "../bookmarks/BookmarksPanel";
 import { ChannelsPanel } from "../channels/ChannelsPanel";
 import { AdsbPanel } from "../adsb/AdsbPanel";
 import { DabPanel } from "../dab/DabPanel";
+import { WeatherPanel } from "../weather/WeatherPanel";
 import { RecordingsPanel } from "../recordings/RecordingsPanel";
 import { ScannerPanel } from "../scanner/ScannerPanel";
 import { DecodersTab } from "../decoders/DecodersTab";
@@ -183,6 +184,8 @@ function TabBody({ r, tab, phoneUp }: { r: Receiver; tab: InspectorTab; phoneUp:
       return <DabPanel r={r} />;
     case "adsb":
       return <AdsbPanel r={r} />;
+    case "weather":
+      return <WeatherPanel r={r} />;
     case "panels":
       return <PanelsTab r={r} />;
     case "display":

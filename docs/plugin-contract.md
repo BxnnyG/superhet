@@ -145,7 +145,7 @@ Mechanics, per process start of an instance:
 The process starts in the plugin directory, in its own process group, with an empty environment
 plus `PATH`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR`, `SUPERHET_DSD_FME_PATH` (the location of the
 user-installed `dsd-fme`, `docs/plugins-dsd.md`), `SUPERHET_TETRA_CODEC_DIR` (the user's ETSI codec
-directory) and `SUPERHET_TETRA_RX_PATH` (an alternative `tetra-rx`, `docs/plugins-tetra.md`) from the host (NATS and database credentials are
+directory) and `SUPERHET_TETRA_RX_PATH` (an alternative `tetra-rx`, `docs/plugins-tetra.md`), `SUPERHET_WEATHER_DIR` (the weather image store) and `SUPERHET_SATDUMP_PATH` (an alternative `satdump`, `docs/plugins-weather.md`) from the host (NATS and database credentials are
 never passed on) and:
 
 | Variable | Content |

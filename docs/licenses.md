@@ -18,6 +18,7 @@ External components run as **separate processes** (plugins) or are **dynamically
 | readsb (wiedehopf) | ADS-B plugin | GPL-3.0 (+ BSD parts) | runtime image (built from a pinned upstream commit in the Dockerfile, separate process, `docs/third-party.md`) | – |
 | Leaflet | ADS-B map (web UI) | BSD-2-Clause | npm, bundled into the web build | – |
 | OpenStreetMap tiles | ADS-B map | ODbL (data), tile usage policy | loaded by the viewer's browser, attribution on the map | – |
+| SatDump | weather plugin (`docs/plugins-weather.md`) | GPL-3.0 | runtime image (built from a pinned upstream commit in the Dockerfile, separate process, `docs/third-party.md`) | ADR-0034 |
 | AIS-catcher | AIS plugin (`docs/plugins-ais.md`) | GPL-3.0 | runtime image (built from a pinned upstream commit in the Dockerfile, separate process, `docs/third-party.md`) | ADR-0031 |
 | acarsdec (f00b4r0 fork) | ACARS plugin (`docs/plugins-acars.md`) | GPL-2.0 | runtime image (built from a pinned upstream commit in the Dockerfile, separate process, `docs/third-party.md`) | original TLeconte repo archived; ADR-0031 |
 | dumpvdl2 | VDL2 plugin (`docs/plugins-acars.md`) | GPL-3.0 | runtime image (built from a pinned upstream commit in the Dockerfile, separate process, `docs/third-party.md`) | ADR-0031 |

@@ -70,6 +70,8 @@ Acceptance criteria:
 
 Also done from the SCOPE decoder list: the VHF datalinks, as plugins around separate GPL tools built in the image: AIS ships with a vessel map (AIS-catcher, `docs/plugins-ais.md`), ACARS (acarsdec) and VDL Mode 2 (dumpvdl2, libacars) with a message list linked to the ADS-B map (`docs/plugins-acars.md`); ADR-0031. Synthetic-data tests only, not yet received on air.
 
+Weather satellites (ADR-0034, `docs/plugins-weather.md`): Meteor-M N2-3 / N2-4 LRPT through SatDump (the NOAA APT satellites were decommissioned in 2025 and are only supported for recordings), a pass recorder that triggers on the signal level, SGP4 pass prediction with an opt-in CelesTrak download or pasted element sets, and a Weather tab with the pass list, a Tune button and the image gallery. Open: scheduled retuning at the start of a pass; nothing received on air yet.
+
 ## P4 – Recording, Instant Replay, event log, scanner, bookmarks
 
 Scope: audio recording per VFO/call, SigMF IQ recording, Instant Replay (audio always on, IQ optional RAM/disk), event log with FTS5 search, filters, timeline, export; bookmarks, frequency lists (CSV, SDR# Frequency Manager), bandplan overlay; scanner.

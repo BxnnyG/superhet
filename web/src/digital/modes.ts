@@ -7,6 +7,12 @@ import { AIS_PLUGIN_ID, AIS_VESSEL } from "../ais/format";
 import { ACARS_MESSAGE, ACARS_PLUGIN_ID, VDL2_MESSAGE, VDL2_PLUGIN_ID } from "../datalink/model";
 import { formatMhz } from "../decoders/events";
 import {
+  WEATHER_FAILED,
+  WEATHER_PASS,
+  WEATHER_PLUGIN_ID,
+  WEATHER_RECORDING,
+} from "../weather/model";
+import {
   FT8_MESSAGE,
   FT8_PLUGIN_ID,
   WSPR_SPOT,
@@ -41,7 +47,8 @@ export type DigitalModeId =
   | "wspr"
   | "ais"
   | "acars"
-  | "vdl2";
+  | "vdl2"
+  | "lrpt";
 
 export interface FrequencyHint {
   loHz: number;
@@ -264,6 +271,30 @@ export const DIGITAL_MODES: readonly DigitalMode[] = [
     noun: "messages",
     expect:
       "Put the receiver on a VDL2 channel (136.975 MHz is the common signalling channel and always busy near airports; 136.725 to 136.875 MHz carry the traffic in Europe). The decoder reads the frequency when it starts, so restart it after retuning. Link management frames are left out unless you ask for them in the decoder settings.",
+  },
+  {
+    id: "lrpt",
+    label: "LRPT",
+    title: "Meteor-M weather satellite images (LRPT, 137 MHz): records each pass and decodes it",
+    pluginId: WEATHER_PLUGIN_ID,
+    eventKinds: [WEATHER_RECORDING, WEATHER_PASS, WEATHER_FAILED],
+    // The plugin takes the VFO's complex baseband (144 kHz) and watches its level for a satellite.
+    vfo: { mode: "nfm", bandwidthHz: 144_000, squelchDbfs: null },
+    hints: [
+      {
+        loHz: 137_850_000,
+        hiHz: 137_950_000,
+        note: "Meteor-M N2-3 / N2-4 LRPT (137.900 MHz)",
+      },
+      {
+        loHz: 137_050_000,
+        hiHz: 137_150_000,
+        note: "Meteor-M N2-3 / N2-4 LRPT (137.100 MHz, used at times)",
+      },
+    ],
+    noun: "passes",
+    expect:
+      "Leave it running: when a Meteor-M satellite rises the decoder records the pass and, a minute after the signal is gone, decodes it; the images appear in the Weather tab. The Weather tab lists when the satellites pass. You need a 137 MHz antenna (a V-dipole or QFH) with a clear sky; no NOAA satellite transmits any more.",
   },
   ft8Mode(
     "ft8",

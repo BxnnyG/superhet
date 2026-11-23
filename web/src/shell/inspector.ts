@@ -13,6 +13,7 @@ export const INSPECTOR_TABS = [
   "decoders",
   "dab",
   "adsb",
+  "weather",
   "panels",
   "display",
   "source",
@@ -34,7 +35,7 @@ export function visibleTabs(
     (t) =>
       // Recordings, like bookmarks, are for accounts; guests have neither.
       ((t !== "bookmarks" && t !== "recordings") || perms.canReadBookmarks) &&
-      ((t !== "decoders" && t !== "dab" && t !== "adsb" && t !== "panels") ||
+      ((t !== "decoders" && t !== "dab" && t !== "adsb" && t !== "weather" && t !== "panels") ||
         perms.canSeeDecoders) &&
       (t !== "panels" || hasPanels),
   );
@@ -49,6 +50,7 @@ export const INSPECTOR_LABEL: Record<InspectorTab, string> = {
   decoders: "Decoders",
   dab: "DAB",
   adsb: "ADS-B",
+  weather: "Weather",
   panels: "Plugins",
   display: "Display",
   source: "Source",
