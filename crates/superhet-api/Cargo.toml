@@ -23,6 +23,7 @@ superhet-bus.workspace = true
 superhet-db.workspace = true
 superhet-notify = { path = "../superhet-notify" }
 superhet-recording.workspace = true
+superhet-satpass = { path = "../superhet-satpass" }
 tokio = { workspace = true, features = ["time", "fs", "io-util"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true

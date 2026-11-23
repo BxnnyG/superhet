@@ -3432,6 +3432,7 @@ dependencies = [
  "superhet-notify",
  "superhet-plugin-protocol",
  "superhet-recording",
+ "superhet-satpass",
  "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite 0.30.0",

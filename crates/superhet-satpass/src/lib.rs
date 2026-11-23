@@ -11,10 +11,13 @@
 //! atmosphere is ignored. Times of a pass are good to a second or two for fresh elements; the
 //! error of the element set itself (days old: seconds to a minute) is larger.
 
+pub mod catalogue;
+
 use std::f64::consts::PI;
 
 use serde::Serialize;
-use sgp4::{Constants, Elements, MinutesSinceEpoch};
+use sgp4::{Constants, MinutesSinceEpoch};
+pub use sgp4::{Elements, chrono};
 
 /// Most element sets parsed from one text (a CelesTrak group has a few hundred).
 pub const MAX_ELEMENTS: usize = 2000;

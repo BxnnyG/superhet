@@ -229,6 +229,13 @@ RUN git init -q . \
     && cmake --build build -j"$(nproc)" \
     && cmake --install build --strip \
     && (strip --strip-unneeded /usr/local/lib/*.so /usr/local/lib/satdump/plugins/*.so 2>/dev/null || true)
+# Self-test: a second of silence goes through the exact command line of the adapter; SatDump has to
+# finish, find no frames and still write its dataset (it exits 0 and decodes nothing).
+RUN head -c 768000 /dev/zero > /tmp/silence.cs16 \
+    && HOME=/tmp satdump meteor_m2-x_lrpt baseband /tmp/silence.cs16 /tmp/silence-out \
+        --samplerate 192000 --baseband_format cs16 > /dev/null \
+    && test -f /tmp/silence-out/dataset.json \
+    && rm -rf /tmp/silence.cs16 /tmp/silence-out
 
 # ---- Stage 9: runtime ----
 FROM debian:bookworm-slim
@@ -239,12 +246,14 @@ FROM debian:bookworm-slim
 # plugin) needs zstd; m17-demod (M17 plugin) needs Codec2 and Boost.Program_options (about 3 MiB);
 # tetra-rx (TETRA plugin) needs libosmocore; dumpvdl2 (VDL2 plugin) needs GLib and acarsdec (ACARS
 # plugin) cJSON; jt9 / wsprd (FT8 plugin) need Qt5Core, libgfortran and
-# libgomp (libfftw3-single3 above).
+# libgomp (libfftw3-single3 above); SatDump (weather plugin) needs VOLK, nng, jemalloc, libpng,
+# libtiff and libcurl (about 14 MiB; SatDump itself is about 53 MiB with its resources).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends librtlsdr0 libopus0 multimon-ng direwolf rtl-433 \
         libfaad2 libfftw3-single3 libmp3lame0 libmpg123-0 libasound2 libairspy0 libsoapysdr0.8 libusb-1.0-0 libzstd1 ca-certificates \
         libcodec2-1.0 libboost-program-options1.74.0 libosmocore19 libglib2.0-0 libcjson1 \
         libqt5core5a libgfortran5 libgomp1 \
+        libvolk2.5 libnng1 libjemalloc2 libpng16-16 libtiff6 libcurl4 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home --home-dir /home/superhet superhet \
     && mkdir -p /data/plugins /data/tiles /data/recordings /data/backups \
@@ -282,6 +291,13 @@ COPY --from=datalink /src/dumpvdl2/build/src/dumpvdl2 /usr/bin/dumpvdl2
 COPY --from=datalink /src/dumpvdl2/LICENSE /usr/share/doc/dumpvdl2/copyright
 COPY --from=datalink /usr/local/lib/libacars-2.so* /usr/local/lib/
 COPY --from=datalink /src/libacars/LICENSE.md /usr/share/doc/libacars/copyright
+# SatDump (headless CLI, GPL-3.0) as compiled above: binary, its core library and plugins, and the
+# resources (pipelines, maps). Meteor-M LRPT and NOAA APT only; no GUI and no SDR drivers.
+COPY --from=weather /usr/local/bin/satdump /usr/local/bin/satdump
+COPY --from=weather /usr/local/lib/libsatdump_core.so /usr/local/lib/libsatdump_core.so
+COPY --from=weather /usr/local/lib/satdump /usr/local/lib/satdump
+COPY --from=weather /usr/local/share/satdump /usr/local/share/satdump
+COPY --from=weather /src/satdump/LICENSE /usr/share/doc/satdump/copyright
 RUN ldconfig
 
 COPY --from=rust /usr/local/lib/libsuperhet-loopback-bind.so /usr/local/lib/superhet/libsuperhet-loopback-bind.so
@@ -308,6 +324,9 @@ COPY plugins/dsd /usr/share/superhet/plugins/dsd
 COPY plugins/tetra /usr/share/superhet/plugins/tetra
 # FT8 / FT4 / WSPR (jt9 and wsprd are in the image, docs/plugins-ft8.md).
 COPY plugins/ft8 /usr/share/superhet/plugins/ft8
+# Weather satellites (Meteor-M LRPT): SatDump is in the image, the images go to the recordings volume
+# (docs/plugins-weather.md).
+COPY plugins/weather /usr/share/superhet/plugins/weather
 # The API does not serve the frontend yet; the build output is shipped for later use.
 COPY --from=web /src/web/dist /usr/share/superhet/web
 

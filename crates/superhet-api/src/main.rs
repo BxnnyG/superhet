@@ -32,6 +32,7 @@ mod share;
 mod state_ws;
 mod tiles;
 mod view;
+mod weather;
 mod web;
 mod ws;
 
@@ -103,6 +104,10 @@ fn app(
         .merge(recordings::router(recordings::RecordingsState::new(
             devices.clone(),
             recorder,
+        )))
+        .merge(weather::router(weather::WeatherState::new(
+            devices.clone(),
+            deps.db.clone(),
         )))
         .merge(devices::router(devices));
     let router = Router::new()
@@ -212,6 +217,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let web = web::Web::from_env().with_shares(Arc::clone(auth.share_links()));
     maintenance::spawn(auth.clone(), devices.clone());
+    // Trims the weather gallery to its quota and refreshes element sets the admin allowed.
+    weather::WeatherState::new(devices.clone(), db.clone()).spawn_background();
     share::spawn_upkeep(auth.clone(), devices.clone());
     let app = app(
         web,
@@ -314,6 +321,9 @@ mod tests {
             "/api/v1/recordings",
             "/api/v1/recordings/config",
             "/api/v1/recordings/1/file",
+            "/api/v1/weather/config",
+            "/api/v1/weather/captures",
+            "/api/v1/weather/captures/1700000000-0001/images/a.png",
             "/api/v1/devices/rtl0/vfos/1/replay",
             "/api/v1/bookmarks",
             "/api/v1/decoder-events",
