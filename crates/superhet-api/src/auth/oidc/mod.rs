@@ -5,7 +5,9 @@
 
 pub(crate) mod client;
 pub(crate) mod config;
+pub(crate) mod diagnose;
 pub(crate) mod flow;
+pub(crate) mod hints;
 pub(crate) mod link;
 pub(crate) mod logout;
 mod routes;

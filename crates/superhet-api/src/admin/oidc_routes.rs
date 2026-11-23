@@ -3,7 +3,7 @@
 use axum::{
     Extension,
     body::Bytes,
-    extract::State,
+    extract::{Query, State},
     http::{HeaderMap, StatusCode},
     response::Response,
 };
@@ -13,7 +13,7 @@ use superhet_bus::audit::Outcome;
 use super::settings_routes::{changed_keys, store_failed, to_value};
 use super::{AdminState, bad, conflict};
 use crate::access::Principal;
-use crate::auth::oidc::{OidcSettings, Source, client::Provider};
+use crate::auth::oidc::{OidcSettings, Source, diagnose::diagnose, hints};
 use crate::auth::{Reply, db_failed, flatten, guard_origin, json_reply, parse_json};
 
 /// The settings document with everything the admin page shows next to it.
@@ -37,6 +37,7 @@ async fn view(state: &AdminState) -> Result<Value, Response> {
         "oidc_admin_exists": oidc_admin,
         "local_login_active": auth.local_login_allowed().await,
         "keep_local_login": env.keep_local_login,
+        "last_error": auth.oidc().providers.last_error(),
     }))
 }
 
@@ -48,16 +49,30 @@ async fn get_inner(state: &AdminState) -> Reply {
     Ok(json_reply(StatusCode::OK, &view(state).await?))
 }
 
+/// `PUT /api/v1/admin/oidc?keep_issuer=true` keeps an issuer that looks like an endpoint URL.
+#[derive(serde::Deserialize, Default)]
+pub(super) struct PutQuery {
+    #[serde(default)]
+    keep_issuer: bool,
+}
+
 pub(super) async fn put(
     State(state): State<AdminState>,
     Extension(me): Extension<Principal>,
+    Query(query): Query<PutQuery>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    flatten(put_inner(&state, &me, &headers, &body).await)
+    flatten(put_inner(&state, &me, &headers, &body, query.keep_issuer).await)
 }
 
-async fn put_inner(state: &AdminState, me: &Principal, headers: &HeaderMap, body: &Bytes) -> Reply {
+async fn put_inner(
+    state: &AdminState,
+    me: &Principal,
+    headers: &HeaderMap,
+    body: &Bytes,
+    keep_issuer: bool,
+) -> Reply {
     guard_origin(&state.auth, headers)?;
     let db = state.auth.db()?;
     let (old, source) = state.auth.oidc_settings().await;
@@ -70,6 +85,18 @@ async fn put_inner(state: &AdminState, me: &Principal, headers: &HeaderMap, body
     let new: OidcSettings = parse_json(headers, body)?;
     new.validate(state.auth.oidc().env.allow_http)
         .map_err(|m| bad(&m))?;
+    // An endpoint URL where the issuer belongs is refused with the likely issuer, so the admin
+    // decides; nothing is rewritten here.
+    if !keep_issuer && let Some(hint) = hints::issuer_hint(&new.issuer) {
+        return Err(json_reply(
+            StatusCode::BAD_REQUEST,
+            &json!({
+                "error": "issuer_is_endpoint",
+                "message": hint.message,
+                "suggested_issuer": hint.suggested,
+            }),
+        ));
+    }
     // Password logins may only go away while somebody can still sign in as admin through OIDC.
     let switching_off = new.enabled && !new.local_login;
     if switching_off
@@ -101,7 +128,23 @@ async fn put_inner(state: &AdminState, me: &Principal, headers: &HeaderMap, body
             json!({"changed": changed_keys(&to_value(&old), &to_value(&new)), "enabled": new.enabled}),
         )
         .await;
-    Ok(json_reply(StatusCode::OK, &view(state).await?))
+    let mut body = view(state).await?;
+    // Saved either way; an enabled configuration that cannot discover its provider is reported
+    // next to it so the admin sees the problem now, not when the first person fails to sign in.
+    body["discovery"] = if new.enabled {
+        let env = &state.auth.oidc().env;
+        let found = diagnose(
+            state.auth.oidc().providers.http(),
+            &new,
+            env.client_secret.as_ref(),
+            env.allow_http,
+        )
+        .await;
+        found.to_json()
+    } else {
+        Value::Null
+    };
+    Ok(json_reply(StatusCode::OK, &body))
 }
 
 /// Run discovery against the effective settings, enabled or not, and report what the provider
@@ -118,20 +161,12 @@ async fn test_inner(state: &AdminState) -> Reply {
     if settings.issuer.trim().is_empty() {
         return Err(bad("issuer is not set"));
     }
-    let result = Provider::discover(
+    let found = diagnose(
         auth.oidc().providers.http(),
         &settings,
         env.client_secret.as_ref(),
         env.allow_http,
     )
     .await;
-    let body = match result {
-        Ok(provider) => json!({
-            "ok": true,
-            "issuer": provider.issuer(),
-            "end_session": provider.has_end_session(),
-        }),
-        Err(err) => json!({"ok": false, "error": err.to_string()}),
-    };
-    Ok(json_reply(StatusCode::OK, &body))
+    Ok(json_reply(StatusCode::OK, &found.to_json()))
 }
