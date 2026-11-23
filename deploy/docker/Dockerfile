@@ -199,6 +199,37 @@ RUN head -c 480000 /dev/zero | /src/acarsdec/build/acarsdec -e --output json:fil
     && head -c 840000 /dev/zero | /src/dumpvdl2/build/src/dumpvdl2 --iq-file - --sample-format U8 \
         --oversample 4 --centerfreq 136975000 --output decoded:json:file:path=- 136975000
 
+# ---- Stage 8b: SatDump (headless) built from source ----
+# The weather-satellite plugin wraps SatDump (GPL-3.0; ADR-0034) for Meteor-M LRPT and NOAA APT.
+# Debian bookworm does not package it, so the CLI is compiled from the pinned tag 1.2.2 (commit
+# below). No GUI, no OpenCL, no SDR source plugins (IQ comes from a file written by the adapter)
+# and only the Meteor and NOAA product plugins. It is installed below /usr/local together with
+# its resources (pipelines, config) and the few shared libraries it needs.
+FROM debian:bookworm-slim AS weather
+ARG SATDUMP_COMMIT=7aef0fe8441bc3eb440b1b6ba053556da5e40991
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential cmake git ca-certificates \
+        pkg-config libpng-dev libtiff-dev libfftw3-dev libvolk2-dev libnng-dev libjemalloc-dev \
+        libcurl4-openssl-dev libzstd-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src/satdump
+RUN git init -q . \
+    && git fetch -q --depth 1 https://github.com/SatDump/SatDump "$SATDUMP_COMMIT" \
+    && git checkout -q FETCH_HEAD \
+    && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DBUILD_GUI=OFF -DBUILD_OPENCL=OFF -DBUILD_ZIQ=OFF -DBUILD_TOOLS=OFF -DBUILD_TESTING=OFF \
+        -DPLUGINS_ALL=OFF -DPLUGIN_METEOR=ON -DPLUGIN_NOAA_METOP=ON \
+        -DPLUGIN_SIMD_SSE41=OFF -DPLUGIN_SIMD_NEON=OFF -DPLUGIN_SIMD_AVX2=OFF \
+        -DPLUGIN_AIRSPY_SDR_SUPPORT=OFF -DPLUGIN_AIRSPYHF_SDR_SUPPORT=OFF -DPLUGIN_HACKRF_SDR_SUPPORT=OFF \
+        -DPLUGIN_LIMESDR_SDR_SUPPORT=OFF -DPLUGIN_SDRPLAY_SDR_SUPPORT=OFF -DPLUGIN_PLUTOSDR_SDR_SUPPORT=OFF \
+        -DPLUGIN_BLADERF_SDR_SUPPORT=OFF -DPLUGIN_USRP_SDR_SUPPORT=OFF -DPLUGIN_RTLSDR_SDR_SUPPORT=OFF \
+        -DPLUGIN_MIRISDR_SDR_SUPPORT=OFF -DPLUGIN_SDRPP_SERVER_SUPPORT=OFF -DPLUGIN_RFNM_SDR_SUPPORT=OFF \
+        -DPLUGIN_NET_SOURCE_SDR_SUPPORT=OFF -DPLUGIN_REMOTE_SDR_SUPPORT=OFF -DPLUGIN_SDDC_SDR_SUPPORT=OFF \
+        -DPLUGIN_SOAPY_SDR_SUPPORT=OFF \
+    && cmake --build build -j"$(nproc)" \
+    && cmake --install build --strip \
+    && (strip --strip-unneeded /usr/local/lib/*.so /usr/local/lib/satdump/plugins/*.so 2>/dev/null || true)
+
 # ---- Stage 9: runtime ----
 FROM debian:bookworm-slim
 # multimon-ng, direwolf and rtl-433 are the external decoders of the first-party plugins

@@ -21,6 +21,8 @@ serde_json = "1"
 # stream, the DAB plugin decodes it to PCM for the host.
 symphonia = { version = "0.6", default-features = false, features = ["mp3"] }
 num-complex.workspace = true
+# PNG decoder / encoder (MIT / Apache-2.0): thumbnails of the weather satellite images.
+png = { version = "0.18", default-features = false }
 superhet-dsp.workspace = true
 superhet-plugin-protocol.workspace = true
 

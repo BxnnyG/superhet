@@ -40,8 +40,10 @@ use crate::outputs::{NoOutputs, Outputs};
 /// credentials in particular) is withheld. `SUPERHET_DSD_FME_PATH` is the location of the
 /// user-installed `dsd-fme` for the DMR / dPMR / NXDN plugin (`docs/plugins-dsd.md`);
 /// `SUPERHET_TETRA_CODEC_DIR` is the directory with the user's ETSI codec for the TETRA plugin and
-/// `SUPERHET_TETRA_RX_PATH` an alternative location of `tetra-rx` (`docs/plugins-tetra.md`). They
-/// are paths, not secrets.
+/// `SUPERHET_TETRA_RX_PATH` an alternative location of `tetra-rx` (`docs/plugins-tetra.md`);
+/// `SUPERHET_WEATHER_DIR` is where the weather-satellite plugin stores its images (the API's
+/// gallery reads the same directory) and `SUPERHET_SATDUMP_PATH` an alternative `satdump`
+/// (`docs/plugins-weather.md`). They are paths, not secrets.
 const PASSTHROUGH_ENV: &[&str] = &[
     "PATH",
     "LANG",
@@ -51,6 +53,8 @@ const PASSTHROUGH_ENV: &[&str] = &[
     "SUPERHET_DSD_FME_PATH",
     "SUPERHET_TETRA_CODEC_DIR",
     "SUPERHET_TETRA_RX_PATH",
+    "SUPERHET_WEATHER_DIR",
+    "SUPERHET_SATDUMP_PATH",
 ];
 
 /// Restart and shutdown behaviour.
